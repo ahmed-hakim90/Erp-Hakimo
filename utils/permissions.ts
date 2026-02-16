@@ -5,8 +5,8 @@
  * The active user's resolved permissions live in the Zustand store.
  *
  * Usage in components:
- *   const can = usePermission();
- *   {can("products.create") && <Button>Add</Button>}
+ *   const { can, canCreateReport, canManageUsers } = usePermission();
+ *   {canCreateReport && <Button>Add</Button>}
  */
 import { useMemo } from 'react';
 import { useAppStore } from '../store/useAppStore';
@@ -23,6 +23,9 @@ export type Permission =
   | 'lineProductConfig.view'
   | 'settings.view' | 'settings.edit'
   | 'roles.view' | 'roles.manage'
+  | 'users.view' | 'users.create' | 'users.edit' | 'users.delete'
+  | 'activityLog.view'
+  | 'quickAction.view'
   | 'print' | 'export';
 
 // ─── Permission Groups (for admin UI) ────────────────────────────────────────
@@ -118,6 +121,30 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    key: 'users',
+    label: 'إدارة المستخدمين',
+    permissions: [
+      { key: 'users.view', label: 'عرض المستخدمين' },
+      { key: 'users.create', label: 'إنشاء مستخدم' },
+      { key: 'users.edit', label: 'تعديل مستخدم' },
+      { key: 'users.delete', label: 'حذف مستخدم' },
+    ],
+  },
+  {
+    key: 'activityLog',
+    label: 'سجل النشاط',
+    permissions: [
+      { key: 'activityLog.view', label: 'عرض سجل النشاط' },
+    ],
+  },
+  {
+    key: 'quickAction',
+    label: 'إدخال سريع',
+    permissions: [
+      { key: 'quickAction.view', label: 'الإدخال السريع' },
+    ],
+  },
+  {
     key: 'special',
     label: 'صلاحيات خاصة',
     permissions: [
@@ -146,6 +173,8 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { path: '/products', icon: 'inventory_2', label: 'إدارة المنتجات', permission: 'products.view' },
   { path: '/supervisors', icon: 'groups', label: 'فريق العمل', permission: 'supervisors.view' },
   { path: '/reports', icon: 'bar_chart', label: 'التقارير', permission: 'reports.view' },
+  { path: '/quick-action', icon: 'bolt', label: 'إدخال سريع', permission: 'quickAction.view' },
+  { path: '/activity-log', icon: 'history', label: 'سجل النشاط', permission: 'activityLog.view' },
   { path: '/roles', icon: 'admin_panel_settings', label: 'إدارة الأدوار', permission: 'roles.manage' },
   { path: '/settings', icon: 'settings', label: 'الإعدادات', permission: 'settings.view' },
 ];
@@ -161,6 +190,9 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/supervisors': 'supervisors.view',
   '/supervisors/:id': 'supervisors.view',
   '/reports': 'reports.view',
+  '/quick-action': 'quickAction.view',
+  '/users': 'users.view',
+  '/activity-log': 'activityLog.view',
   '/roles': 'roles.manage',
   '/settings': 'settings.view',
 };
@@ -183,13 +215,34 @@ export function deriveIsReadOnly(permissions: Record<string, boolean>): boolean 
   );
 }
 
+// ─── Permission Guard Interface ──────────────────────────────────────────────
+
+export interface PermissionGuards {
+  can: (permission: Permission) => boolean;
+  canCreateReport: boolean;
+  canEditReport: boolean;
+  canDeleteReport: boolean;
+  canManageUsers: boolean;
+  canViewActivityLog: boolean;
+  canUseQuickAction: boolean;
+}
+
 // ─── React Hooks ─────────────────────────────────────────────────────────────
 
-/** Primary hook — returns `can("permission.name")` checker function */
-export function usePermission(): (permission: Permission) => boolean {
+/** Primary hook — returns `can()` checker plus named guards */
+export function usePermission(): PermissionGuards {
   const permissions = useAppStore((s) => s.userPermissions);
   return useMemo(() => {
-    return (permission: Permission) => permissions[permission] === true;
+    const can = (permission: Permission) => permissions[permission] === true;
+    return {
+      can,
+      canCreateReport: can('reports.create'),
+      canEditReport: can('reports.edit'),
+      canDeleteReport: can('reports.delete'),
+      canManageUsers: can('users.create') || can('users.edit'),
+      canViewActivityLog: can('activityLog.view'),
+      canUseQuickAction: can('quickAction.view'),
+    };
   }, [permissions]);
 }
 

@@ -59,6 +59,7 @@ export const DEFAULT_ROLES: Omit<FirestoreRole, 'id'>[] = [
       'lineStatus.view', 'lineStatus.edit',
       'lineProductConfig.view',
       'settings.view',
+      'quickAction.view',
       'print', 'export',
     ]),
   },
@@ -68,6 +69,7 @@ export const DEFAULT_ROLES: Omit<FirestoreRole, 'id'>[] = [
     permissions: permsFrom([
       'dashboard.view',
       'reports.view', 'reports.create',
+      'quickAction.view',
       'print', 'export',
     ]),
   },

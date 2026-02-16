@@ -4,6 +4,8 @@
  * exposes loading / error states, and manages real-time subscriptions.
  *
  * Dynamic RBAC: roles & permissions are stored in Firestore.
+ * Email/Password authentication with user profile & isActive check.
+ * Automatic activity logging on all mutations.
  */
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
@@ -18,17 +20,25 @@ import {
   FirestoreProductionLine,
   FirestoreSupervisor,
   FirestoreRole,
+  FirestoreUser,
 } from '../types';
 
-import { authenticateAnonymously } from '../services/firebase';
+import {
+  signInWithEmail,
+  signOut,
+  createUserWithEmail,
+  resetPassword,
+  auth,
+} from '../services/firebase';
 import { productService } from '../services/productService';
 import { lineService } from '../services/lineService';
 import { supervisorService } from '../services/supervisorService';
 import { reportService } from '../services/reportService';
 import { lineStatusService } from '../services/lineStatusService';
 import { lineProductConfigService } from '../services/lineProductConfigService';
-import { roleService, DEFAULT_ROLES } from '../services/roleService';
+import { roleService } from '../services/roleService';
 import { userService } from '../services/userService';
+import { activityLogService } from '../services/activityLogService';
 import { ALL_PERMISSIONS } from '../utils/permissions';
 import {
   buildProducts,
@@ -42,6 +52,12 @@ import {
 function adminPermissions(): Record<string, boolean> {
   const perms: Record<string, boolean> = {};
   ALL_PERMISSIONS.forEach((p) => { perms[p] = true; });
+  return perms;
+}
+
+function emptyPermissions(): Record<string, boolean> {
+  const perms: Record<string, boolean> = {};
+  ALL_PERMISSIONS.forEach((p) => { perms[p] = false; });
   return perms;
 }
 
@@ -69,10 +85,14 @@ interface AppState {
   linesLoading: boolean;
   reportsLoading: boolean;
   error: string | null;
+  authError: string | null;
 
   // Auth
   isAuthenticated: boolean;
   uid: string | null;
+  userEmail: string | null;
+  userDisplayName: string | null;
+  userProfile: FirestoreUser | null;
 
   // Dynamic RBAC
   roles: FirestoreRole[];
@@ -83,8 +103,14 @@ interface AppState {
 
   // ── Actions ──
 
-  // App bootstrap
+  // Auth
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   initializeApp: () => Promise<void>;
+
+  // Admin user management
+  createUser: (email: string, password: string, displayName: string, roleId: string) => Promise<string | null>;
+  resetUserPassword: (email: string) => Promise<void>;
 
   // Role switching (updates user doc + permissions)
   switchRole: (roleId: string) => Promise<void>;
@@ -135,9 +161,11 @@ interface AppState {
   subscribeToLineStatuses: () => () => void;
 
   // Internal helpers
+  _loadAppData: () => Promise<void>;
   _rebuildProducts: () => void;
   _rebuildLines: () => void;
   _applyRole: (role: FirestoreRole) => void;
+  _logActivity: (action: Parameters<typeof activityLogService.log>[2], description: string, metadata?: Record<string, any>) => void;
 
   // Legacy setters (backward compat)
   setProductionLines: (lines: ProductionLine[]) => void;
@@ -168,15 +196,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   linesLoading: false,
   reportsLoading: false,
   error: null,
+  authError: null,
   isAuthenticated: false,
   uid: null,
+  userEmail: null,
+  userDisplayName: null,
+  userProfile: null,
 
-  // Dynamic RBAC defaults (full admin until Firestore loads)
+  // Dynamic RBAC defaults (empty until login)
   roles: [],
   userRoleId: '',
-  userRoleName: 'مدير النظام',
-  userRoleColor: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
-  userPermissions: adminPermissions(),
+  userRoleName: '',
+  userRoleColor: '',
+  userPermissions: emptyPermissions(),
 
   // ── Internal: apply a role to the store ─────────────────────────────────────
 
@@ -189,92 +221,253 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  // ── App Bootstrap ─────────────────────────────────────────────────────────
+  // ── Internal: log activity (fire-and-forget) ──────────────────────────────
 
-  initializeApp: async () => {
-    set({ loading: true, error: null });
+  _logActivity: (action, description, metadata) => {
+    const { uid, userEmail } = get();
+    if (uid && userEmail) {
+      activityLogService.log(uid, userEmail, action, description, metadata);
+    }
+  },
+
+  // ── Auth: Login ─────────────────────────────────────────────────────────────
+
+  login: async (email: string, password: string) => {
+    set({ loading: true, authError: null, error: null });
     try {
-      // 1. Anonymous auth
-      const uid = await authenticateAnonymously();
-      set({ isAuthenticated: !!uid, uid });
+      const cred = await signInWithEmail(email, password);
+      const uid = cred.user.uid;
 
-      // 2. Seed default roles if needed + fetch all roles
+      // Fetch roles
       const roles = await roleService.seedIfEmpty();
       set({ roles });
 
-      // 3. Get or create user document → resolve role
-      if (uid && roles.length > 0) {
-        let userDoc = await userService.get(uid);
-        if (!userDoc) {
-          const adminRole = roles[0];
-          await userService.set(uid, { roleId: adminRole.id! });
-          userDoc = { id: uid, roleId: adminRole.id! };
-        }
-
-        const role = roles.find((r) => r.id === userDoc!.roleId) ?? roles[0];
-        get()._applyRole(role);
+      // Fetch user profile from Firestore
+      const userDoc = await userService.get(uid);
+      if (!userDoc) {
+        await signOut();
+        set({
+          loading: false,
+          authError: 'لم يتم العثور على حساب المستخدم. تواصل مع المدير.',
+          isAuthenticated: false,
+        });
+        return;
       }
 
-      // 4. Parallel fetch of all base collections
-      const [rawProducts, rawLines, rawSupervisors, configs] =
-        await Promise.all([
-          productService.getAll(),
-          lineService.getAll(),
-          supervisorService.getAll(),
-          lineProductConfigService.getAll(),
-        ]);
+      // Check isActive
+      if (!userDoc.isActive) {
+        await signOut();
+        set({
+          loading: false,
+          authError: 'حسابك معطل. تواصل مع مدير النظام.',
+          isAuthenticated: false,
+        });
+        return;
+      }
 
-      // 5. Fetch today's reports & monthly reports
-      const today = getTodayDateString();
-      const { start: monthStart, end: monthEnd } = getMonthDateRange();
-      const [todayReports, monthlyReports, lineStatuses] = await Promise.all([
-        reportService.getByDateRange(today, today),
-        reportService.getByDateRange(monthStart, monthEnd),
-        lineStatusService.getAll(),
-      ]);
-
-      // 6. Store raw data
-      set({
-        _rawProducts: rawProducts,
-        _rawLines: rawLines,
-        _rawSupervisors: rawSupervisors,
-        lineProductConfigs: configs,
-        todayReports,
-        monthlyReports,
-        lineStatuses,
-      });
-
-      // 7. Build UI data
-      const products = buildProducts(rawProducts, todayReports, configs);
-      const productionLines = buildProductionLines(
-        rawLines,
-        rawProducts,
-        rawSupervisors,
-        todayReports,
-        lineStatuses,
-        configs
-      );
-      const supervisors: Supervisor[] = rawSupervisors.map((s) => ({
-        id: s.id!,
-        name: s.name,
-        role: s.role ?? 'supervisor',
-        isActive: s.isActive !== false,
-        efficiency: 0,
-        monthlyHours: 0,
-        monthlyShifts: 0,
-        status: 'offline' as const,
-      }));
+      // Resolve role
+      const role = roles.find((r) => r.id === userDoc.roleId) ?? roles[0];
 
       set({
-        products,
-        productionLines,
-        supervisors,
-        loading: false,
+        isAuthenticated: true,
+        uid,
+        userEmail: userDoc.email,
+        userDisplayName: userDoc.displayName,
+        userProfile: userDoc,
       });
+
+      get()._applyRole(role);
+
+      // Load app data
+      await get()._loadAppData();
+
+      // Log login activity
+      activityLogService.log(uid, userDoc.email, 'LOGIN', `تسجيل دخول: ${userDoc.displayName}`);
+
+      set({ loading: false });
+    } catch (error: any) {
+      let msg = 'فشل تسجيل الدخول';
+      if (error?.code === 'auth/user-not-found' || error?.code === 'auth/wrong-password' || error?.code === 'auth/invalid-credential') {
+        msg = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
+      } else if (error?.code === 'auth/too-many-requests') {
+        msg = 'تم تجاوز عدد المحاولات. حاول لاحقاً.';
+      }
+      set({ authError: msg, loading: false, isAuthenticated: false });
+    }
+  },
+
+  // ── Auth: Logout ──────────────────────────────────────────────────────────
+
+  logout: async () => {
+    const { uid, userEmail } = get();
+    if (uid && userEmail) {
+      activityLogService.log(uid, userEmail, 'LOGOUT', 'تسجيل خروج');
+    }
+    await signOut();
+    set({
+      isAuthenticated: false,
+      uid: null,
+      userEmail: null,
+      userDisplayName: null,
+      userProfile: null,
+      userRoleId: '',
+      userRoleName: '',
+      userRoleColor: '',
+      userPermissions: emptyPermissions(),
+      productionLines: [],
+      products: [],
+      supervisors: [],
+      _rawProducts: [],
+      _rawLines: [],
+      _rawSupervisors: [],
+      productionReports: [],
+      todayReports: [],
+      monthlyReports: [],
+      lineStatuses: [],
+      lineProductConfigs: [],
+      roles: [],
+      error: null,
+      authError: null,
+    });
+  },
+
+  // ── Admin: Create User ───────────────────────────────────────────────────
+
+  createUser: async (email, password, displayName, roleId) => {
+    try {
+      const cred = await createUserWithEmail(email, password);
+      const newUid = cred.user.uid;
+
+      await userService.set(newUid, {
+        email,
+        displayName,
+        roleId,
+        isActive: true,
+        createdBy: get().uid ?? '',
+      });
+
+      // If creating a user logs us out of the current session (Firebase limitation),
+      // we need to handle re-auth. For now, the admin should stay logged in via
+      // the Firebase Auth Admin SDK approach. In client-side, creating a user with
+      // createUserWithEmailAndPassword signs in as that user, so we sign back in.
+      // This is handled by the caller re-authenticating if needed.
+
+      get()._logActivity('CREATE_USER', `إنشاء مستخدم: ${displayName} (${email})`, { newUid, roleId });
+
+      return newUid;
+    } catch (error: any) {
+      let msg = 'فشل إنشاء المستخدم';
+      if (error?.code === 'auth/email-already-in-use') {
+        msg = 'البريد الإلكتروني مستخدم بالفعل';
+      }
+      set({ error: msg });
+      return null;
+    }
+  },
+
+  // ── Admin: Reset Password ────────────────────────────────────────────────
+
+  resetUserPassword: async (email: string) => {
+    try {
+      await resetPassword(email);
+    } catch (error) {
+      set({ error: 'فشل إرسال رابط إعادة تعيين كلمة المرور' });
+    }
+  },
+
+  // ── App Bootstrap (called after login) ─────────────────────────────────
+
+  initializeApp: async () => {
+    // Check if user is already signed in (e.g. page refresh with persistent session)
+    if (!auth) return;
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      set({ loading: false, isAuthenticated: false });
+      return;
+    }
+
+    set({ loading: true, error: null });
+    try {
+      const uid = currentUser.uid;
+
+      const roles = await roleService.seedIfEmpty();
+      set({ roles });
+
+      const userDoc = await userService.get(uid);
+      if (!userDoc || !userDoc.isActive) {
+        await signOut();
+        set({
+          loading: false,
+          isAuthenticated: false,
+          authError: !userDoc ? 'لم يتم العثور على حساب المستخدم.' : 'حسابك معطل.',
+        });
+        return;
+      }
+
+      const role = roles.find((r) => r.id === userDoc.roleId) ?? roles[0];
+
+      set({
+        isAuthenticated: true,
+        uid,
+        userEmail: userDoc.email,
+        userDisplayName: userDoc.displayName,
+        userProfile: userDoc,
+      });
+
+      get()._applyRole(role);
+      await get()._loadAppData();
+      set({ loading: false });
     } catch (error) {
       console.error('initializeApp error:', error);
       set({ error: (error as Error).message, loading: false });
     }
+  },
+
+  // ── Internal: Load all app data (after auth) ────────────────────────────
+
+  _loadAppData: async () => {
+    const [rawProducts, rawLines, rawSupervisors, configs] =
+      await Promise.all([
+        productService.getAll(),
+        lineService.getAll(),
+        supervisorService.getAll(),
+        lineProductConfigService.getAll(),
+      ]);
+
+    const today = getTodayDateString();
+    const { start: monthStart, end: monthEnd } = getMonthDateRange();
+    const [todayReports, monthlyReports, lineStatuses] = await Promise.all([
+      reportService.getByDateRange(today, today),
+      reportService.getByDateRange(monthStart, monthEnd),
+      lineStatusService.getAll(),
+    ]);
+
+    set({
+      _rawProducts: rawProducts,
+      _rawLines: rawLines,
+      _rawSupervisors: rawSupervisors,
+      lineProductConfigs: configs,
+      todayReports,
+      monthlyReports,
+      lineStatuses,
+    });
+
+    const products = buildProducts(rawProducts, todayReports, configs);
+    const productionLines = buildProductionLines(
+      rawLines, rawProducts, rawSupervisors, todayReports, lineStatuses, configs
+    );
+    const supervisors: Supervisor[] = rawSupervisors.map((s) => ({
+      id: s.id!,
+      name: s.name,
+      role: s.role ?? 'supervisor',
+      isActive: s.isActive !== false,
+      efficiency: 0,
+      monthlyHours: 0,
+      monthlyShifts: 0,
+      status: 'offline' as const,
+    }));
+
+    set({ products, productionLines, supervisors });
   },
 
   // ── Role Switching ─────────────────────────────────────────────────────────
@@ -289,6 +482,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (uid) {
       try {
         await userService.updateRoleId(uid, roleId);
+        get()._logActivity('UPDATE_USER_ROLE', `تبديل الدور إلى: ${role.name}`, { roleId });
       } catch (error) {
         console.error('switchRole: failed to persist roleId', error);
       }
@@ -322,7 +516,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       await roleService.update(id, data);
       await get().fetchRoles();
 
-      // If the updated role is the current user's role, refresh permissions
       if (id === get().userRoleId) {
         const fresh = await roleService.getById(id);
         if (fresh) get()._applyRole(fresh);
@@ -515,7 +708,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  // ── Reports ──
+  // ── Reports (with automatic activity logging) ──
 
   createReport: async (data) => {
     try {
@@ -529,6 +722,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ todayReports, monthlyReports });
       get()._rebuildProducts();
       get()._rebuildLines();
+
+      get()._logActivity('CREATE_REPORT', `إنشاء تقرير إنتاج جديد`, { reportId: id, ...data });
+
       return id;
     } catch (error) {
       set({ error: (error as Error).message });
@@ -548,6 +744,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ todayReports, monthlyReports });
       get()._rebuildProducts();
       get()._rebuildLines();
+
+      get()._logActivity('UPDATE_REPORT', `تعديل تقرير إنتاج`, { reportId: id, changes: data });
     } catch (error) {
       set({ error: (error as Error).message });
     }
@@ -565,6 +763,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ todayReports, monthlyReports });
       get()._rebuildProducts();
       get()._rebuildLines();
+
+      get()._logActivity('DELETE_REPORT', `حذف تقرير إنتاج`, { reportId: id });
     } catch (error) {
       set({ error: (error as Error).message });
     }

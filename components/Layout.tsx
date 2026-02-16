@@ -5,12 +5,11 @@ import { useAppStore } from '../store/useAppStore';
 import { usePermission, useCurrentRole, SIDEBAR_ITEMS } from '../utils/permissions';
 
 const Sidebar: React.FC = () => {
-  const can = usePermission();
+  const { can } = usePermission();
   const { roleName, roleColor, isReadOnly } = useCurrentRole();
-  const roles = useAppStore((s) => s.roles);
-  const userRoleId = useAppStore((s) => s.userRoleId);
-  const switchRole = useAppStore((s) => s.switchRole);
-  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
+  const userDisplayName = useAppStore((s) => s.userDisplayName);
+  const userEmail = useAppStore((s) => s.userEmail);
+  const logout = useAppStore((s) => s.logout);
 
   return (
     <aside className="w-64 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col fixed h-full z-50">
@@ -32,7 +31,7 @@ const Sidebar: React.FC = () => {
         </div>
       )}
 
-      <nav className="flex-1 p-4 space-y-2 mt-4">
+      <nav className="flex-1 p-4 space-y-2 mt-4 overflow-y-auto">
         {SIDEBAR_ITEMS.filter((item) => can(item.permission)).map((item) => (
           <NavLink
             key={item.path}
@@ -51,53 +50,32 @@ const Sidebar: React.FC = () => {
         ))}
       </nav>
 
-      {/* User card with role selector */}
+      {/* User card with logout */}
       <div className="p-4 border-t border-slate-100 dark:border-slate-800">
-        <div className="relative">
-          <button
-            onClick={() => setRoleMenuOpen(!roleMenuOpen)}
-            className="w-full bg-slate-50 dark:bg-slate-800 p-3 rounded-xl flex items-center gap-3 hover:ring-2 hover:ring-primary/20 transition-all text-right"
-          >
+        <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
               <span className="material-icons-round text-primary text-xl">person</span>
             </div>
             <div className="overflow-hidden flex-1">
-              <p className="text-sm font-bold truncate">المستخدم</p>
+              <p className="text-sm font-bold truncate">{userDisplayName ?? 'المستخدم'}</p>
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold mt-0.5 ${roleColor}`}>
                 {roleName}
               </span>
             </div>
-            <span className="material-icons-round text-slate-400 text-sm">
-              {roleMenuOpen ? 'expand_less' : 'expand_more'}
-            </span>
-          </button>
-
-          {/* Role dropdown */}
-          {roleMenuOpen && (
-            <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden z-50">
-              <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">تبديل الدور</p>
-              </div>
-              {roles.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => { switchRole(r.id!); setRoleMenuOpen(false); }}
-                  className={`w-full px-4 py-3 text-right flex items-center gap-3 transition-all text-sm ${
-                    r.id === userRoleId
-                      ? 'bg-primary/5 text-primary font-bold'
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${r.color}`}>
-                    {r.name}
-                  </span>
-                  {r.id === userRoleId && (
-                    <span className="material-icons-round text-primary text-sm mr-auto">check</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
+          </div>
+          <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <p className="text-[10px] text-slate-400 font-mono truncate" dir="ltr" title={userEmail ?? ''}>
+              {userEmail}
+            </p>
+            <button
+              onClick={logout}
+              className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
+              title="تسجيل الخروج"
+            >
+              <span className="material-icons-round text-lg">logout</span>
+            </button>
+          </div>
         </div>
       </div>
     </aside>

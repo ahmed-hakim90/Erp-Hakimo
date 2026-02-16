@@ -32,7 +32,7 @@ export const RolesManagement: React.FC = () => {
   const updateRole = useAppStore((s) => s.updateRole);
   const deleteRole = useAppStore((s) => s.deleteRole);
   const userRoleId = useAppStore((s) => s.userRoleId);
-  const can = usePermission();
+  const { can } = usePermission();
 
   const [editingRole, setEditingRole] = useState<FirestoreRole | null>(null);
   const [editPerms, setEditPerms] = useState<Record<string, boolean>>({});

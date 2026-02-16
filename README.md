@@ -100,6 +100,42 @@
 
 ## 🗂️ هيكل المشروع
 
+```
+src/
+├── components/
+│   ├── UI.tsx                      # Card, KPIBox, Button, Badge, LoadingSkeleton
+│   ├── ProductionReportPrint.tsx    # Bulk + Single report print components
+│   └── Layout.tsx                  # App shell, sidebar, navigation
+│
+├── pages/
+│   ├── Dashboard.tsx               # لوحة التحكم + حاسبة التخطيط الذكي
+│   ├── Products.tsx                # قائمة المنتجات
+│   ├── ProductDetails.tsx          # تفاصيل المنتج + رسم بياني
+│   ├── Lines.tsx                   # قائمة خطوط الإنتاج
+│   ├── LineDetails.tsx             # تفاصيل الخط + الكفاءة + الاستخدام
+│   ├── Supervisors.tsx             # قائمة المشرفين
+│   ├── SupervisorDetails.tsx       # تفاصيل المشرف + إنتاج اليوم/الشهر
+│   └── Reports.tsx                 # تقارير الإنتاج + CRUD + طباعة فردية
+│
+├── services/
+│   ├── firebase.ts                 # Firebase initialization
+│   ├── productService.ts           # Products CRUD
+│   ├── reportService.ts            # Reports CRUD + queries (byDate, byProduct, byLine, bySupervisor)
+│   └── lineStatusService.ts        # Line status real-time updates
+│
+├── store/
+│   └── useAppStore.ts              # Zustand global store (state + actions + listeners)
+│
+├── utils/
+│   ├── calculations.ts             # Business logic: avg assembly time, efficiency, waste%, capacity
+│   ├── permissions.ts              # Role-based permissions matrix
+│   ├── exportExcel.ts              # Excel export (SheetJS)
+│   └── reportExport.ts             # PDF export (jsPDF) + WhatsApp sharing
+│
+├── types.ts                        # TypeScript interfaces + UserRole type
+├── App.tsx                         # Router + layout wrapper
+└── index.tsx                       # Entry point
+```
 
 ---
 
@@ -122,3 +158,93 @@
 ## 👨‍💻 المطور
 
 Ahmed Abdel Hakim Said
+
+---
+
+## ⚙️ التشغيل المحلي
+
+**المتطلبات:** Node.js 18+
+
+1. تثبيت المكتبات:
+   ```bash
+   npm install
+   ```
+
+2. إنشاء ملف `.env.local` وإضافة إعدادات Firebase:
+   ```env
+   VITE_FIREBASE_API_KEY=your_api_key
+   VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=your_project_id
+   VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+   VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+   VITE_FIREBASE_APP_ID=your_app_id
+   ```
+
+3. تشغيل السيرفر المحلي:
+   ```bash
+   npm run dev
+   ```
+
+4. بناء نسخة الإنتاج:
+   ```bash
+   npm run build
+   ```
+
+---
+
+## 📊 معادلات الحسابات
+
+| المقياس | المعادلة |
+|---------|---------|
+| متوسط زمن التجميع | `sum(workers × hours) / sum(quantityProduced)` |
+| الكفاءة | `standardAssemblyTime / actualAssemblyTime` |
+| نسبة الهالك | `quantityWaste / (quantityProduced + quantityWaste)` |
+| الطاقة اليومية | `(maxWorkers × dailyWorkingHours) / avgAssemblyTime` |
+| متوسط الإنتاج اليومي | `totalProduced / uniqueWorkDays` |
+
+---
+
+## 👥 جدول الصلاحيات التفصيلي
+
+| الدور | إنشاء تقرير | تعديل تقرير | حذف تقرير | طباعة | تصدير |
+|-------|:-----------:|:-----------:|:---------:|:-----:|:-----:|
+| مشرف | ✅ | ❌ | ❌ | ✅ | ✅ |
+| مشرف صالة | ✅ | ✅ | ❌ | ✅ | ✅ |
+| مسؤول مصنع | ❌ | ❌ | ❌ | ✅ | ✅ |
+| مسؤول عام | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+---
+
+## 🚀 ملاحظات الأداء
+
+- استعلامات Firestore مفلترة بالتاريخ — لا يتم تحميل كل السجلات
+- `onSnapshot` مستخدم فقط في Dashboard و Line Status
+- Loading Skeletons لتجربة مستخدم سلسة أثناء التحميل
+- مقارنة سطحية (shallow) في Zustand لتجنب إعادة الرسم غير الضرورية
+- الترتيب يتم في الذاكرة لتجنب الحاجة لـ Composite Indexes في Firestore
+- يمكن إنشاء أكثر من تقرير لنفس الخط في نفس اليوم
+
+---
+
+## 📦 المكتبات الأساسية
+
+| المكتبة | الاستخدام |
+|---------|----------|
+| `react` + `react-dom` | واجهة المستخدم |
+| `vite` | أداة البناء والتشغيل |
+| `tailwindcss` | التنسيق |
+| `zustand` | إدارة الحالة |
+| `firebase` | قاعدة البيانات والمصادقة |
+| `react-router-dom` | التنقل بين الصفحات |
+| `recharts` | الرسوم البيانية |
+| `react-to-print` | الطباعة |
+| `xlsx` + `file-saver` | تصدير Excel |
+| `jspdf` + `html2canvas` | تصدير PDF |
+
+---
+
+<div align="center">
+
+**Pro-Tech ERP** — نظام إنتاج متكامل 🏭
+
+</div>

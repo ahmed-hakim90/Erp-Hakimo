@@ -33,7 +33,7 @@ export const Lines: React.FC = () => {
   const createLineStatus = useAppStore((s) => s.createLineStatus);
   const updateLineStatus = useAppStore((s) => s.updateLineStatus);
 
-  const can = usePermission();
+  const { can } = usePermission();
   const navigate = useNavigate();
 
   const [showModal, setShowModal] = useState(false);

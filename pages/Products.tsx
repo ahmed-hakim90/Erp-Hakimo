@@ -21,7 +21,7 @@ export const Products: React.FC = () => {
   const deleteProduct = useAppStore((s) => s.deleteProduct);
   const productsLoading = useAppStore((s) => s.productsLoading);
 
-  const can = usePermission();
+  const { can } = usePermission();
   const navigate = useNavigate();
 
   const [showModal, setShowModal] = useState(false);

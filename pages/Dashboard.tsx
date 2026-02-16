@@ -27,7 +27,7 @@ export const Dashboard: React.FC = () => {
   const updateLineStatus = useAppStore((s) => s.updateLineStatus);
   const navigate = useNavigate();
 
-  const can = usePermission();
+  const { can } = usePermission();
 
   const [selectedProductId, setSelectedProductId] = useState('');
   const [planQuantity, setPlanQuantity] = useState<number>(0);

@@ -72,13 +72,31 @@ export interface FirestoreSupervisor {
   name: string;
   role?: 'supervisor' | 'hall_supervisor' | 'factory_manager' | 'admin';
   isActive?: boolean;
+  /** Firebase Auth UID — links this supervisor to their login account */
+  userId?: string;
+  /** Email — for display (primary source of truth is in users collection) */
+  email?: string;
 }
+
+// ─── Activity Log ────────────────────────────────────────────────────────────
+
+export type ActivityAction =
+  | 'LOGIN'
+  | 'LOGOUT'
+  | 'CREATE_REPORT'
+  | 'UPDATE_REPORT'
+  | 'DELETE_REPORT'
+  | 'CREATE_USER'
+  | 'UPDATE_USER_ROLE'
+  | 'TOGGLE_USER_ACTIVE';
 
 export interface ActivityLog {
   id?: string;
-  supervisorId: string;
-  action: string;
+  userId: string;
+  userEmail: string;
+  action: ActivityAction;
   description: string;
+  metadata?: Record<string, any>;
   timestamp: any;
 }
 
@@ -124,5 +142,10 @@ export interface FirestoreRole {
 
 export interface FirestoreUser {
   id?: string;
+  email: string;
+  displayName: string;
   roleId: string;
+  isActive: boolean;
+  createdAt?: any;
+  createdBy?: string;
 }

@@ -19,7 +19,7 @@ export const Settings: React.FC = () => {
   const roles = useAppStore((s) => s.roles);
   const userPermissions = useAppStore((s) => s.userPermissions);
 
-  const can = usePermission();
+  const { can } = usePermission();
   const { roleName, roleColor, isReadOnly } = useCurrentRole();
 
   const enabledCount = Object.values(userPermissions).filter(Boolean).length;
@@ -187,7 +187,7 @@ export const Settings: React.FC = () => {
           </div>
           <div className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800">
             <span className="text-sm font-bold text-slate-600 dark:text-slate-400">نوع المصادقة</span>
-            <span className="text-sm font-bold text-slate-800 dark:text-white">تسجيل مجهول (Anonymous)</span>
+            <span className="text-sm font-bold text-slate-800 dark:text-white">بريد إلكتروني / كلمة مرور</span>
           </div>
           <div className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800">
             <span className="text-sm font-bold text-slate-600 dark:text-slate-400">نظام الصلاحيات</span>

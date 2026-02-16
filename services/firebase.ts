@@ -1,16 +1,20 @@
 /**
  * Firebase Core Initialization
  * Reads config from VITE_ environment variables.
- * Add your Firebase credentials to .env.local
+ * Supports Email/Password authentication.
  */
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore } from 'firebase/firestore';
 import {
   getAuth,
   Auth,
-  signInAnonymously,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  sendPasswordResetEmail,
   onAuthStateChanged,
   User,
+  UserCredential,
 } from 'firebase/auth';
 
 const firebaseConfig = {
@@ -43,17 +47,42 @@ if (isConfigured) {
 export { db, auth, isConfigured };
 
 /**
- * Sign in anonymously — returns the UID or null on failure.
+ * Sign in with email and password — returns the UserCredential.
  */
-export const authenticateAnonymously = async (): Promise<string | null> => {
-  if (!isConfigured || !auth) return null;
-  try {
-    const result = await signInAnonymously(auth);
-    return result.user.uid;
-  } catch (error) {
-    console.error('Anonymous authentication failed:', error);
-    return null;
-  }
+export const signInWithEmail = async (
+  email: string,
+  password: string
+): Promise<UserCredential> => {
+  if (!isConfigured || !auth) throw new Error('Firebase not configured');
+  return signInWithEmailAndPassword(auth, email, password);
+};
+
+/**
+ * Create a new user with email and password (admin action).
+ * Returns the UserCredential.
+ */
+export const createUserWithEmail = async (
+  email: string,
+  password: string
+): Promise<UserCredential> => {
+  if (!isConfigured || !auth) throw new Error('Firebase not configured');
+  return createUserWithEmailAndPassword(auth, email, password);
+};
+
+/**
+ * Sign out the current user.
+ */
+export const signOut = async (): Promise<void> => {
+  if (!isConfigured || !auth) return;
+  await firebaseSignOut(auth);
+};
+
+/**
+ * Send a password reset email.
+ */
+export const resetPassword = async (email: string): Promise<void> => {
+  if (!isConfigured || !auth) throw new Error('Firebase not configured');
+  await sendPasswordResetEmail(auth, email);
 };
 
 /**

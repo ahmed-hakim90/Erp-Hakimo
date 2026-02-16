@@ -40,7 +40,7 @@ export const Reports: React.FC = () => {
   const reportsLoading = useAppStore((s) => s.reportsLoading);
   const error = useAppStore((s) => s.error);
 
-  const can = usePermission();
+  const { can } = usePermission();
 
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
