@@ -127,7 +127,7 @@ export const QuickAction: React.FC = () => {
   };
 
   const showShareFeedback = (result: ShareResult) => {
-    if (result.method === 'native_share') return;
+    if (result.method === 'native_share' || result.method === 'cancelled') return;
     const msg = result.copied
       ? 'تم تحميل الصورة ونسخها — افتح المحادثة والصق الصورة (Ctrl+V)'
       : 'تم تحميل صورة التقرير — أرفقها في محادثة واتساب';

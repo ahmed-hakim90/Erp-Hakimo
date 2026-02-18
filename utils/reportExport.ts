@@ -29,6 +29,8 @@ const downloadBlob = (blob: Blob, fileName: string) => {
   URL.revokeObjectURL(url);
 };
 
+const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 // ─── Export element to PDF (A4, multi-page) ─────────────────────────────────
 
 export const exportToPDF = async (el: HTMLElement, fileName: string) => {
@@ -83,7 +85,7 @@ export const exportAsImage = async (el: HTMLElement, fileName: string) => {
 // ─── Share result type ──────────────────────────────────────────────────────
 
 export type ShareResult = {
-  method: 'native_share' | 'clipboard_and_download' | 'download_only';
+  method: 'native_share' | 'cancelled' | 'clipboard_and_download' | 'download_only';
   copied: boolean;
 };
 
@@ -94,43 +96,48 @@ export const shareToWhatsApp = async (
   title: string,
 ): Promise<ShareResult> => {
   const canvas = await capture(el);
+  const blob = await canvasToBlob(canvas);
+  const file = new File([blob], `${title}.png`, { type: 'image/png' });
 
-  // Mobile: Use Web Share API with file attachment
+  // ── Step 1: Try Web Share API with file (mobile browsers) ──
+  // This opens the OS share picker → user selects WhatsApp → image is sent
   if (navigator.share && navigator.canShare) {
     try {
-      const blob = await canvasToBlob(canvas);
-      const file = new File([blob], `${title}.png`, { type: 'image/png' });
       if (navigator.canShare({ files: [file] })) {
         await navigator.share({ title, files: [file] });
         return { method: 'native_share', copied: false };
       }
-    } catch {
-      // User cancelled or API unavailable — fall through to desktop fallback
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return { method: 'cancelled', copied: false };
+      }
     }
   }
 
-  // Desktop fallback: download + copy to clipboard
-  const blob = await canvasToBlob(canvas);
+  // ── Step 2: Fallback — download image + open WhatsApp ──
   const fileName = `${title}.png`;
-
-  // 1. Download the image
   downloadBlob(blob, fileName);
 
-  // 2. Try copying the image to clipboard so user can paste in WhatsApp
   let copied = false;
-  try {
-    if (navigator.clipboard?.write) {
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': blob }),
-      ]);
-      copied = true;
-    }
-  } catch {
-    // Clipboard write not supported — image was still downloaded
-  }
 
-  // 3. Open WhatsApp Web so user can paste the image
-  window.open('https://web.whatsapp.com/', '_blank');
+  if (isMobile()) {
+    // Mobile fallback: open WhatsApp app directly via intent URL
+    // User can then attach the downloaded image from gallery
+    window.location.href = `whatsapp://send?text=${encodeURIComponent(title)}`;
+  } else {
+    // Desktop: copy image to clipboard so user can paste (Ctrl+V)
+    try {
+      if (navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob }),
+        ]);
+        copied = true;
+      }
+    } catch {
+      // Clipboard write not supported
+    }
+    window.open('https://web.whatsapp.com/', '_blank');
+  }
 
   return { method: copied ? 'clipboard_and_download' : 'download_only', copied };
 };

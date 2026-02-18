@@ -135,7 +135,7 @@ export const Reports: React.FC = () => {
   );
 
   const showShareFeedback = useCallback((result: ShareResult) => {
-    if (result.method === 'native_share') return;
+    if (result.method === 'native_share' || result.method === 'cancelled') return;
     const msg = result.copied
       ? 'تم تحميل الصورة ونسخها — افتح المحادثة والصق الصورة (Ctrl+V)'
       : 'تم تحميل صورة التقرير — أرفقها في محادثة واتساب';
