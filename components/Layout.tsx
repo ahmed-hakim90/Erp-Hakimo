@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
-import { usePermission, useCurrentRole, SIDEBAR_ITEMS } from '../utils/permissions';
+import { usePermission, useCurrentRole, SIDEBAR_GROUPS } from '../utils/permissions';
 
 const Sidebar: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
   const { can } = usePermission();
@@ -57,23 +57,34 @@ const Sidebar: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClo
           </div>
         )}
 
-        <nav className="flex-1 p-4 space-y-2 mt-4 overflow-y-auto">
-          {SIDEBAR_ITEMS.filter((item) => can(item.permission)).map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${
-                  isActive
-                    ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20'
-                    : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-primary'
-                }`
-              }
-            >
-              <span className="material-icons-round text-xl">{item.icon}</span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
+        <nav className="flex-1 p-4 mt-2 overflow-y-auto space-y-1">
+          {SIDEBAR_GROUPS.map((group) => {
+            const visibleItems = group.items.filter((item) => can(item.permission));
+            if (visibleItems.length === 0) return null;
+            return (
+              <div key={group.key} className="mb-1">
+                <p className="px-4 pt-4 pb-1.5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em]">
+                  {group.label}
+                </p>
+                {visibleItems.map((item) => (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-2.5 rounded-lg font-medium transition-all text-sm ${
+                        isActive
+                          ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20'
+                          : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-primary'
+                      }`
+                    }
+                  >
+                    <span className="material-icons-round text-[20px]">{item.icon}</span>
+                    <span>{item.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-slate-100 dark:border-slate-800">

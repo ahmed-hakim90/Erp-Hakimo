@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { KPIBox, Card, Badge, Button, LoadingSkeleton } from '../components/UI';
+import { SupervisorDashboard } from '../components/SupervisorDashboard';
 import { useAppStore } from '../store/useAppStore';
 import {
   formatNumber,
@@ -62,6 +63,7 @@ export const Dashboard: React.FC = () => {
   const products = useAppStore((s) => s.products);
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const _rawLines = useAppStore((s) => s._rawLines);
+  const _rawSupervisors = useAppStore((s) => s._rawSupervisors);
   const lineStatuses = useAppStore((s) => s.lineStatuses);
   const lineProductConfigs = useAppStore((s) => s.lineProductConfigs);
   const loading = useAppStore((s) => s.loading);
@@ -71,10 +73,20 @@ export const Dashboard: React.FC = () => {
   const costCenterValues = useAppStore((s) => s.costCenterValues);
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
+  const uid = useAppStore((s) => s.uid);
   const navigate = useNavigate();
 
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
+
+  const linkedSupervisor = useMemo(
+    () => _rawSupervisors.find((s) => s.userId === uid),
+    [_rawSupervisors, uid]
+  );
+
+  if (linkedSupervisor && !canViewCosts) {
+    return <SupervisorDashboard supervisorId={linkedSupervisor.id!} supervisorName={linkedSupervisor.name} />;
+  }
 
   const [selectedProductId, setSelectedProductId] = useState('');
   const [planQuantity, setPlanQuantity] = useState<number>(0);
@@ -733,6 +745,19 @@ export const Dashboard: React.FC = () => {
                 )}
               </div>
             </form>
+
+            {selectedProductId && planQuantity > 0 && can('plans.create') && (
+              <div className="mt-6">
+                <Button
+                  variant="primary"
+                  className="w-full"
+                  onClick={() => navigate(`/production-plans?productId=${selectedProductId}&quantity=${planQuantity}`)}
+                >
+                  <span className="material-icons-round text-sm">add_task</span>
+                  إنشاء خطة رسمية
+                </Button>
+              </div>
+            )}
 
             {canViewCosts && selectedProductCost && (
               <div className="mt-6 p-4 bg-violet-50 dark:bg-violet-900/10 rounded-xl border border-violet-200 dark:border-violet-800 space-y-3">

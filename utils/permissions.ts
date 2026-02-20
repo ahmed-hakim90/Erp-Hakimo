@@ -28,6 +28,9 @@ export type Permission =
   | 'quickAction.view'
   | 'costs.view' | 'costs.manage'
   | 'plans.view' | 'plans.create' | 'plans.edit'
+  | 'supervisorDashboard.view'
+  | 'factoryDashboard.view'
+  | 'adminDashboard.view'
   | 'print' | 'export';
 
 // ─── Permission Groups (for admin UI) ────────────────────────────────────────
@@ -164,6 +167,27 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    key: 'supervisorDashboard',
+    label: 'لوحة المشرف',
+    permissions: [
+      { key: 'supervisorDashboard.view', label: 'عرض لوحة المشرف' },
+    ],
+  },
+  {
+    key: 'factoryDashboard',
+    label: 'لوحة مدير المصنع',
+    permissions: [
+      { key: 'factoryDashboard.view', label: 'عرض لوحة مدير المصنع' },
+    ],
+  },
+  {
+    key: 'adminDashboard',
+    label: 'لوحة مدير النظام',
+    permissions: [
+      { key: 'adminDashboard.view', label: 'عرض لوحة مدير النظام' },
+    ],
+  },
+  {
     key: 'special',
     label: 'صلاحيات خاصة',
     permissions: [
@@ -186,25 +210,69 @@ export interface SidebarItem {
   permission: Permission;
 }
 
-export const SIDEBAR_ITEMS: SidebarItem[] = [
-  { path: '/', icon: 'dashboard', label: 'لوحة التحكم', permission: 'dashboard.view' },
-  { path: '/lines', icon: 'precision_manufacturing', label: 'خطوط الإنتاج', permission: 'lines.view' },
-  { path: '/products', icon: 'inventory_2', label: 'إدارة المنتجات', permission: 'products.view' },
-  { path: '/supervisors', icon: 'groups', label: 'فريق العمل', permission: 'supervisors.view' },
-  { path: '/reports', icon: 'bar_chart', label: 'التقارير', permission: 'reports.view' },
-  { path: '/quick-action', icon: 'bolt', label: 'إدخال سريع', permission: 'quickAction.view' },
-  { path: '/activity-log', icon: 'history', label: 'سجل النشاط', permission: 'activityLog.view' },
-  { path: '/production-plans', icon: 'event_note', label: 'خطط الإنتاج', permission: 'plans.view' },
-  { path: '/cost-centers', icon: 'account_balance', label: 'مراكز التكلفة', permission: 'costs.view' },
-  { path: '/cost-settings', icon: 'payments', label: 'إعدادات التكلفة', permission: 'costs.manage' },
-  { path: '/roles', icon: 'admin_panel_settings', label: 'إدارة الأدوار', permission: 'roles.manage' },
-  { path: '/settings', icon: 'settings', label: 'الإعدادات', permission: 'settings.view' },
+export interface SidebarGroup {
+  key: string;
+  label: string;
+  items: SidebarItem[];
+}
+
+export const SIDEBAR_GROUPS: SidebarGroup[] = [
+  {
+    key: 'dashboards',
+    label: 'لوحات التحكم',
+    items: [
+      { path: '/', icon: 'dashboard', label: 'الرئيسية', permission: 'dashboard.view' },
+      { path: '/supervisor-dashboard', icon: 'assignment_ind', label: 'لوحة المشرف', permission: 'supervisorDashboard.view' },
+      { path: '/factory-dashboard', icon: 'analytics', label: 'لوحة مدير المصنع', permission: 'factoryDashboard.view' },
+      { path: '/admin-dashboard', icon: 'shield', label: 'لوحة مدير النظام', permission: 'adminDashboard.view' },
+    ],
+  },
+  {
+    key: 'production',
+    label: 'الإنتاج',
+    items: [
+      { path: '/lines', icon: 'precision_manufacturing', label: 'خطوط الإنتاج', permission: 'lines.view' },
+      { path: '/products', icon: 'inventory_2', label: 'المنتجات', permission: 'products.view' },
+      { path: '/production-plans', icon: 'event_note', label: 'خطط الإنتاج', permission: 'plans.view' },
+      { path: '/reports', icon: 'bar_chart', label: 'التقارير', permission: 'reports.view' },
+      { path: '/quick-action', icon: 'bolt', label: 'إدخال سريع', permission: 'quickAction.view' },
+    ],
+  },
+  {
+    key: 'hr',
+    label: 'فريق العمل',
+    items: [
+      { path: '/supervisors', icon: 'groups', label: 'المشرفين', permission: 'supervisors.view' },
+      { path: '/users', icon: 'manage_accounts', label: 'المستخدمين', permission: 'users.view' },
+    ],
+  },
+  {
+    key: 'costs',
+    label: 'التكاليف',
+    items: [
+      { path: '/cost-centers', icon: 'account_balance', label: 'مراكز التكلفة', permission: 'costs.view' },
+      { path: '/cost-settings', icon: 'payments', label: 'إعدادات التكلفة', permission: 'costs.manage' },
+    ],
+  },
+  {
+    key: 'system',
+    label: 'النظام',
+    items: [
+      { path: '/roles', icon: 'admin_panel_settings', label: 'الأدوار والصلاحيات', permission: 'roles.manage' },
+      { path: '/activity-log', icon: 'history', label: 'سجل النشاط', permission: 'activityLog.view' },
+      { path: '/settings', icon: 'settings', label: 'الإعدادات', permission: 'settings.view' },
+    ],
+  },
 ];
+
+/** Flat list for backward compatibility (route matching, etc.) */
+export const SIDEBAR_ITEMS: SidebarItem[] = SIDEBAR_GROUPS.flatMap((g) => g.items);
 
 // ─── Route → Permission Mapping ──────────────────────────────────────────────
 
 export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/': 'dashboard.view',
+  '/supervisor-dashboard': 'supervisorDashboard.view',
   '/products': 'products.view',
   '/products/:id': 'products.view',
   '/lines': 'lines.view',
@@ -216,6 +284,8 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/users': 'users.view',
   '/activity-log': 'activityLog.view',
   '/production-plans': 'plans.view',
+  '/factory-dashboard': 'factoryDashboard.view',
+  '/admin-dashboard': 'adminDashboard.view',
   '/cost-centers': 'costs.view',
   '/cost-centers/:id': 'costs.view',
   '/cost-settings': 'costs.manage',
