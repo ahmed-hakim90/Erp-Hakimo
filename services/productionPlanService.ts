@@ -9,6 +9,7 @@ import {
   query,
   where,
   serverTimestamp,
+  increment,
 } from 'firebase/firestore';
 import { db, isConfigured } from './firebase';
 import { ProductionPlan } from '../types';
@@ -92,6 +93,45 @@ export const productionPlanService = {
       await deleteDoc(doc(db, COLLECTION, id));
     } catch (error) {
       console.error('productionPlanService.delete error:', error);
+      throw error;
+    }
+  },
+
+  async incrementProduced(
+    id: string,
+    quantityDelta: number,
+    costDelta: number,
+  ): Promise<void> {
+    if (!isConfigured) return;
+    try {
+      await updateDoc(doc(db, COLLECTION, id), {
+        producedQuantity: increment(quantityDelta),
+        actualCost: increment(costDelta),
+      });
+    } catch (error) {
+      console.error('productionPlanService.incrementProduced error:', error);
+      throw error;
+    }
+  },
+
+  async getActiveByLineAndProduct(
+    lineId: string,
+    productId: string,
+  ): Promise<ProductionPlan[]> {
+    if (!isConfigured) return [];
+    try {
+      const q = query(
+        collection(db, COLLECTION),
+        where('lineId', '==', lineId),
+        where('productId', '==', productId),
+        where('status', 'in', ['planned', 'in_progress']),
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(
+        (d) => ({ id: d.id, ...d.data() } as ProductionPlan),
+      );
+    } catch (error) {
+      console.error('productionPlanService.getActiveByLineAndProduct error:', error);
       throw error;
     }
   },

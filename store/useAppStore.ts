@@ -53,6 +53,7 @@ import { activityLogService } from '../services/activityLogService';
 import { systemSettingsService } from '../services/systemSettingsService';
 import { ALL_PERMISSIONS } from '../utils/permissions';
 import { DEFAULT_SYSTEM_SETTINGS } from '../utils/dashboardConfig';
+import { applyTheme, setupAutoThemeListener } from '../utils/themeEngine';
 import {
   buildProducts,
   buildProductionLines,
@@ -608,6 +609,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     );
 
+    const mergedSettings = systemSettingsRaw
+      ? { ...DEFAULT_SYSTEM_SETTINGS, ...systemSettingsRaw }
+      : DEFAULT_SYSTEM_SETTINGS;
+
     set({
       _rawProducts: rawProducts,
       _rawLines: rawLines,
@@ -622,10 +627,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       costCenterValues,
       costAllocations,
       laborSettings,
-      systemSettings: systemSettingsRaw
-        ? { ...DEFAULT_SYSTEM_SETTINGS, ...systemSettingsRaw }
-        : DEFAULT_SYSTEM_SETTINGS,
+      systemSettings: mergedSettings,
     });
+
+    applyTheme(mergedSettings.theme);
+    setupAutoThemeListener(mergedSettings.theme);
 
     const products = buildProducts(rawProducts, todayReports, configs);
     const productionLines = buildProductionLines(
@@ -941,7 +947,36 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createReport: async (data) => {
     try {
+      const { systemSettings, laborSettings } = get();
+      const planSettings = systemSettings.planSettings ?? { allowReportWithoutPlan: true, allowOverProduction: true, allowMultipleActivePlans: true };
+
+      const activePlans = await productionPlanService.getActiveByLineAndProduct(data.lineId, data.productId);
+      const activePlan = activePlans[0] ?? null;
+
+      if (!planSettings.allowReportWithoutPlan && !activePlan) {
+        set({ error: 'لا يمكن إنشاء تقرير بدون خطة إنتاج نشطة لهذا الخط والمنتج' });
+        return null;
+      }
+
+      if (!planSettings.allowOverProduction && activePlan) {
+        if ((activePlan.producedQuantity ?? 0) >= activePlan.plannedQuantity) {
+          set({ error: 'تم الوصول للكمية المخططة — الإنتاج الزائد غير مسموح' });
+          return null;
+        }
+      }
+
       const id = await reportService.create(data);
+
+      if (activePlan?.id) {
+        const laborCost = (laborSettings?.hourlyRate ?? 0) * (data.workHours || 0) * (data.workersCount || 0);
+        await productionPlanService.incrementProduced(activePlan.id, data.quantityProduced, laborCost);
+
+        const newProduced = (activePlan.producedQuantity ?? 0) + data.quantityProduced;
+        if (newProduced >= activePlan.plannedQuantity) {
+          await productionPlanService.update(activePlan.id, { status: 'completed' });
+        }
+      }
+
       const today = getTodayDateString();
       const { start: monthStart, end: monthEnd } = getMonthDateRange();
       const [todayReports, monthlyReports] = await Promise.all([
@@ -951,6 +986,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ todayReports, monthlyReports, productionReports: monthlyReports });
       get()._rebuildProducts();
       get()._rebuildLines();
+      if (activePlan) await get().fetchProductionPlans();
 
       get()._logActivity('CREATE_REPORT', `إنشاء تقرير إنتاج جديد`, { reportId: id, ...data });
 
@@ -1138,7 +1174,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const data = await systemSettingsService.get();
       if (data) {
-        set({ systemSettings: { ...DEFAULT_SYSTEM_SETTINGS, ...data } });
+        const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...data };
+        set({ systemSettings: merged });
+        applyTheme(merged.theme);
+        setupAutoThemeListener(merged.theme);
       }
     } catch (error) {
       console.error('fetchSystemSettings error:', error);
@@ -1149,6 +1188,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await systemSettingsService.set(data);
       set({ systemSettings: data });
+      applyTheme(data.theme);
+      setupAutoThemeListener(data.theme);
     } catch (error) {
       set({ error: (error as Error).message });
     }

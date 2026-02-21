@@ -1,4 +1,7 @@
-import type { SystemSettings, AlertSettings, KPIThreshold, WidgetConfig, PrintTemplateSettings } from '../types';
+import type {
+  SystemSettings, AlertSettings, KPIThreshold, WidgetConfig, PrintTemplateSettings,
+  PlanSettings, BrandingSettings, ThemeSettings, DashboardDisplaySettings, AlertToggleSettings,
+} from '../types';
 
 // ─── Widget Registry ─────────────────────────────────────────────────────────
 
@@ -102,6 +105,50 @@ export const DEFAULT_PRINT_TEMPLATE: PrintTemplateSettings = {
   showQRCode: false,
 };
 
+export const DEFAULT_PLAN_SETTINGS: PlanSettings = {
+  allowMultipleActivePlans: true,
+  allowReportWithoutPlan: true,
+  allowOverProduction: true,
+  autoClosePlan: true,
+  maxWasteThreshold: 5,
+  efficiencyCalculationMode: 'standard',
+  averageProductionMode: 'daily',
+};
+
+export const DEFAULT_BRANDING: BrandingSettings = {
+  factoryName: 'مؤسسة المغربي',
+  logoUrl: '',
+  currency: 'SAR',
+  timezone: 'Asia/Riyadh',
+};
+
+export const DEFAULT_THEME: ThemeSettings = {
+  primaryColor: '#1392ec',
+  secondaryColor: '#64748b',
+  successColor: '#10b981',
+  warningColor: '#f59e0b',
+  dangerColor: '#ef4444',
+  backgroundColor: '#f6f7f8',
+  darkMode: 'light',
+  baseFontFamily: 'Inter',
+  baseFontSize: 14,
+  borderRadius: 12,
+  density: 'comfortable',
+};
+
+export const DEFAULT_DASHBOARD_DISPLAY: DashboardDisplaySettings = {
+  showCostWidgets: true,
+  showAlertsWidget: true,
+  widgetsPerRow: 3,
+  enableDragReorder: true,
+};
+
+export const DEFAULT_ALERT_TOGGLES: AlertToggleSettings = {
+  enablePlanDelayAlert: true,
+  enableCapacityAlert: true,
+  enableCostVarianceAlert: true,
+};
+
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   dashboardWidgets: {
     dashboard: buildDefaultWidgets('dashboard'),
@@ -111,6 +158,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   alertSettings: DEFAULT_ALERT_SETTINGS,
   kpiThresholds: DEFAULT_KPI_THRESHOLDS,
   printTemplate: DEFAULT_PRINT_TEMPLATE,
+  planSettings: DEFAULT_PLAN_SETTINGS,
+  branding: DEFAULT_BRANDING,
+  theme: DEFAULT_THEME,
+  dashboardDisplay: DEFAULT_DASHBOARD_DISPLAY,
+  alertToggles: DEFAULT_ALERT_TOGGLES,
 };
 
 // ─── Selectors / Helpers ─────────────────────────────────────────────────────

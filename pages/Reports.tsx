@@ -50,6 +50,8 @@ export const Reports: React.FC = () => {
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
   const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
+  const productionPlans = useAppStore((s) => s.productionPlans);
+  const planSettings = useAppStore((s) => s.systemSettings.planSettings);
 
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
@@ -690,6 +692,44 @@ export const Reports: React.FC = () => {
                 );
               })()
             )}
+            {/* Linked plan info */}
+            {form.lineId && form.productId && (() => {
+              const linked = productionPlans.find(
+                (p) => p.lineId === form.lineId && p.productId === form.productId && (p.status === 'in_progress' || p.status === 'planned')
+              );
+              const noActivePlan = !linked;
+              const blockWithoutPlan = !planSettings?.allowReportWithoutPlan && noActivePlan && !editId;
+              const overProduced = linked && !planSettings?.allowOverProduction && (linked.producedQuantity ?? 0) >= linked.plannedQuantity;
+
+              return (
+                <>
+                  {linked && (
+                    <div className="mx-4 sm:mx-6 mb-2 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 flex items-center gap-3">
+                      <span className="material-icons-round text-emerald-600 text-lg">event_available</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">خطة مرتبطة</p>
+                        <p className="text-[11px] text-emerald-600 dark:text-emerald-500">
+                          {formatNumber(linked.producedQuantity ?? 0)} / {formatNumber(linked.plannedQuantity)} —
+                          {' '}{Math.min(Math.round(((linked.producedQuantity ?? 0) / linked.plannedQuantity) * 100), 100)}%
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {blockWithoutPlan && (
+                    <div className="mx-4 sm:mx-6 mb-2 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800 rounded-xl p-3 flex items-center gap-3">
+                      <span className="material-icons-round text-rose-500 text-lg">block</span>
+                      <p className="text-xs font-bold text-rose-600 dark:text-rose-400">لا يوجد خطة إنتاج نشطة لهذا الخط والمنتج — التقارير بدون خطة غير مسموحة</p>
+                    </div>
+                  )}
+                  {overProduced && (
+                    <div className="mx-4 sm:mx-6 mb-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl p-3 flex items-center gap-3">
+                      <span className="material-icons-round text-amber-500 text-lg">warning</span>
+                      <p className="text-xs font-bold text-amber-600 dark:text-amber-400">تم الوصول للكمية المخططة — الإنتاج الزائد غير مسموح</p>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
               <Button variant="outline" onClick={() => { setShowModal(false); setEditId(null); }}>إلغاء</Button>
               <Button

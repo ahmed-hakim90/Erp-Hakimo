@@ -14,6 +14,7 @@ import type {
   ProductionLine,
   ProductionLineStatus,
   ProductionPlan,
+  SmartStatus,
 } from '../types';
 
 // ─── Core Metrics ───────────────────────────────────────────────────────────
@@ -342,6 +343,103 @@ export const calculatePlanProgress = (
 ): number => {
   if (plannedQuantity <= 0) return 0;
   return Math.min(Math.round((actualProduced / plannedQuantity) * 100), 100);
+};
+
+// ─── Plan-Level Computed Metrics (never stored in Firestore) ────────────────
+
+const daysBetween = (a: string, b: string): number => {
+  const msPerDay = 86_400_000;
+  return Math.round(
+    (new Date(b).getTime() - new Date(a).getTime()) / msPerDay
+  );
+};
+
+/**
+ * Progress ratio — can exceed 100 % for over-production.
+ */
+export const calculateProgressRatio = (
+  producedQuantity: number,
+  plannedQuantity: number,
+): number => {
+  if (plannedQuantity <= 0) return 0;
+  return Number(((producedQuantity / plannedQuantity) * 100).toFixed(1));
+};
+
+/**
+ * Time ratio = elapsed days / total planned days (0 – 100+).
+ */
+export const calculateTimeRatio = (
+  startDate: string,
+  plannedEndDate: string,
+): number => {
+  const totalDays = daysBetween(startDate, plannedEndDate);
+  if (totalDays <= 0) return 100;
+  const elapsed = daysBetween(startDate, getTodayDateString());
+  return Number(((Math.max(elapsed, 0) / totalDays) * 100).toFixed(1));
+};
+
+/**
+ * Project a forecast finish date based on current daily throughput.
+ */
+export const calculateForecastFinishDate = (
+  startDate: string,
+  producedQuantity: number,
+  plannedQuantity: number,
+  avgDailyTarget: number,
+): string => {
+  const remaining = plannedQuantity - producedQuantity;
+  if (remaining <= 0) return getTodayDateString();
+
+  const elapsed = daysBetween(startDate, getTodayDateString());
+  const actualDailyRate =
+    elapsed > 0 ? producedQuantity / elapsed : avgDailyTarget;
+  const rate = actualDailyRate > 0 ? actualDailyRate : avgDailyTarget;
+  if (rate <= 0) return '—';
+
+  const daysToGo = Math.ceil(remaining / rate);
+  const forecast = new Date();
+  forecast.setDate(forecast.getDate() + daysToGo);
+  const y = forecast.getFullYear();
+  const m = String(forecast.getMonth() + 1).padStart(2, '0');
+  const d = String(forecast.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+/**
+ * Calendar days remaining until the planned end date.
+ */
+export const calculateRemainingDays = (plannedEndDate: string): number => {
+  return Math.max(daysBetween(getTodayDateString(), plannedEndDate), 0);
+};
+
+/**
+ * Derive a human-readable smart status from progress vs time ratios.
+ */
+export const calculateSmartStatus = (
+  progressRatio: number,
+  timeRatio: number,
+  status: ProductionPlan['status'],
+): SmartStatus => {
+  if (status === 'completed') return 'completed';
+  if (status === 'paused' || status === 'cancelled') return 'at_risk';
+
+  const gap = timeRatio - progressRatio;
+  if (gap <= 5) return 'on_track';
+  if (gap <= 20) return 'at_risk';
+  if (gap <= 40) return 'delayed';
+  return 'critical';
+};
+
+/**
+ * Add business days to a date string and return a new "YYYY-MM-DD".
+ */
+export const addDaysToDate = (dateStr: string, days: number): string => {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + Math.ceil(days));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
 /**

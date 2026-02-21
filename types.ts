@@ -131,13 +131,25 @@ export interface LineStatus {
   updatedAt?: any;
 }
 
+export type PlanPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type PlanStatus = 'planned' | 'in_progress' | 'completed' | 'paused' | 'cancelled';
+export type SmartStatus = 'on_track' | 'at_risk' | 'delayed' | 'critical' | 'completed';
+
 export interface ProductionPlan {
   id?: string;
   productId: string;
   lineId: string;
   plannedQuantity: number;
+  producedQuantity: number;
   startDate: string;
-  status: 'planned' | 'in_progress' | 'completed' | 'paused';
+  plannedStartDate: string;
+  plannedEndDate: string;
+  estimatedDurationDays: number;
+  avgDailyTarget: number;
+  priority: PlanPriority;
+  estimatedCost: number;
+  actualCost: number;
+  status: PlanStatus;
   createdBy: string;
   createdAt?: any;
 }
@@ -208,11 +220,65 @@ export interface PrintTemplateSettings {
   showQRCode: boolean;
 }
 
+export interface PlanSettings {
+  allowMultipleActivePlans: boolean;
+  allowReportWithoutPlan: boolean;
+  allowOverProduction: boolean;
+  autoClosePlan: boolean;
+  maxWasteThreshold: number;
+  efficiencyCalculationMode: 'standard' | 'weighted';
+  averageProductionMode: 'daily' | 'weekly' | 'monthly';
+}
+
+// ─── General Settings (Branding, Theme, Dashboard Display, Alert Toggles) ────
+
+export interface BrandingSettings {
+  factoryName: string;
+  logoUrl: string;
+  currency: string;
+  timezone: string;
+}
+
+export type ThemeMode = 'light' | 'dark' | 'auto';
+export type UIDensity = 'comfortable' | 'compact';
+
+export interface ThemeSettings {
+  primaryColor: string;
+  secondaryColor: string;
+  successColor: string;
+  warningColor: string;
+  dangerColor: string;
+  backgroundColor: string;
+  darkMode: ThemeMode;
+  baseFontFamily: string;
+  baseFontSize: number;
+  borderRadius: number;
+  density: UIDensity;
+}
+
+export interface DashboardDisplaySettings {
+  showCostWidgets: boolean;
+  showAlertsWidget: boolean;
+  widgetsPerRow: number;
+  enableDragReorder: boolean;
+}
+
+export interface AlertToggleSettings {
+  enablePlanDelayAlert: boolean;
+  enableCapacityAlert: boolean;
+  enableCostVarianceAlert: boolean;
+}
+
 export interface SystemSettings {
   dashboardWidgets: Record<string, WidgetConfig[]>;
   alertSettings: AlertSettings;
   kpiThresholds: Record<string, KPIThreshold>;
   printTemplate: PrintTemplateSettings;
+  planSettings: PlanSettings;
+  branding?: BrandingSettings;
+  theme?: ThemeSettings;
+  dashboardDisplay?: DashboardDisplaySettings;
+  alertToggles?: AlertToggleSettings;
 }
 
 // ─── Dynamic Roles & Permissions ─────────────────────────────────────────────

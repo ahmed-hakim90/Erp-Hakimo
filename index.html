@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HAKIM PRODUCTION SYSTEM</title>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@300;400;500;700&family=Rubik:wght@300;400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
     <script>
       tailwind.config = {
@@ -14,9 +14,9 @@
         theme: {
           extend: {
             colors: {
-              primary: "#1392ec",
-              secondary: "#64748b",
-              background: "#f6f7f8",
+              primary: "rgb(var(--color-primary) / <alpha-value>)",
+              secondary: "rgb(var(--color-secondary) / <alpha-value>)",
+              background: "var(--color-background)",
               "background-dark": "#101a22",
             },
             fontFamily: {
@@ -27,9 +27,22 @@
       };
     </script>
     <style>
+      :root {
+        --color-primary: 19 146 236;
+        --color-secondary: 100 116 139;
+        --color-success: 16 185 129;
+        --color-warning: 245 158 11;
+        --color-danger: 239 68 68;
+        --color-background: #f6f7f8;
+        --font-family-base: 'Inter', 'Noto Sans Arabic', sans-serif;
+        --font-size-base: 14px;
+        --border-radius-base: 12px;
+        --density-scale: 1;
+      }
       body {
-        font-family: 'Inter', 'Noto Sans Arabic', sans-serif;
-        background-color: #f6f7f8;
+        font-family: var(--font-family-base);
+        font-size: var(--font-size-base);
+        background-color: var(--color-background);
       }
       ::-webkit-scrollbar {
         width: 6px;
@@ -43,7 +56,7 @@
         border-radius: 10px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #1392ec;
+        background: rgb(var(--color-primary));
       }
     </style>
   <script type="importmap">

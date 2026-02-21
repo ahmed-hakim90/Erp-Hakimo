@@ -198,9 +198,9 @@ export const LineDetails: React.FC = () => {
     );
 
     const monthCache = new Map<string, number>();
-    const dates = new Set(reports.filter((r) => r.quantityProduced > 0).map((r) => r.date));
+    const dates = new Set<string>(reports.filter((r) => r.quantityProduced > 0).map((r) => r.date));
     let totalIndirect = 0;
-    dates.forEach((date) => {
+    dates.forEach((date: string) => {
       const month = date.slice(0, 7);
       if (!monthCache.has(month)) {
         monthCache.set(month, calculateDailyIndirectCost(id, month, costCenters, costCenterValues, costAllocations));

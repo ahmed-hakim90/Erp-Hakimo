@@ -7,10 +7,7 @@ import { Card, Badge, Button } from '../components/UI';
 import {
   usePermission,
   useCurrentRole,
-  PERMISSION_GROUPS,
   ALL_PERMISSIONS,
-  checkPermission,
-  type Permission,
 } from '../utils/permissions';
 import {
   DASHBOARD_WIDGETS,
@@ -19,6 +16,11 @@ import {
   DEFAULT_ALERT_SETTINGS,
   DEFAULT_KPI_THRESHOLDS,
   DEFAULT_PRINT_TEMPLATE,
+  DEFAULT_PLAN_SETTINGS,
+  DEFAULT_BRANDING,
+  DEFAULT_THEME,
+  DEFAULT_DASHBOARD_DISPLAY,
+  DEFAULT_ALERT_TOGGLES,
 } from '../utils/dashboardConfig';
 import { ProductionReportPrint, computePrintTotals } from '../components/ProductionReportPrint';
 import {
@@ -28,18 +30,58 @@ import {
   type BackupHistoryEntry,
   type RestoreMode,
 } from '../services/backupService';
-import type { SystemSettings, WidgetConfig, AlertSettings, KPIThreshold, PrintTemplateSettings, PaperSize, PaperOrientation } from '../types';
+import { applyTheme, setupAutoThemeListener } from '../utils/themeEngine';
+import type {
+  SystemSettings, WidgetConfig, AlertSettings, KPIThreshold, PrintTemplateSettings,
+  PaperSize, PaperOrientation, PlanSettings, BrandingSettings, ThemeSettings,
+  DashboardDisplaySettings, AlertToggleSettings, ThemeMode, UIDensity,
+} from '../types';
 import type { ReportPrintRow } from '../components/ProductionReportPrint';
 
 type SettingsTab = 'general' | 'dashboardWidgets' | 'alertRules' | 'kpiThresholds' | 'printTemplate' | 'backup';
 
 const TABS: { key: SettingsTab; label: string; icon: string; adminOnly: boolean }[] = [
-  { key: 'general', label: 'عام', icon: 'settings', adminOnly: false },
+  { key: 'general', label: 'الإعدادات العامة', icon: 'settings', adminOnly: false },
   { key: 'dashboardWidgets', label: 'إعدادات لوحات التحكم', icon: 'dashboard_customize', adminOnly: true },
   { key: 'alertRules', label: 'قواعد التنبيهات', icon: 'notifications_active', adminOnly: true },
   { key: 'kpiThresholds', label: 'حدود المؤشرات', icon: 'tune', adminOnly: true },
   { key: 'printTemplate', label: 'إعدادات الطباعة', icon: 'print', adminOnly: true },
   { key: 'backup', label: 'النسخ الاحتياطي', icon: 'backup', adminOnly: true },
+];
+
+const CURRENCIES = [
+  { value: 'SAR', label: 'ريال سعودي (SAR)' },
+  { value: 'EGP', label: 'جنيه مصري (EGP)' },
+  { value: 'AED', label: 'درهم إماراتي (AED)' },
+  { value: 'USD', label: 'دولار أمريكي (USD)' },
+  { value: 'EUR', label: 'يورو (EUR)' },
+  { value: 'KWD', label: 'دينار كويتي (KWD)' },
+  { value: 'QAR', label: 'ريال قطري (QAR)' },
+  { value: 'BHD', label: 'دينار بحريني (BHD)' },
+  { value: 'OMR', label: 'ريال عماني (OMR)' },
+  { value: 'JOD', label: 'دينار أردني (JOD)' },
+];
+
+const TIMEZONES = [
+  { value: 'Asia/Riyadh', label: 'الرياض (GMT+3)' },
+  { value: 'Africa/Cairo', label: 'القاهرة (GMT+2)' },
+  { value: 'Asia/Dubai', label: 'دبي (GMT+4)' },
+  { value: 'Asia/Kuwait', label: 'الكويت (GMT+3)' },
+  { value: 'Asia/Qatar', label: 'قطر (GMT+3)' },
+  { value: 'Asia/Bahrain', label: 'البحرين (GMT+3)' },
+  { value: 'Asia/Muscat', label: 'مسقط (GMT+4)' },
+  { value: 'Asia/Amman', label: 'عمّان (GMT+3)' },
+  { value: 'Europe/London', label: 'لندن (GMT+0)' },
+  { value: 'America/New_York', label: 'نيويورك (GMT-5)' },
+];
+
+const FONT_FAMILIES = [
+  { value: 'Inter', label: 'Inter' },
+  { value: 'Cairo', label: 'Cairo' },
+  { value: 'Tajawal', label: 'Tajawal' },
+  { value: 'Rubik', label: 'Rubik' },
+  { value: 'IBM Plex Sans Arabic', label: 'IBM Plex Sans Arabic' },
+  { value: 'Noto Sans Arabic', label: 'Noto Sans Arabic' },
 ];
 
 const RESTORE_MODES: { value: RestoreMode; label: string; icon: string; description: string; color: string }[] = [
@@ -67,13 +109,12 @@ export const Settings: React.FC = () => {
   const products = useAppStore((s) => s.products);
   const productionLines = useAppStore((s) => s.productionLines);
   const supervisors = useAppStore((s) => s.supervisors);
-  const roles = useAppStore((s) => s.roles);
   const userPermissions = useAppStore((s) => s.userPermissions);
   const systemSettings = useAppStore((s) => s.systemSettings);
   const updateSystemSettings = useAppStore((s) => s.updateSystemSettings);
 
   const { can } = usePermission();
-  const { roleName, roleColor, isReadOnly } = useCurrentRole();
+  const { roleName, roleColor } = useCurrentRole();
   const isAdmin = can('roles.manage');
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
@@ -96,9 +137,42 @@ export const Settings: React.FC = () => {
   const [localPrint, setLocalPrint] = useState<PrintTemplateSettings>(
     () => ({ ...DEFAULT_PRINT_TEMPLATE, ...systemSettings.printTemplate })
   );
+  const [localPlanSettings, setLocalPlanSettings] = useState<PlanSettings>(
+    () => ({ ...DEFAULT_PLAN_SETTINGS, ...systemSettings.planSettings })
+  );
+  const [localBranding, setLocalBranding] = useState<BrandingSettings>(
+    () => ({ ...DEFAULT_BRANDING, ...systemSettings.branding })
+  );
+  const [localTheme, setLocalTheme] = useState<ThemeSettings>(
+    () => ({ ...DEFAULT_THEME, ...systemSettings.theme })
+  );
+  const [localDashboardDisplay, setLocalDashboardDisplay] = useState<DashboardDisplaySettings>(
+    () => ({ ...DEFAULT_DASHBOARD_DISPLAY, ...systemSettings.dashboardDisplay })
+  );
+  const [localAlertToggles, setLocalAlertToggles] = useState<AlertToggleSettings>(
+    () => ({ ...DEFAULT_ALERT_TOGGLES, ...systemSettings.alertToggles })
+  );
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const brandingLogoRef = useRef<HTMLInputElement>(null);
+
+  // Instant theme preview
+  useEffect(() => {
+    if (activeTab === 'general') {
+      applyTheme(localTheme);
+      setupAutoThemeListener(localTheme);
+    }
+  }, [localTheme, activeTab]);
+
+  // Revert to saved theme when leaving general tab
+  useEffect(() => {
+    return () => {
+      const saved = systemSettings.theme ?? DEFAULT_THEME;
+      applyTheme(saved);
+      setupAutoThemeListener(saved);
+    };
+  }, []);
 
   // ── Backup state ────────────────────────────────────────────────────────────
   const [backupLoading, setBackupLoading] = useState(false);
@@ -256,7 +330,24 @@ export const Settings: React.FC = () => {
     if (logoInputRef.current) logoInputRef.current.value = '';
   }, []);
 
-  const handleSave = useCallback(async (section: 'widgets' | 'alerts' | 'kpis' | 'print') => {
+  const handleBrandingLogoUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !isConfigured) return;
+    setUploadingLogo(true);
+    try {
+      const fileRef = storageRef(storage, `branding/logo_${Date.now()}_${file.name}`);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      setLocalBranding((prev) => ({ ...prev, logoUrl: url }));
+    } catch (err) {
+      console.error('Logo upload error:', err);
+      setSaveMessage('فشل رفع الشعار');
+    }
+    setUploadingLogo(false);
+    if (brandingLogoRef.current) brandingLogoRef.current.value = '';
+  }, []);
+
+  const handleSave = useCallback(async (section: 'general' | 'widgets' | 'alerts' | 'kpis' | 'print') => {
     setSaving(true);
     setSaveMessage('');
     try {
@@ -266,6 +357,11 @@ export const Settings: React.FC = () => {
         alertSettings: section === 'alerts' ? localAlerts : systemSettings.alertSettings,
         kpiThresholds: section === 'kpis' ? localKPIs : systemSettings.kpiThresholds,
         printTemplate: section === 'print' ? localPrint : systemSettings.printTemplate,
+        planSettings: section === 'general' ? localPlanSettings : (systemSettings.planSettings ?? DEFAULT_PLAN_SETTINGS),
+        branding: section === 'general' ? localBranding : (systemSettings.branding ?? DEFAULT_BRANDING),
+        theme: section === 'general' ? localTheme : (systemSettings.theme ?? DEFAULT_THEME),
+        dashboardDisplay: section === 'general' ? localDashboardDisplay : (systemSettings.dashboardDisplay ?? DEFAULT_DASHBOARD_DISPLAY),
+        alertToggles: section === 'general' ? localAlertToggles : (systemSettings.alertToggles ?? DEFAULT_ALERT_TOGGLES),
       };
       await updateSystemSettings(updated);
       setSaveMessage('تم الحفظ بنجاح');
@@ -274,7 +370,7 @@ export const Settings: React.FC = () => {
       setSaveMessage('فشل الحفظ');
     }
     setSaving(false);
-  }, [systemSettings, localWidgets, localAlerts, localKPIs, localPrint, updateSystemSettings]);
+  }, [systemSettings, localWidgets, localAlerts, localKPIs, localPrint, localPlanSettings, localBranding, localTheme, localDashboardDisplay, localAlertToggles, updateSystemSettings]);
 
   // ── Widget drag & drop ─────────────────────────────────────────────────────
 
@@ -371,128 +467,495 @@ export const Settings: React.FC = () => {
       )}
 
       {/* ════════════════════════════════════════════════════════════════════ */}
-      {/* ── TAB: General ──────────────────────────────────────────────────── */}
+      {/* ── TAB: General Settings ─────────────────────────────────────────── */}
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'general' && (
         <>
-          {/* Current Role Info */}
-          <Card title="الدور الحالي والصلاحيات">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="material-icons-round text-primary text-3xl">shield</span>
-              </div>
+          {/* Save button */}
+          {isAdmin && (
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-400 font-bold mb-1">الدور الحالي</p>
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold ${roleColor}`}>
-                  {roleName}
-                </span>
+                <h3 className="text-lg font-bold">الإعدادات العامة</h3>
+                <p className="text-sm text-slate-500">هوية المصنع، المظهر، سلوك النظام، لوحة التحكم، والتنبيهات.</p>
               </div>
-              <div className="mr-auto flex items-center gap-2">
-                {isReadOnly && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                    <span className="material-icons-round text-sm">lock</span>
-                    قراءة فقط
-                  </span>
-                )}
-                {can("print") && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                    <span className="material-icons-round text-sm">print</span>
-                    طباعة
-                  </span>
-                )}
-                {can("export") && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-                    <span className="material-icons-round text-sm">download</span>
-                    تصدير
-                  </span>
-                )}
-              </div>
+              <Button onClick={() => handleSave('general')} disabled={saving}>
+                {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
+                <span className="material-icons-round text-sm">save</span>
+                حفظ جميع الإعدادات
+              </Button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {PERMISSION_GROUPS.map((group) => (
-                <div key={group.key} className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
-                  <p className="text-xs font-bold text-slate-500 mb-2">{group.label}</p>
-                  <div className="flex flex-wrap gap-1">
-                    {group.permissions.map((perm) => (
-                      <span
-                        key={perm.key}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          can(perm.key)
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                            : 'bg-slate-200 text-slate-400 dark:bg-slate-700 dark:text-slate-500 line-through'
-                        }`}
-                      >
-                        {perm.label}
-                      </span>
-                    ))}
+          )}
+
+          {/* ── Section 1: Branding ────────────────────────────────────────── */}
+          {isAdmin && (
+            <Card title="هوية المصنع">
+              <div className="space-y-5">
+                {/* Factory Name */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">factory</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">اسم المصنع</p>
+                      <p className="text-xs text-slate-400">يظهر في التقارير والواجهة</p>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    className="w-full sm:w-72 border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-4 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    value={localBranding.factoryName}
+                    onChange={(e) => setLocalBranding((p) => ({ ...p, factoryName: e.target.value }))}
+                  />
+                </div>
+
+                {/* Logo */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">image</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">شعار المصنع</p>
+                      <p className="text-xs text-slate-400">PNG أو JPG — يظهر في الواجهة والتقارير</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {localBranding.logoUrl && (
+                      <img src={localBranding.logoUrl} alt="logo" className="w-12 h-12 rounded-lg object-contain border border-slate-200 dark:border-slate-700 bg-white" />
+                    )}
+                    <input ref={brandingLogoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleBrandingLogoUpload} />
+                    <button
+                      onClick={() => brandingLogoRef.current?.click()}
+                      disabled={uploadingLogo}
+                      className="px-4 py-2.5 rounded-xl text-sm font-bold bg-primary/10 text-primary hover:bg-primary/20 transition-all disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {uploadingLogo ? <span className="material-icons-round animate-spin text-sm">refresh</span> : <span className="material-icons-round text-sm">upload</span>}
+                      {localBranding.logoUrl ? 'تغيير' : 'رفع'}
+                    </button>
+                    {localBranding.logoUrl && (
+                      <button onClick={() => setLocalBranding((p) => ({ ...p, logoUrl: '' }))} className="px-3 py-2.5 rounded-xl text-sm font-bold bg-rose-50 dark:bg-rose-900/10 text-rose-600 hover:bg-rose-100 transition-all">
+                        <span className="material-icons-round text-sm">delete</span>
+                      </button>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-            <div className="mt-4 text-xs text-slate-400 font-bold">
-              {enabledCount} / {ALL_PERMISSIONS.length} صلاحية مفعلة
-            </div>
-          </Card>
 
-          {/* Full Permission Matrix */}
-          {can("roles.manage") && roles.length > 0 && (
-            <Card title="مصفوفة الصلاحيات الكاملة">
-              <div className="overflow-x-auto">
-                <table className="w-full text-right border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
-                      <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase">المورد</th>
-                      {roles.map((r) => (
-                        <th key={r.id} className="px-4 py-3 text-center">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${r.color}`}>
-                            {r.name}
-                          </span>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {PERMISSION_GROUPS.map((group) => (
-                      <tr key={group.key} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                        <td className="px-4 py-3 font-bold text-slate-700 dark:text-slate-300">{group.label}</td>
-                        {roles.map((r) => (
-                          <td key={r.id} className="px-4 py-3 text-center">
-                            <div className="flex flex-wrap justify-center gap-1">
-                              {group.permissions.map((perm) => (
-                                <span
-                                  key={perm.key}
-                                  className={`w-6 h-6 rounded flex items-center justify-center text-xs ${
-                                    checkPermission(r.permissions, perm.key)
-                                      ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                      : 'bg-slate-100 text-slate-300 dark:bg-slate-800 dark:text-slate-600'
-                                  }`}
-                                  title={`${r.name} - ${group.label} - ${perm.label}`}
-                                >
-                                  {checkPermission(r.permissions, perm.key) ? (
-                                    <span className="material-icons-round text-xs">check</span>
-                                  ) : (
-                                    <span className="material-icons-round text-xs">close</span>
-                                  )}
-                                </span>
-                              ))}
-                            </div>
-                            <p className="text-[9px] text-slate-400 mt-1">
-                              {group.permissions
-                                .filter((p) => checkPermission(r.permissions, p.key))
-                                .map((p) => p.label)
-                                .join(' · ') || 'لا يوجد'}
-                            </p>
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {/* Currency */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">payments</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">العملة</p>
+                      <p className="text-xs text-slate-400">العملة المستخدمة في التكاليف والتقارير</p>
+                    </div>
+                  </div>
+                  <select
+                    className="w-full sm:w-64 border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-4 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    value={localBranding.currency}
+                    onChange={(e) => setLocalBranding((p) => ({ ...p, currency: e.target.value }))}
+                  >
+                    {CURRENCIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
+                </div>
+
+                {/* Timezone */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">schedule</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">المنطقة الزمنية</p>
+                      <p className="text-xs text-slate-400">تحدد توقيت التقارير والعمليات</p>
+                    </div>
+                  </div>
+                  <select
+                    className="w-full sm:w-64 border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-4 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    value={localBranding.timezone}
+                    onChange={(e) => setLocalBranding((p) => ({ ...p, timezone: e.target.value }))}
+                  >
+                    {TIMEZONES.map((tz) => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
+                  </select>
+                </div>
               </div>
             </Card>
           )}
 
-          {/* System Status */}
+          {/* ── Section 2: Theme Engine ────────────────────────────────────── */}
+          {isAdmin && (
+            <Card title="محرك المظهر">
+              <div className="space-y-6">
+                {/* Color Grid */}
+                <div>
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">الألوان</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {([
+                      { key: 'primaryColor' as const, label: 'اللون الرئيسي', icon: 'palette' },
+                      { key: 'secondaryColor' as const, label: 'اللون الثانوي', icon: 'color_lens' },
+                      { key: 'successColor' as const, label: 'لون النجاح', icon: 'check_circle' },
+                      { key: 'warningColor' as const, label: 'لون التحذير', icon: 'warning' },
+                      { key: 'dangerColor' as const, label: 'لون الخطر', icon: 'error' },
+                      { key: 'backgroundColor' as const, label: 'لون الخلفية', icon: 'format_paint' },
+                    ]).map((color) => (
+                      <div key={color.key} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                        <input
+                          type="color"
+                          className="w-10 h-10 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer shrink-0"
+                          value={localTheme[color.key]}
+                          onChange={(e) => setLocalTheme((p) => ({ ...p, [color.key]: e.target.value }))}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-600 dark:text-slate-400">{color.label}</p>
+                          <input
+                            type="text"
+                            className="w-full border-0 bg-transparent text-xs font-mono font-bold text-slate-800 dark:text-white outline-none p-0 mt-0.5"
+                            value={localTheme[color.key]}
+                            onChange={(e) => setLocalTheme((p) => ({ ...p, [color.key]: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Dark Mode */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">dark_mode</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">الوضع</p>
+                      <p className="text-xs text-slate-400">فاتح، داكن، أو تلقائي حسب النظام</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {([
+                      { value: 'light' as ThemeMode, label: 'فاتح', icon: 'light_mode' },
+                      { value: 'dark' as ThemeMode, label: 'داكن', icon: 'dark_mode' },
+                      { value: 'auto' as ThemeMode, label: 'تلقائي', icon: 'brightness_auto' },
+                    ]).map((mode) => (
+                      <button
+                        key={mode.value}
+                        onClick={() => setLocalTheme((p) => ({ ...p, darkMode: mode.value }))}
+                        className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${
+                          localTheme.darkMode === mode.value
+                            ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-primary/30'
+                        }`}
+                      >
+                        <span className="material-icons-round text-sm">{mode.icon}</span>
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Font Family */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">text_fields</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">نوع الخط</p>
+                      <p className="text-xs text-slate-400">الخط المستخدم في جميع أنحاء التطبيق</p>
+                    </div>
+                  </div>
+                  <select
+                    className="w-full sm:w-56 border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-4 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    value={localTheme.baseFontFamily}
+                    onChange={(e) => setLocalTheme((p) => ({ ...p, baseFontFamily: e.target.value }))}
+                  >
+                    {FONT_FAMILIES.map((f) => <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>{f.label}</option>)}
+                  </select>
+                </div>
+
+                {/* Font Size + Border Radius */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">format_size</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">حجم الخط الأساسي</p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={11}
+                          max={20}
+                          step={1}
+                          className="flex-1 accent-primary"
+                          value={localTheme.baseFontSize}
+                          onChange={(e) => setLocalTheme((p) => ({ ...p, baseFontSize: Number(e.target.value) }))}
+                        />
+                        <span className="text-sm font-bold text-slate-700 dark:text-slate-300 w-12 text-center">{localTheme.baseFontSize}px</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">rounded_corner</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">استدارة الحواف</p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={0}
+                          max={24}
+                          step={2}
+                          className="flex-1 accent-primary"
+                          value={localTheme.borderRadius}
+                          onChange={(e) => setLocalTheme((p) => ({ ...p, borderRadius: Number(e.target.value) }))}
+                        />
+                        <span className="text-sm font-bold text-slate-700 dark:text-slate-300 w-12 text-center">{localTheme.borderRadius}px</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Density */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">density_medium</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">كثافة العرض</p>
+                      <p className="text-xs text-slate-400">مريح يعطي مساحة أكبر، مضغوط يعرض محتوى أكثر</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {([
+                      { value: 'comfortable' as UIDensity, label: 'مريح', icon: 'view_agenda' },
+                      { value: 'compact' as UIDensity, label: 'مضغوط', icon: 'view_headline' },
+                    ]).map((d) => (
+                      <button
+                        key={d.value}
+                        onClick={() => setLocalTheme((p) => ({ ...p, density: d.value }))}
+                        className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${
+                          localTheme.density === d.value
+                            ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-primary/30'
+                        }`}
+                      >
+                        <span className="material-icons-round text-sm">{d.icon}</span>
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Theme Preview Swatches */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <p className="text-xs font-bold text-slate-500 mb-3">معاينة الألوان</p>
+                  <div className="flex flex-wrap gap-3">
+                    {([
+                      { label: 'رئيسي', color: localTheme.primaryColor },
+                      { label: 'ثانوي', color: localTheme.secondaryColor },
+                      { label: 'نجاح', color: localTheme.successColor },
+                      { label: 'تحذير', color: localTheme.warningColor },
+                      { label: 'خطر', color: localTheme.dangerColor },
+                      { label: 'خلفية', color: localTheme.backgroundColor },
+                    ]).map((swatch) => (
+                      <div key={swatch.label} className="flex flex-col items-center gap-1">
+                        <div className="w-12 h-12 rounded-xl shadow-inner border border-white/20" style={{ backgroundColor: swatch.color }} />
+                        <span className="text-[10px] font-bold text-slate-500">{swatch.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Reset */}
+                <button
+                  onClick={() => setLocalTheme({ ...DEFAULT_THEME })}
+                  className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                >
+                  <span className="material-icons-round text-sm">restart_alt</span>
+                  إعادة تعيين للقيم الافتراضية
+                </button>
+              </div>
+            </Card>
+          )}
+
+          {/* ── Section 3: System Behavior ─────────────────────────────────── */}
+          {isAdmin && (
+            <Card title="سلوك النظام">
+              <div className="space-y-4">
+                {/* Toggle Settings */}
+                {([
+                  { key: 'allowMultipleActivePlans' as keyof PlanSettings, label: 'السماح بخطط متعددة نشطة على نفس الخط', icon: 'playlist_add', desc: 'عند التعطيل، لن يُسمح بإنشاء خطة جديدة على خط يحتوي بالفعل على خطة نشطة.' },
+                  { key: 'allowReportWithoutPlan' as keyof PlanSettings, label: 'السماح بالتقارير بدون خطة', icon: 'assignment', desc: 'عند التعطيل، لن يتمكن المشرفون من إنشاء تقارير إنتاج بدون خطة نشطة.' },
+                  { key: 'allowOverProduction' as keyof PlanSettings, label: 'السماح بالإنتاج الزائد', icon: 'trending_up', desc: 'عند التعطيل، لن يُسمح بإضافة تقارير بعد الوصول إلى الكمية المخططة.' },
+                  { key: 'autoClosePlan' as keyof PlanSettings, label: 'إغلاق الخطة تلقائياً عند الاكتمال', icon: 'event_available', desc: 'عند التفعيل، يتم تغيير حالة الخطة إلى "مكتملة" تلقائياً عند الوصول للكمية المخططة.' },
+                ]).map((setting) => (
+                  <div key={setting.key} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                    <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">{setting.icon}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{setting.label}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{setting.desc}</p>
+                    </div>
+                    <button
+                      onClick={() => setLocalPlanSettings((prev) => ({ ...prev, [setting.key]: !prev[setting.key] }))}
+                      className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${(localPlanSettings as any)[setting.key] ? 'bg-primary' : 'bg-slate-300 dark:bg-slate-600'}`}
+                    >
+                      <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-sm transition-all ${(localPlanSettings as any)[setting.key] ? 'left-0.5' : 'left-[calc(100%-1.625rem)]'}`} />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Numeric & Select Settings */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Max Waste Threshold */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="material-icons-round text-primary text-lg">delete_sweep</span>
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">حد الهدر الأقصى</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold text-center py-2.5 px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                        value={localPlanSettings.maxWasteThreshold}
+                        onChange={(e) => setLocalPlanSettings((p) => ({ ...p, maxWasteThreshold: Number(e.target.value) }))}
+                      />
+                      <span className="text-sm font-bold text-slate-400">%</span>
+                    </div>
+                  </div>
+
+                  {/* Efficiency Calculation Mode */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="material-icons-round text-primary text-lg">speed</span>
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">حساب الكفاءة</p>
+                    </div>
+                    <select
+                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                      value={localPlanSettings.efficiencyCalculationMode}
+                      onChange={(e) => setLocalPlanSettings((p) => ({ ...p, efficiencyCalculationMode: e.target.value as 'standard' | 'weighted' }))}
+                    >
+                      <option value="standard">قياسي</option>
+                      <option value="weighted">مرجّح</option>
+                    </select>
+                  </div>
+
+                  {/* Average Production Mode */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="material-icons-round text-primary text-lg">equalizer</span>
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">متوسط الإنتاج</p>
+                    </div>
+                    <select
+                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                      value={localPlanSettings.averageProductionMode}
+                      onChange={(e) => setLocalPlanSettings((p) => ({ ...p, averageProductionMode: e.target.value as 'daily' | 'weekly' | 'monthly' }))}
+                    >
+                      <option value="daily">يومي</option>
+                      <option value="weekly">أسبوعي</option>
+                      <option value="monthly">شهري</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* ── Section 4: Dashboard Settings ─────────────────────────────── */}
+          {isAdmin && (
+            <Card title="إعدادات لوحة التحكم">
+              <div className="space-y-4">
+                {([
+                  { key: 'showCostWidgets' as keyof DashboardDisplaySettings, label: 'عرض عناصر التكاليف', icon: 'account_balance', desc: 'إظهار عناصر التكلفة والتحليل المالي في لوحات التحكم' },
+                  { key: 'showAlertsWidget' as keyof DashboardDisplaySettings, label: 'عرض عنصر التنبيهات', icon: 'notifications_active', desc: 'إظهار قسم التنبيهات النشطة في لوحات التحكم' },
+                  { key: 'enableDragReorder' as keyof DashboardDisplaySettings, label: 'تفعيل السحب لإعادة الترتيب', icon: 'drag_indicator', desc: 'السماح بإعادة ترتيب العناصر في لوحات التحكم بالسحب والإفلات' },
+                ]).map((setting) => (
+                  <div key={setting.key} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                    <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">{setting.icon}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{setting.label}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{setting.desc}</p>
+                    </div>
+                    <button
+                      onClick={() => setLocalDashboardDisplay((prev) => ({ ...prev, [setting.key]: !prev[setting.key] }))}
+                      className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${(localDashboardDisplay as any)[setting.key] ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                    >
+                      <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-sm transition-all ${(localDashboardDisplay as any)[setting.key] ? 'right-0.5' : 'right-[22px]'}`} />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Widgets Per Row */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">view_column</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">عدد العناصر في الصف</p>
+                      <p className="text-xs text-slate-400">عدد الأعمدة في شبكة لوحة التحكم</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {[2, 3, 4].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setLocalDashboardDisplay((p) => ({ ...p, widgetsPerRow: n }))}
+                        className={`w-12 h-10 rounded-xl text-sm font-bold transition-all ${
+                          localDashboardDisplay.widgetsPerRow === n
+                            ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-primary/30'
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* ── Section 5: Alerts Settings ─────────────────────────────────── */}
+          {isAdmin && (
+            <Card title="إعدادات التنبيهات">
+              <div className="space-y-4">
+                {([
+                  { key: 'enablePlanDelayAlert' as keyof AlertToggleSettings, label: 'تنبيه تأخر الخطط', icon: 'schedule', desc: 'إرسال تنبيه عند تأخر خطة الإنتاج عن الموعد المحدد' },
+                  { key: 'enableCapacityAlert' as keyof AlertToggleSettings, label: 'تنبيه السعة الإنتاجية', icon: 'production_quantity_limits', desc: 'تنبيه عند اقتراب خط الإنتاج من الحد الأقصى للسعة' },
+                  { key: 'enableCostVarianceAlert' as keyof AlertToggleSettings, label: 'تنبيه انحراف التكلفة', icon: 'compare_arrows', desc: 'تنبيه عند تجاوز التكلفة الفعلية للتكلفة المعيارية' },
+                ]).map((alert) => (
+                  <div key={alert.key} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                    <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary">{alert.icon}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{alert.label}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{alert.desc}</p>
+                    </div>
+                    <button
+                      onClick={() => setLocalAlertToggles((prev) => ({ ...prev, [alert.key]: !prev[alert.key] }))}
+                      className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${localAlertToggles[alert.key] ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                    >
+                      <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-sm transition-all ${localAlertToggles[alert.key] ? 'right-0.5' : 'right-[22px]'}`} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* ── System Status (for all users) ─────────────────────────────── */}
           <Card title="حالة النظام">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
               <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-5 text-center">
@@ -520,54 +983,21 @@ export const Settings: React.FC = () => {
             </div>
           </Card>
 
-          {/* Firebase Info */}
-          <Card title="معلومات قاعدة البيانات">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold text-slate-600 dark:text-slate-400">نوع قاعدة البيانات</span>
-                <span className="text-sm font-bold text-slate-800 dark:text-white">Firebase Firestore</span>
+          {/* Current Role Info (for all users) */}
+          <Card title="الدور الحالي والصلاحيات">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="material-icons-round text-primary text-2xl">shield</span>
               </div>
-              <div className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold text-slate-600 dark:text-slate-400">نوع المصادقة</span>
-                <span className="text-sm font-bold text-slate-800 dark:text-white">بريد إلكتروني / كلمة مرور</span>
+              <div>
+                <p className="text-xs text-slate-400 font-bold mb-1">الدور الحالي</p>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold ${roleColor}`}>
+                  {roleName}
+                </span>
               </div>
-              <div className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold text-slate-600 dark:text-slate-400">نظام الصلاحيات</span>
-                <span className="text-sm font-bold text-primary">ديناميكي (Firestore-backed RBAC)</span>
+              <div className="mr-auto text-xs text-slate-400 font-bold">
+                {enabledCount} / {ALL_PERMISSIONS.length} صلاحية مفعلة
               </div>
-              <div className="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold text-slate-600 dark:text-slate-400">عدد الأدوار</span>
-                <span className="text-sm font-bold text-slate-800 dark:text-white">{roles.length}</span>
-              </div>
-              <div className="flex items-center justify-between py-3">
-                <span className="text-sm font-bold text-slate-600 dark:text-slate-400">الإصدار</span>
-                <span className="text-sm font-bold text-primary">2.0.0</span>
-              </div>
-            </div>
-          </Card>
-
-          {/* Collections */}
-          <Card title="هيكل البيانات (Firestore Collections)">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[
-                { name: 'roles', label: 'الأدوار', icon: 'admin_panel_settings', fields: 'name, color, permissions' },
-                { name: 'users', label: 'المستخدمين', icon: 'people', fields: 'roleId' },
-                { name: 'products', label: 'المنتجات', icon: 'inventory_2', fields: 'name, model, code, openingBalance' },
-                { name: 'production_lines', label: 'خطوط الإنتاج', icon: 'precision_manufacturing', fields: 'name, dailyWorkingHours, maxWorkers, status' },
-                { name: 'supervisors', label: 'المشرفين', icon: 'person', fields: 'name' },
-                { name: 'production_reports', label: 'تقارير الإنتاج', icon: 'bar_chart', fields: 'date, lineId, productId, supervisorId, quantities...' },
-                { name: 'line_status', label: 'حالة الخطوط', icon: 'monitor_heart', fields: 'lineId, currentProductId, targetTodayQty' },
-                { name: 'line_product_config', label: 'إعدادات المنتج-الخط', icon: 'settings_applications', fields: 'lineId, productId, standardAssemblyTime' },
-              ].map((col) => (
-                <div key={col.name} className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 border border-slate-100 dark:border-slate-700">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="material-icons-round text-primary text-lg">{col.icon}</span>
-                    <span className="font-bold text-sm text-slate-800 dark:text-white">{col.label}</span>
-                  </div>
-                  <p className="text-xs text-slate-400 font-mono">{col.name}</p>
-                  <p className="text-xs text-slate-500 mt-2">{col.fields}</p>
-                </div>
-              ))}
             </div>
           </Card>
         </>
