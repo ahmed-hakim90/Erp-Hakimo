@@ -293,6 +293,23 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/settings': 'settings.view',
 };
 
+// ─── Role-based Home Route ───────────────────────────────────────────────────
+
+const HOME_ROUTES: { permission: Permission; path: string }[] = [
+  { permission: 'adminDashboard.view', path: '/admin-dashboard' },
+  { permission: 'factoryDashboard.view', path: '/factory-dashboard' },
+  { permission: 'supervisorDashboard.view', path: '/supervisor-dashboard' },
+  { permission: 'dashboard.view', path: '/' },
+];
+
+/** Returns the appropriate home route based on the user's permissions (highest role first) */
+export function getHomeRoute(permissions: Record<string, boolean>): string {
+  for (const entry of HOME_ROUTES) {
+    if (permissions[entry.permission] === true) return entry.path;
+  }
+  return '/';
+}
+
 // ─── Pure Helpers ────────────────────────────────────────────────────────────
 
 /** Check a single permission against a permissions map */

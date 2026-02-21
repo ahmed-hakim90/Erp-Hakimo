@@ -139,6 +139,47 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ── System Settings Collection ─────────────────────────────────────
+    // All active users can read. Only admin can write.
+    match /system_settings/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Backups Collection (history log) ──────────────────────────────────
+    // Only admin can read, create, and delete backup history entries.
+    match /backups/{docId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Cost Centers Collection ──────────────────────────────────────────
+    match /cost_centers/{docId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Cost Center Values Collection ────────────────────────────────────
+    match /cost_center_values/{docId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Cost Allocations Collection ──────────────────────────────────────
+    match /cost_allocations/{docId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Labor Settings Collection ────────────────────────────────────────
+    match /labor_settings/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
     // ── Catch-all: deny everything else ───────────────────────────────────
     match /{document=**} {
       allow read, write: if false;

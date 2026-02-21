@@ -21,6 +21,7 @@ import {
   CostCenterValue,
   CostAllocation,
   LaborSettings,
+  SystemSettings,
   FirestoreProduct,
   FirestoreProductionLine,
   FirestoreSupervisor,
@@ -49,7 +50,9 @@ import { laborSettingsService } from '../services/laborSettingsService';
 import { roleService } from '../services/roleService';
 import { userService } from '../services/userService';
 import { activityLogService } from '../services/activityLogService';
+import { systemSettingsService } from '../services/systemSettingsService';
 import { ALL_PERMISSIONS } from '../utils/permissions';
+import { DEFAULT_SYSTEM_SETTINGS } from '../utils/dashboardConfig';
 import {
   buildProducts,
   buildProductionLines,
@@ -96,6 +99,9 @@ interface AppState {
   costCenterValues: CostCenterValue[];
   costAllocations: CostAllocation[];
   laborSettings: LaborSettings | null;
+
+  // System settings (dashboard config, alert thresholds, KPI thresholds)
+  systemSettings: SystemSettings;
 
   // Loading & error
   loading: boolean;
@@ -181,6 +187,10 @@ interface AppState {
   updateProductionPlan: (id: string, data: Partial<ProductionPlan>) => Promise<void>;
   deleteProductionPlan: (id: string) => Promise<void>;
 
+  // System Settings
+  fetchSystemSettings: () => Promise<void>;
+  updateSystemSettings: (data: SystemSettings) => Promise<void>;
+
   // Mutations — Cost Management
   fetchCostData: () => Promise<void>;
   createCostCenter: (data: Omit<CostCenter, 'id' | 'createdAt'>) => Promise<string | null>;
@@ -231,6 +241,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   costCenterValues: [],
   costAllocations: [],
   laborSettings: null,
+
+  systemSettings: DEFAULT_SYSTEM_SETTINGS,
 
   loading: false,
   productsLoading: false,
@@ -421,6 +433,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       costCenterValues: [],
       costAllocations: [],
       laborSettings: null,
+      systemSettings: DEFAULT_SYSTEM_SETTINGS,
       roles: [],
       error: null,
       authError: null,
@@ -522,7 +535,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Internal: Load all app data (after auth) ────────────────────────────
 
   _loadAppData: async () => {
-    const [rawProducts, rawLines, rawSupervisors, configs, productionPlans, costCenters, costCenterValues, costAllocations, laborSettings] =
+    const [rawProducts, rawLines, rawSupervisors, configs, productionPlans, costCenters, costCenterValues, costAllocations, laborSettings, systemSettingsRaw] =
       await Promise.all([
         productService.getAll(),
         lineService.getAll(),
@@ -533,6 +546,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         costCenterValueService.getAll(),
         costAllocationService.getAll(),
         laborSettingsService.get(),
+        systemSettingsService.get(),
       ]);
 
     const today = getTodayDateString();
@@ -570,6 +584,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       costCenterValues,
       costAllocations,
       laborSettings,
+      systemSettings: systemSettingsRaw
+        ? { ...DEFAULT_SYSTEM_SETTINGS, ...systemSettingsRaw }
+        : DEFAULT_SYSTEM_SETTINGS,
     });
 
     const products = buildProducts(rawProducts, todayReports, configs);
@@ -1072,6 +1089,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       await laborSettingsService.set(data);
       const laborSettings = await laborSettingsService.get();
       set({ laborSettings });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    }
+  },
+
+  // ── System Settings ──────────────────────────────────────────────────────
+
+  fetchSystemSettings: async () => {
+    try {
+      const data = await systemSettingsService.get();
+      if (data) {
+        set({ systemSettings: { ...DEFAULT_SYSTEM_SETTINGS, ...data } });
+      }
+    } catch (error) {
+      console.error('fetchSystemSettings error:', error);
+    }
+  },
+
+  updateSystemSettings: async (data: SystemSettings) => {
+    try {
+      await systemSettingsService.set(data);
+      set({ systemSettings: data });
     } catch (error) {
       set({ error: (error as Error).message });
     }

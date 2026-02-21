@@ -10,6 +10,14 @@ import {
   getCurrentMonth,
   calculateDailyIndirectCost,
 } from '../utils/costCalculations';
+import {
+  getAlertSettings,
+  getKPIThreshold,
+  getKPIColor,
+  KPI_COLOR_CLASSES,
+  isWidgetVisible,
+  getWidgetOrder,
+} from '../utils/dashboardConfig';
 import type { ProductionReport, ActivityLog } from '../types';
 import {
   ResponsiveContainer,
@@ -190,6 +198,7 @@ const GaugeChart: React.FC<{ value: number; label: string }> = ({ value, label }
 
 export const AdminDashboard: React.FC = () => {
   const { can } = usePermission();
+  const canViewCosts = can('costs.view');
 
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const _rawLines = useAppStore((s) => s._rawLines);
@@ -200,6 +209,14 @@ export const AdminDashboard: React.FC = () => {
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
   const lineProductConfigs = useAppStore((s) => s.lineProductConfigs);
+  const systemSettings = useAppStore((s) => s.systemSettings);
+
+  const alertCfg = useMemo(() => getAlertSettings(systemSettings), [systemSettings]);
+  const widgetOrder = useMemo(() => getWidgetOrder(systemSettings, 'adminDashboard'), [systemSettings]);
+  const isVisible = useCallback(
+    (widgetId: string) => isWidgetVisible(systemSettings, 'adminDashboard', widgetId),
+    [systemSettings]
+  );
 
   // ── Period filter state (local to this dashboard) ────────────────────────
   const [preset, setPreset] = useState<PeriodPreset>('month');
@@ -504,11 +521,11 @@ export const AdminDashboard: React.FC = () => {
   const alerts = useMemo(() => {
     const result: { type: 'danger' | 'warning' | 'info'; icon: string; message: string }[] = [];
 
-    if (kpis.costVariance > 10) {
+    if (kpis.costVariance > alertCfg.costVarianceThreshold) {
       result.push({
         type: 'danger',
         icon: 'trending_up',
-        message: `التكلفة أعلى من المعيار بنسبة ${kpis.costVariance}%`,
+        message: `التكلفة أعلى من المعيار بنسبة ${kpis.costVariance}% (الحد: ${alertCfg.costVarianceThreshold}%)`,
       });
     }
 
@@ -523,7 +540,7 @@ export const AdminDashboard: React.FC = () => {
       const now = new Date();
       const elapsed = Math.max(1, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
       const expectedProgress = Math.min(100, (elapsed / Math.max(1, elapsed)) * (progress > 0 ? 50 : 30));
-      return progress < expectedProgress * 0.5 && elapsed > 3;
+      return progress < expectedProgress * 0.5 && elapsed > alertCfg.planDelayDays;
     });
     if (delayedPlans.length > 0) {
       result.push({
@@ -533,17 +550,25 @@ export const AdminDashboard: React.FC = () => {
       });
     }
 
-    if (kpis.wastePercent > 5) {
+    if (kpis.wastePercent > alertCfg.wasteThreshold) {
       result.push({
         type: 'danger',
         icon: 'delete_sweep',
-        message: `نسبة الهدر مرتفعة: ${kpis.wastePercent}% (الحد المقبول 5%)`,
+        message: `نسبة الهدر مرتفعة: ${kpis.wastePercent}% (الحد المقبول ${alertCfg.wasteThreshold}%)`,
       });
-    } else if (kpis.wastePercent > 3) {
+    } else if (kpis.wastePercent > alertCfg.wasteThreshold * 0.6) {
       result.push({
         type: 'warning',
         icon: 'warning',
         message: `نسبة الهدر تقترب من الحد: ${kpis.wastePercent}%`,
+      });
+    }
+
+    if (kpis.efficiency > 0 && kpis.efficiency < alertCfg.efficiencyThreshold) {
+      result.push({
+        type: 'warning',
+        icon: 'speed',
+        message: `الكفاءة أقل من الحد المطلوب: ${kpis.efficiency}% (الحد: ${alertCfg.efficiencyThreshold}%)`,
       });
     }
 
@@ -564,7 +589,7 @@ export const AdminDashboard: React.FC = () => {
     }
 
     return result;
-  }, [kpis, productionPlans, planReports, systemUsers]);
+  }, [kpis, productionPlans, planReports, systemUsers, alertCfg]);
 
   // ── Tooltips ──────────────────────────────────────────────────────────────
 
@@ -691,12 +716,13 @@ export const AdminDashboard: React.FC = () => {
       </Card>
 
       {/* ── Operational KPIs ────────────────────────────────────────────────── */}
+      {isVisible('operational_kpis') && (
       <div>
         <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
           <span className="material-icons-round text-base">precision_manufacturing</span>
           مؤشرات تشغيلية
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 ${canViewCosts ? 'xl:grid-cols-5' : 'xl:grid-cols-3'} gap-4`}>
           <KPIBox
             label="إجمالي الإنتاج"
             value={formatNumber(kpis.totalProduction)}
@@ -704,40 +730,58 @@ export const AdminDashboard: React.FC = () => {
             unit="وحدة"
             colorClass="bg-primary/10 text-primary"
           />
-          <KPIBox
-            label="تكلفة الوحدة"
-            value={formatCost(kpis.avgCostPerUnit)}
-            icon="payments"
-            unit="ج.م"
-            colorClass="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400"
-          />
-          <KPIBox
-            label="انحراف التكلفة"
-            value={`${kpis.costVariance > 0 ? '+' : ''}${kpis.costVariance}%`}
-            icon="compare_arrows"
-            colorClass={kpis.costVariance > 5 ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400' : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'}
-            trend={kpis.costVariance > 5 ? 'أعلى من المعيار' : 'ضمن المعيار'}
-            trendUp={kpis.costVariance <= 5}
-          />
-          <KPIBox
-            label="نسبة الهدر"
-            value={`${kpis.wastePercent}%`}
-            icon="delete_sweep"
-            colorClass={kpis.wastePercent > 5 ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400' : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'}
-          />
-          <KPIBox
-            label="الكفاءة العامة"
-            value={`${kpis.efficiency}%`}
-            icon="speed"
-            colorClass="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-            trend={kpis.efficiency >= 90 ? 'ممتاز' : kpis.efficiency >= 75 ? 'جيد' : 'يحتاج تحسين'}
-            trendUp={kpis.efficiency >= 75}
-          />
+          {canViewCosts && (
+            <KPIBox
+              label="تكلفة الوحدة"
+              value={formatCost(kpis.avgCostPerUnit)}
+              icon="payments"
+              unit="ج.م"
+              colorClass="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400"
+            />
+          )}
+          {canViewCosts && (() => {
+            const cvColor = getKPIColor(Math.abs(kpis.costVariance), getKPIThreshold(systemSettings, 'costVariance'), true);
+            return (
+              <KPIBox
+                label="انحراف التكلفة"
+                value={`${kpis.costVariance > 0 ? '+' : ''}${kpis.costVariance}%`}
+                icon="compare_arrows"
+                colorClass={KPI_COLOR_CLASSES[cvColor]}
+                trend={cvColor === 'good' ? 'ضمن المعيار' : 'أعلى من المعيار'}
+                trendUp={cvColor === 'good'}
+              />
+            );
+          })()}
+          {(() => {
+            const wasteColor = getKPIColor(kpis.wastePercent, getKPIThreshold(systemSettings, 'wasteRatio'), true);
+            return (
+              <KPIBox
+                label="نسبة الهدر"
+                value={`${kpis.wastePercent}%`}
+                icon="delete_sweep"
+                colorClass={KPI_COLOR_CLASSES[wasteColor]}
+              />
+            );
+          })()}
+          {(() => {
+            const effColor = getKPIColor(kpis.efficiency, getKPIThreshold(systemSettings, 'efficiency'), false);
+            return (
+              <KPIBox
+                label="الكفاءة العامة"
+                value={`${kpis.efficiency}%`}
+                icon="speed"
+                colorClass={KPI_COLOR_CLASSES[effColor]}
+                trend={effColor === 'good' ? 'ممتاز' : effColor === 'warning' ? 'جيد' : 'يحتاج تحسين'}
+                trendUp={effColor !== 'danger'}
+              />
+            );
+          })()}
         </div>
       </div>
+      )}
 
       {/* ── System KPIs ─────────────────────────────────────────────────────── */}
-      <div>
+      {isVisible('system_kpis') && <div>
         <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
           <span className="material-icons-round text-base">computer</span>
           مؤشرات النظام
@@ -767,19 +811,24 @@ export const AdminDashboard: React.FC = () => {
             icon="event_note"
             colorClass="bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400"
           />
-          <KPIBox
-            label="اكتمال التخصيص"
-            value={`${costAllocationCompletion}%`}
-            icon="account_balance"
-            colorClass={costAllocationCompletion >= 80 ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'}
-            trend={costAllocationCompletion >= 100 ? 'مكتمل' : 'غير مكتمل'}
-            trendUp={costAllocationCompletion >= 80}
-          />
+          {canViewCosts && (() => {
+            const caColor = getKPIColor(costAllocationCompletion, getKPIThreshold(systemSettings, 'costAllocation'), false);
+            return (
+              <KPIBox
+                label="اكتمال التخصيص"
+                value={`${costAllocationCompletion}%`}
+                icon="account_balance"
+                colorClass={KPI_COLOR_CLASSES[caColor]}
+                trend={costAllocationCompletion >= 100 ? 'مكتمل' : 'غير مكتمل'}
+                trendUp={caColor !== 'danger'}
+              />
+            );
+          })()}
         </div>
-      </div>
+      </div>}
 
       {/* ── Alerts ──────────────────────────────────────────────────────────── */}
-      {alerts.length > 0 && (
+      {isVisible('alerts') && alerts.length > 0 && (
         <div className="space-y-2">
           {alerts.map((alert, i) => (
             <div
@@ -802,7 +851,7 @@ export const AdminDashboard: React.FC = () => {
       {/* ── Production Health Score + Charts ─────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Health Score Gauge */}
-        <Card>
+        {isVisible('health_score') && <Card>
           <div className="flex items-center gap-2 mb-4">
             <span className="material-icons-round text-rose-500">monitor_heart</span>
             <h3 className="text-lg font-bold">صحة الإنتاج</h3>
@@ -833,55 +882,57 @@ export const AdminDashboard: React.FC = () => {
               </div>
             ))}
           </div>
-        </Card>
+        </Card>}
 
         {/* Cost Breakdown Pie */}
-        <Card>
-          <div className="flex items-center gap-2 mb-4">
-            <span className="material-icons-round text-amber-500">pie_chart</span>
-            <h3 className="text-lg font-bold">توزيع التكاليف</h3>
-          </div>
-          {costPieData.length > 0 ? (
-            <div style={{ direction: 'ltr' }} className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={costPieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={45}
-                    outerRadius={80}
-                    paddingAngle={4}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  >
-                    {costPieData.map((_, idx) => (
-                      <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<PieTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
+        {isVisible('cost_breakdown') && canViewCosts && (
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="material-icons-round text-amber-500">pie_chart</span>
+              <h3 className="text-lg font-bold">توزيع التكاليف</h3>
             </div>
-          ) : (
-            <div className="h-56 flex items-center justify-center text-slate-400 text-sm">
-              لا توجد بيانات تكاليف
-            </div>
-          )}
-          {costPieData.length > 0 && (
-            <div className="mt-2 flex justify-center gap-6 text-sm">
-              {costPieData.map((d, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[i] }}></span>
-                  <span className="text-slate-600 dark:text-slate-300 text-xs">{d.name}: <strong>{formatCost(d.value)}</strong> ج.م</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+            {costPieData.length > 0 ? (
+              <div style={{ direction: 'ltr' }} className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={costPieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={80}
+                      paddingAngle={4}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {costPieData.map((_, idx) => (
+                        <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<PieTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-56 flex items-center justify-center text-slate-400 text-sm">
+                لا توجد بيانات تكاليف
+              </div>
+            )}
+            {costPieData.length > 0 && (
+              <div className="mt-2 flex justify-center gap-6 text-sm">
+                {costPieData.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[i] }}></span>
+                    <span className="text-slate-600 dark:text-slate-300 text-xs">{d.name}: <strong>{formatCost(d.value)}</strong> ج.م</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* Roles Distribution Pie */}
-        <Card>
+        {isVisible('roles_distribution') && <Card>
           <div className="flex items-center gap-2 mb-4">
             <span className="material-icons-round text-indigo-500">admin_panel_settings</span>
             <h3 className="text-lg font-bold">توزيع الأدوار</h3>
@@ -923,46 +974,48 @@ export const AdminDashboard: React.FC = () => {
               ))}
             </div>
           )}
-        </Card>
+        </Card>}
       </div>
 
       {/* ── Production vs Cost Chart (full width) ────────────────────────────── */}
-      <Card>
-        <div className="flex items-center gap-2 mb-4">
-          <span className="material-icons-round text-primary">show_chart</span>
-          <h3 className="text-lg font-bold">الإنتاج مقابل تكلفة الوحدة</h3>
-        </div>
-        {dailyChartData.length > 0 ? (
-          <div style={{ direction: 'ltr' }} className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={dailyChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
-                <Tooltip content={<ChartTooltip />} />
-                <Legend
-                  formatter={(val: string) =>
-                    val === 'production' ? 'الإنتاج' : 'تكلفة الوحدة'
-                  }
-                />
-                <Bar yAxisId="left" dataKey="production" name="production" fill="#1392ec" radius={[4, 4, 0, 0]} barSize={20} />
-                <Line yAxisId="right" type="monotone" dataKey="costPerUnit" name="costPerUnit" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
+      {isVisible('production_cost_chart') && canViewCosts && (
+        <Card>
+          <div className="flex items-center gap-2 mb-4">
+            <span className="material-icons-round text-primary">show_chart</span>
+            <h3 className="text-lg font-bold">الإنتاج مقابل تكلفة الوحدة</h3>
           </div>
-        ) : (
-          <div className="h-72 flex items-center justify-center text-slate-400 text-sm">
-            <span className="material-icons-round ml-2">bar_chart</span>
-            لا توجد بيانات للفترة المحددة
-          </div>
-        )}
-      </Card>
+          {dailyChartData.length > 0 ? (
+            <div style={{ direction: 'ltr' }} className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={dailyChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Legend
+                    formatter={(val: string) =>
+                      val === 'production' ? 'الإنتاج' : 'تكلفة الوحدة'
+                    }
+                  />
+                  <Bar yAxisId="left" dataKey="production" name="production" fill="#1392ec" radius={[4, 4, 0, 0]} barSize={20} />
+                  <Line yAxisId="right" type="monotone" dataKey="costPerUnit" name="costPerUnit" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-72 flex items-center justify-center text-slate-400 text-sm">
+              <span className="material-icons-round ml-2">bar_chart</span>
+              لا توجد بيانات للفترة المحددة
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* ── System Monitoring Section ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Activity Log Snapshot */}
-        <Card>
+        {isVisible('activity_log') && <Card>
           <div className="flex items-center gap-2 mb-4">
             <span className="material-icons-round text-blue-500">history</span>
             <h3 className="text-lg font-bold">آخر النشاطات</h3>
@@ -1003,67 +1056,69 @@ export const AdminDashboard: React.FC = () => {
               {systemLoading ? 'جاري التحميل...' : 'لا توجد نشاطات مسجلة'}
             </div>
           )}
-        </Card>
+        </Card>}
 
         {/* Cost Centers Summary */}
-        <Card>
-          <div className="flex items-center gap-2 mb-4">
-            <span className="material-icons-round text-emerald-500">account_balance</span>
-            <h3 className="text-lg font-bold">ملخص مراكز التكلفة</h3>
-            <span className="text-xs text-slate-400 font-medium mr-auto">الشهر الحالي</span>
-          </div>
-          {costCentersSummary.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700">
-                    <th className="text-right py-3 px-3 font-bold text-slate-500 text-xs">المركز</th>
-                    <th className="text-right py-3 px-3 font-bold text-slate-500 text-xs">النوع</th>
-                    <th className="text-right py-3 px-3 font-bold text-slate-500 text-xs">المبلغ</th>
-                    <th className="text-center py-3 px-3 font-bold text-slate-500 text-xs">التخصيص</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {costCentersSummary.map((cc, i) => (
-                    <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                      <td className="py-2.5 px-3 font-bold text-sm">{cc.name}</td>
-                      <td className="py-2.5 px-3">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                          cc.type === 'indirect'
-                            ? 'bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
-                            : 'bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400'
-                        }`}>
-                          {cc.type === 'indirect' ? 'غير مباشر' : 'مباشر'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-sm font-bold text-slate-600 dark:text-slate-300">
-                        {cc.amount > 0 ? `${formatCost(cc.amount)} ج.م` : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        {cc.allocated ? (
-                          <span className="material-icons-round text-emerald-500 text-sm">check_circle</span>
-                        ) : (
-                          <span className="material-icons-round text-slate-300 dark:text-slate-600 text-sm">radio_button_unchecked</span>
-                        )}
-                      </td>
+        {isVisible('cost_centers_summary') && canViewCosts && (
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="material-icons-round text-emerald-500">account_balance</span>
+              <h3 className="text-lg font-bold">ملخص مراكز التكلفة</h3>
+              <span className="text-xs text-slate-400 font-medium mr-auto">الشهر الحالي</span>
+            </div>
+            {costCentersSummary.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-700">
+                      <th className="text-right py-3 px-3 font-bold text-slate-500 text-xs">المركز</th>
+                      <th className="text-right py-3 px-3 font-bold text-slate-500 text-xs">النوع</th>
+                      <th className="text-right py-3 px-3 font-bold text-slate-500 text-xs">المبلغ</th>
+                      <th className="text-center py-3 px-3 font-bold text-slate-500 text-xs">التخصيص</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="py-8 text-center text-slate-400 text-sm">
-              <span className="material-icons-round text-3xl mb-2 block opacity-30">account_balance</span>
-              لا توجد مراكز تكلفة
-            </div>
-          )}
-        </Card>
+                  </thead>
+                  <tbody>
+                    {costCentersSummary.map((cc, i) => (
+                      <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                        <td className="py-2.5 px-3 font-bold text-sm">{cc.name}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            cc.type === 'indirect'
+                              ? 'bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
+                              : 'bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400'
+                          }`}>
+                            {cc.type === 'indirect' ? 'غير مباشر' : 'مباشر'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-sm font-bold text-slate-600 dark:text-slate-300">
+                          {cc.amount > 0 ? `${formatCost(cc.amount)} ج.م` : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          {cc.allocated ? (
+                            <span className="material-icons-round text-emerald-500 text-sm">check_circle</span>
+                          ) : (
+                            <span className="material-icons-round text-slate-300 dark:text-slate-600 text-sm">radio_button_unchecked</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-slate-400 text-sm">
+                <span className="material-icons-round text-3xl mb-2 block opacity-30">account_balance</span>
+                لا توجد مراكز تكلفة
+              </div>
+            )}
+          </Card>
+        )}
       </div>
 
       {/* ── Top Lines & Products ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Top 5 Lines */}
-        <Card>
+        {isVisible('top_lines') && <Card>
           <div className="flex items-center gap-2 mb-4">
             <span className="material-icons-round text-emerald-500">precision_manufacturing</span>
             <h3 className="text-lg font-bold">أعلى 5 خطوط إنتاج</h3>
@@ -1085,10 +1140,10 @@ export const AdminDashboard: React.FC = () => {
               لا توجد بيانات
             </div>
           )}
-        </Card>
+        </Card>}
 
         {/* Top 5 Products */}
-        <Card>
+        {isVisible('top_products') && <Card>
           <div className="flex items-center gap-2 mb-4">
             <span className="material-icons-round text-violet-500">inventory_2</span>
             <h3 className="text-lg font-bold">أعلى 5 منتجات</h3>
@@ -1110,11 +1165,11 @@ export const AdminDashboard: React.FC = () => {
               لا توجد بيانات
             </div>
           )}
-        </Card>
+        </Card>}
       </div>
 
       {/* ── Product Performance Table ────────────────────────────────────────── */}
-      <Card>
+      {isVisible('product_performance') && <Card>
         <div className="flex items-center gap-2 mb-4">
           <span className="material-icons-round text-primary">table_chart</span>
           <h3 className="text-lg font-bold">ملخص أداء المنتجات</h3>
@@ -1155,7 +1210,7 @@ export const AdminDashboard: React.FC = () => {
         ) : (
           <div className="py-8 text-center text-slate-400 text-sm">لا توجد بيانات</div>
         )}
-      </Card>
+      </Card>}
     </div>
   );
 };

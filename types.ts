@@ -169,6 +169,50 @@ export interface LaborSettings {
   hourlyRate: number;
 }
 
+// ─── System Settings (system_settings/global) ───────────────────────────────
+
+export interface WidgetConfig {
+  id: string;
+  visible: boolean;
+}
+
+export interface AlertSettings {
+  wasteThreshold: number;
+  costVarianceThreshold: number;
+  efficiencyThreshold: number;
+  planDelayDays: number;
+  overProductionThreshold: number;
+}
+
+export interface KPIThreshold {
+  good: number;
+  warning: number;
+}
+
+export type PaperSize = 'a4' | 'a5' | 'thermal';
+export type PaperOrientation = 'portrait' | 'landscape';
+
+export interface PrintTemplateSettings {
+  logoUrl: string;
+  headerText: string;
+  footerText: string;
+  primaryColor: string;
+  paperSize: PaperSize;
+  orientation: PaperOrientation;
+  copies: number;
+  decimalPlaces: number;
+  showWaste: boolean;
+  showSupervisor: boolean;
+  showQRCode: boolean;
+}
+
+export interface SystemSettings {
+  dashboardWidgets: Record<string, WidgetConfig[]>;
+  alertSettings: AlertSettings;
+  kpiThresholds: Record<string, KPIThreshold>;
+  printTemplate: PrintTemplateSettings;
+}
+
 // ─── Dynamic Roles & Permissions ─────────────────────────────────────────────
 
 /** @deprecated use FirestoreRole + dynamic permissions instead */

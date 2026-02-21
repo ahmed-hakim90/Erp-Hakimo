@@ -49,6 +49,7 @@ export const Reports: React.FC = () => {
   const costCenterValues = useAppStore((s) => s.costCenterValues);
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
 
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
@@ -130,7 +131,6 @@ export const Reports: React.FC = () => {
   // ── Print handlers ─────────────────────────────────────────────────────────
 
   const handleBulkPrint = useReactToPrint({ contentRef: bulkPrintRef });
-
   const handleSinglePrint = useReactToPrint({ contentRef: singlePrintRef });
 
   const buildReportRow = useCallback(
@@ -246,7 +246,11 @@ export const Reports: React.FC = () => {
     if (!bulkPrintRef.current) return;
     setExporting(true);
     try {
-      await exportToPDF(bulkPrintRef.current, `تقارير-الإنتاج-${startDate}`);
+      await exportToPDF(bulkPrintRef.current, `تقارير-الإنتاج-${startDate}`, {
+        paperSize: printTemplate?.paperSize,
+        orientation: printTemplate?.orientation,
+        copies: printTemplate?.copies,
+      });
     } finally {
       setExporting(false);
     }
@@ -338,6 +342,10 @@ export const Reports: React.FC = () => {
               >
                 <span className="material-icons-round text-sm">download</span>
                 <span className="hidden sm:inline">Excel</span>
+              </Button>
+              <Button variant="outline" onClick={() => handleBulkPrint()}>
+                <span className="material-icons-round text-sm">print</span>
+                <span className="hidden sm:inline">طباعة</span>
               </Button>
               <Button variant="outline" disabled={exporting} onClick={handlePDF}>
                 {exporting ? (
@@ -554,8 +562,9 @@ export const Reports: React.FC = () => {
           subtitle={`${printRows.length} تقرير`}
           rows={printRows}
           totals={printTotals}
+          printSettings={printTemplate}
         />
-        <SingleReportPrint ref={singlePrintRef} report={printReport} />
+        <SingleReportPrint ref={singlePrintRef} report={printReport} printSettings={printTemplate} />
       </div>
 
       {/* ══ Create / Edit Report Modal ══ */}
@@ -885,6 +894,7 @@ export const Reports: React.FC = () => {
           </div>
         </div>
       )}
+
     </div>
   );
 };

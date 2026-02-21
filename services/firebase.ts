@@ -5,6 +5,7 @@
  */
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 import {
   getAuth,
   Auth,
@@ -33,18 +34,20 @@ const isConfigured =
 let app: FirebaseApp;
 let db: Firestore;
 let auth: Auth;
+let storage: FirebaseStorage;
 
 if (isConfigured) {
   app = initializeApp(firebaseConfig);
   db = getFirestore(app);
   auth = getAuth(app);
+  storage = getStorage(app);
 } else {
   console.warn(
     '⚠ Firebase not configured. Add VITE_FIREBASE_* variables to .env.local'
   );
 }
 
-export { db, auth, isConfigured };
+export { db, auth, storage, isConfigured };
 
 /**
  * Sign in with email and password — returns the UserCredential.

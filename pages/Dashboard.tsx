@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { KPIBox, Card, Badge, Button, LoadingSkeleton } from '../components/UI';
 import { SupervisorDashboard } from '../components/SupervisorDashboard';
@@ -15,6 +15,12 @@ import { buildLineCosts, buildProductCosts, buildProductAvgCost, formatCost, Pro
 import { ProductionLineStatus, ProductionReport } from '../types';
 import { usePermission } from '../utils/permissions';
 import { reportService } from '../services/reportService';
+import {
+  getKPIThreshold,
+  getKPIColor,
+  KPI_COLOR_CLASSES,
+  isWidgetVisible,
+} from '../utils/dashboardConfig';
 import {
   ComposedChart,
   Line,
@@ -74,10 +80,16 @@ export const Dashboard: React.FC = () => {
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
   const uid = useAppStore((s) => s.uid);
+  const systemSettings = useAppStore((s) => s.systemSettings);
   const navigate = useNavigate();
 
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
+
+  const isVisible = useCallback(
+    (widgetId: string) => isWidgetVisible(systemSettings, 'dashboard', widgetId),
+    [systemSettings]
+  );
 
   const linkedSupervisor = useMemo(
     () => _rawSupervisors.find((s) => s.userId === uid),
@@ -302,6 +314,7 @@ export const Dashboard: React.FC = () => {
         <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium text-sm sm:text-base">نظرة عامة شاملة على أداء المصنع اليوم وتتبع حقيقي لخطوط الإنتاج.</p>
       </div> */}
 
+      {isVisible('kpi_row') && (
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
         {/* Production Card — Daily & Monthly */}
         <div className="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm sm:col-span-2 md:col-span-1">
@@ -324,12 +337,19 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
         </div>
-        <KPIBox label="معدل الكفاءة" value={`${kpis.efficiency}%`} icon="bolt" trend="" trendUp={true} colorClass="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400" />
-        <KPIBox label="نسبة الهالك" value={`${kpis.wasteRatio}%`} icon="delete_sweep" trend="" trendUp={true} colorClass="bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400" />
+        {(() => {
+          const effColor = getKPIColor(kpis.efficiency, getKPIThreshold(systemSettings, 'efficiency'), false);
+          return <KPIBox label="معدل الكفاءة" value={`${kpis.efficiency}%`} icon="bolt" trend="" trendUp={true} colorClass={KPI_COLOR_CLASSES[effColor]} />;
+        })()}
+        {(() => {
+          const wasteColor = getKPIColor(kpis.wasteRatio, getKPIThreshold(systemSettings, 'wasteRatio'), true);
+          return <KPIBox label="نسبة الهالك" value={`${kpis.wasteRatio}%`} icon="delete_sweep" trend="" trendUp={wasteColor === 'good'} colorClass={KPI_COLOR_CLASSES[wasteColor]} />;
+        })()}
       </div>
+      )}
 
       {/* ── Product Cost Analysis Section ── */}
-      {canViewCosts && (
+      {isVisible('product_cost_analysis') && canViewCosts && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
           <div className="px-5 sm:px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -464,7 +484,7 @@ export const Dashboard: React.FC = () => {
       )}
 
       {/* ── Daily Production vs Cost Chart ── */}
-      {canViewCosts && (
+      {isVisible('daily_cost_chart') && canViewCosts && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
           <div className="px-5 sm:px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -586,7 +606,7 @@ export const Dashboard: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-        <div className="lg:col-span-2 space-y-5 sm:space-y-6">
+        {isVisible('production_lines') && <div className="lg:col-span-2 space-y-5 sm:space-y-6">
           <div className="flex items-center justify-between px-2 gap-3">
             <h3 className="text-lg sm:text-xl font-bold flex items-center gap-3">
               <span className="w-2 h-7 bg-primary rounded-full shrink-0"></span>
@@ -674,9 +694,9 @@ export const Dashboard: React.FC = () => {
               </Card>
             ))}
           </div>
-        </div>
+        </div>}
 
-        <div className="lg:col-span-1">
+        {isVisible('smart_planning') && <div className="lg:col-span-1">
           <Card className="sticky top-24 border-primary/20 shadow-xl shadow-primary/5" title="التخطيط الذكي">
             <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
               <div className="space-y-2">
@@ -810,7 +830,7 @@ export const Dashboard: React.FC = () => {
               )}
             </div>
           </Card>
-        </div>
+        </div>}
       </div>
 
       {/* ── Set Target Modal ── */}

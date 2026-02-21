@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, SearchableSelect } from '../components/UI';
@@ -15,6 +15,7 @@ export const QuickAction: React.FC = () => {
   const _rawLines = useAppStore((s) => s._rawLines);
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const supervisors = useAppStore((s) => s.supervisors);
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
 
   const [supervisorId, setSupervisorId] = useState('');
   const [lineId, setLineId] = useState('');
@@ -98,7 +99,11 @@ export const QuickAction: React.FC = () => {
     if (!printRef.current) return;
     setExporting(true);
     try {
-      await exportToPDF(printRef.current, `تقرير-سريع-${today}`);
+      await exportToPDF(printRef.current, `تقرير-سريع-${today}`, {
+        paperSize: printTemplate?.paperSize,
+        orientation: printTemplate?.orientation,
+        copies: printTemplate?.copies,
+      });
     } finally {
       setExporting(false);
     }
@@ -357,9 +362,9 @@ export const QuickAction: React.FC = () => {
         </div>
       )}
 
-      {/* Hidden print component — same design as Reports page */}
+      {/* Hidden print component */}
       <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
-        <SingleReportPrint ref={printRef} report={printReport} />
+        <SingleReportPrint ref={printRef} report={printReport} printSettings={printTemplate} />
       </div>
     </div>
   );

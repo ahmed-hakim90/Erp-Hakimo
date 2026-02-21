@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { usePermission } from '../utils/permissions';
 import { Card, KPIBox, Badge, LoadingSkeleton } from '../components/UI';
@@ -10,6 +10,13 @@ import {
   calculateDailyLaborCost,
   calculateDailyIndirectCost,
 } from '../utils/costCalculations';
+import {
+  getAlertSettings,
+  getKPIThreshold,
+  getKPIColor,
+  KPI_COLOR_CLASSES,
+  isWidgetVisible,
+} from '../utils/dashboardConfig';
 import type { ProductionReport } from '../types';
 import {
   ResponsiveContainer,
@@ -71,6 +78,7 @@ const PRESET_LABELS: Record<PeriodPreset, string> = {
 
 export const FactoryManagerDashboard: React.FC = () => {
   const { can } = usePermission();
+  const canViewCosts = can('costs.view');
 
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const _rawLines = useAppStore((s) => s._rawLines);
@@ -81,6 +89,13 @@ export const FactoryManagerDashboard: React.FC = () => {
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
   const lineProductConfigs = useAppStore((s) => s.lineProductConfigs);
+  const systemSettings = useAppStore((s) => s.systemSettings);
+
+  const alertCfg = useMemo(() => getAlertSettings(systemSettings), [systemSettings]);
+  const isVisible = useCallback(
+    (widgetId: string) => isWidgetVisible(systemSettings, 'factoryDashboard', widgetId),
+    [systemSettings]
+  );
 
   const [preset, setPreset] = useState<PeriodPreset>('month');
   const [customStart, setCustomStart] = useState('');
@@ -291,11 +306,11 @@ export const FactoryManagerDashboard: React.FC = () => {
   const alerts = useMemo(() => {
     const result: { type: 'danger' | 'warning' | 'info'; icon: string; message: string }[] = [];
 
-    if (kpis.costVariance > 10) {
+    if (kpis.costVariance > alertCfg.costVarianceThreshold) {
       result.push({
         type: 'danger',
         icon: 'trending_up',
-        message: `التكلفة أعلى من المعيار بنسبة ${kpis.costVariance}%`,
+        message: `التكلفة أعلى من المعيار بنسبة ${kpis.costVariance}% (الحد: ${alertCfg.costVarianceThreshold}%)`,
       });
     }
 
@@ -310,7 +325,7 @@ export const FactoryManagerDashboard: React.FC = () => {
       const now = new Date();
       const elapsed = Math.max(1, Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
       const expectedProgress = Math.min(100, (elapsed / Math.max(1, elapsed)) * (progress > 0 ? 50 : 30));
-      return progress < expectedProgress * 0.5 && elapsed > 3;
+      return progress < expectedProgress * 0.5 && elapsed > alertCfg.planDelayDays;
     });
     if (delayedPlans.length > 0) {
       result.push({
@@ -320,17 +335,25 @@ export const FactoryManagerDashboard: React.FC = () => {
       });
     }
 
-    if (kpis.wastePercent > 5) {
+    if (kpis.wastePercent > alertCfg.wasteThreshold) {
       result.push({
         type: 'danger',
         icon: 'delete_sweep',
-        message: `نسبة الهدر مرتفعة: ${kpis.wastePercent}% (الحد المقبول 5%)`,
+        message: `نسبة الهدر مرتفعة: ${kpis.wastePercent}% (الحد المقبول ${alertCfg.wasteThreshold}%)`,
       });
-    } else if (kpis.wastePercent > 3) {
+    } else if (kpis.wastePercent > alertCfg.wasteThreshold * 0.6) {
       result.push({
         type: 'warning',
         icon: 'warning',
         message: `نسبة الهدر تقترب من الحد: ${kpis.wastePercent}%`,
+      });
+    }
+
+    if (kpis.efficiency > 0 && kpis.efficiency < alertCfg.efficiencyThreshold) {
+      result.push({
+        type: 'warning',
+        icon: 'speed',
+        message: `الكفاءة أقل من الحد المطلوب: ${kpis.efficiency}% (الحد: ${alertCfg.efficiencyThreshold}%)`,
       });
     }
 
@@ -343,7 +366,7 @@ export const FactoryManagerDashboard: React.FC = () => {
     }
 
     return result;
-  }, [kpis, productionPlans, planReports]);
+  }, [kpis, productionPlans, planReports, alertCfg]);
 
   // ── Custom Tooltip ──────────────────────────────────────────────────────────
 
@@ -458,7 +481,8 @@ export const FactoryManagerDashboard: React.FC = () => {
       </Card>
 
       {/* ── KPI Section ────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      {isVisible('kpis') && (
+      <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 ${canViewCosts ? 'xl:grid-cols-6' : 'xl:grid-cols-4'} gap-4`}>
         <KPIBox
           label="إجمالي الإنتاج"
           value={formatNumber(kpis.totalProduction)}
@@ -466,45 +490,68 @@ export const FactoryManagerDashboard: React.FC = () => {
           unit="وحدة"
           colorClass="bg-primary/10 text-primary"
         />
-        <KPIBox
-          label="متوسط تكلفة الوحدة"
-          value={formatCost(kpis.avgCostPerUnit)}
-          icon="payments"
-          unit="ج.م"
-          colorClass="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400"
-        />
-        <KPIBox
-          label="انحراف التكلفة"
-          value={`${kpis.costVariance > 0 ? '+' : ''}${kpis.costVariance}%`}
-          icon="compare_arrows"
-          colorClass={kpis.costVariance > 5 ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400' : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'}
-          trend={kpis.costVariance > 5 ? 'أعلى من المعيار' : 'ضمن المعيار'}
-          trendUp={kpis.costVariance <= 5}
-        />
-        <KPIBox
-          label="نسبة الهدر"
-          value={`${kpis.wastePercent}%`}
-          icon="delete_sweep"
-          colorClass={kpis.wastePercent > 5 ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400' : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'}
-        />
-        <KPIBox
-          label="الكفاءة العامة"
-          value={`${kpis.efficiency}%`}
-          icon="speed"
-          colorClass="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-          trend={kpis.efficiency >= 90 ? 'ممتاز' : kpis.efficiency >= 75 ? 'جيد' : 'يحتاج تحسين'}
-          trendUp={kpis.efficiency >= 75}
-        />
-        <KPIBox
-          label="تحقيق الخطط"
-          value={`${kpis.planAchievementRate}%`}
-          icon="fact_check"
-          colorClass="bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400"
-        />
+        {canViewCosts && (
+          <KPIBox
+            label="متوسط تكلفة الوحدة"
+            value={formatCost(kpis.avgCostPerUnit)}
+            icon="payments"
+            unit="ج.م"
+            colorClass="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400"
+          />
+        )}
+        {canViewCosts && (() => {
+          const cvColor = getKPIColor(Math.abs(kpis.costVariance), getKPIThreshold(systemSettings, 'costVariance'), true);
+          return (
+            <KPIBox
+              label="انحراف التكلفة"
+              value={`${kpis.costVariance > 0 ? '+' : ''}${kpis.costVariance}%`}
+              icon="compare_arrows"
+              colorClass={KPI_COLOR_CLASSES[cvColor]}
+              trend={cvColor === 'good' ? 'ضمن المعيار' : 'أعلى من المعيار'}
+              trendUp={cvColor === 'good'}
+            />
+          );
+        })()}
+        {(() => {
+          const wasteColor = getKPIColor(kpis.wastePercent, getKPIThreshold(systemSettings, 'wasteRatio'), true);
+          return (
+            <KPIBox
+              label="نسبة الهدر"
+              value={`${kpis.wastePercent}%`}
+              icon="delete_sweep"
+              colorClass={KPI_COLOR_CLASSES[wasteColor]}
+            />
+          );
+        })()}
+        {(() => {
+          const effColor = getKPIColor(kpis.efficiency, getKPIThreshold(systemSettings, 'efficiency'), false);
+          return (
+            <KPIBox
+              label="الكفاءة العامة"
+              value={`${kpis.efficiency}%`}
+              icon="speed"
+              colorClass={KPI_COLOR_CLASSES[effColor]}
+              trend={effColor === 'good' ? 'ممتاز' : effColor === 'warning' ? 'جيد' : 'يحتاج تحسين'}
+              trendUp={effColor !== 'danger'}
+            />
+          );
+        })()}
+        {(() => {
+          const paColor = getKPIColor(kpis.planAchievementRate, getKPIThreshold(systemSettings, 'planAchievement'), false);
+          return (
+            <KPIBox
+              label="تحقيق الخطط"
+              value={`${kpis.planAchievementRate}%`}
+              icon="fact_check"
+              colorClass={KPI_COLOR_CLASSES[paColor]}
+            />
+          );
+        })()}
       </div>
+      )}
 
       {/* ── Alerts ─────────────────────────────────────────────────────────────── */}
-      {alerts.length > 0 && (
+      {isVisible('alerts') && alerts.length > 0 && (
         <div className="space-y-2">
           {alerts.map((alert, i) => (
             <div
@@ -527,85 +574,89 @@ export const FactoryManagerDashboard: React.FC = () => {
       {/* ── Charts Grid ────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Chart 1: Production vs Cost Per Unit */}
-        <Card className="lg:col-span-2">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="material-icons-round text-primary">show_chart</span>
-            <h3 className="text-lg font-bold">الإنتاج مقابل تكلفة الوحدة</h3>
-          </div>
-          {dailyChartData.length > 0 ? (
-            <div style={{ direction: 'ltr' }} className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={dailyChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Legend
-                    formatter={(val: string) =>
-                      val === 'production' ? 'الإنتاج' : 'تكلفة الوحدة'
-                    }
-                  />
-                  <Bar yAxisId="left" dataKey="production" name="production" fill="#1392ec" radius={[4, 4, 0, 0]} barSize={20} />
-                  <Line yAxisId="right" type="monotone" dataKey="costPerUnit" name="costPerUnit" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
+        {isVisible('production_cost_chart') && canViewCosts && (
+          <Card className="lg:col-span-2">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="material-icons-round text-primary">show_chart</span>
+              <h3 className="text-lg font-bold">الإنتاج مقابل تكلفة الوحدة</h3>
             </div>
-          ) : (
-            <div className="h-72 flex items-center justify-center text-slate-400 text-sm">
-              <span className="material-icons-round ml-2">bar_chart</span>
-              لا توجد بيانات للفترة المحددة
-            </div>
-          )}
-        </Card>
+            {dailyChartData.length > 0 ? (
+              <div style={{ direction: 'ltr' }} className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={dailyChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Legend
+                      formatter={(val: string) =>
+                        val === 'production' ? 'الإنتاج' : 'تكلفة الوحدة'
+                      }
+                    />
+                    <Bar yAxisId="left" dataKey="production" name="production" fill="#1392ec" radius={[4, 4, 0, 0]} barSize={20} />
+                    <Line yAxisId="right" type="monotone" dataKey="costPerUnit" name="costPerUnit" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-72 flex items-center justify-center text-slate-400 text-sm">
+                <span className="material-icons-round ml-2">bar_chart</span>
+                لا توجد بيانات للفترة المحددة
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* Chart 2: Cost Breakdown Pie */}
-        <Card>
-          <div className="flex items-center gap-2 mb-4">
-            <span className="material-icons-round text-amber-500">pie_chart</span>
-            <h3 className="text-lg font-bold">توزيع التكاليف</h3>
-          </div>
-          {costPieData.length > 0 ? (
-            <div style={{ direction: 'ltr' }} className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={costPieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={90}
-                    paddingAngle={4}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  >
-                    {costPieData.map((_, idx) => (
-                      <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<PieTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
+        {isVisible('cost_breakdown') && canViewCosts && (
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="material-icons-round text-amber-500">pie_chart</span>
+              <h3 className="text-lg font-bold">توزيع التكاليف</h3>
             </div>
-          ) : (
-            <div className="h-64 flex items-center justify-center text-slate-400 text-sm">
-              لا توجد بيانات تكاليف
-            </div>
-          )}
-          {costPieData.length > 0 && (
-            <div className="mt-2 flex justify-center gap-6 text-sm">
-              {costPieData.map((d, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[i] }}></span>
-                  <span className="text-slate-600 dark:text-slate-300">{d.name}: <strong>{formatCost(d.value)}</strong> ج.م</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+            {costPieData.length > 0 ? (
+              <div style={{ direction: 'ltr' }} className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={costPieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={90}
+                      paddingAngle={4}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {costPieData.map((_, idx) => (
+                        <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<PieTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-400 text-sm">
+                لا توجد بيانات تكاليف
+              </div>
+            )}
+            {costPieData.length > 0 && (
+              <div className="mt-2 flex justify-center gap-6 text-sm">
+                {costPieData.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[i] }}></span>
+                    <span className="text-slate-600 dark:text-slate-300">{d.name}: <strong>{formatCost(d.value)}</strong> ج.م</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* Chart 3: Top 5 Lines */}
-        <Card>
+        {isVisible('top_lines') && <Card>
           <div className="flex items-center gap-2 mb-4">
             <span className="material-icons-round text-emerald-500">precision_manufacturing</span>
             <h3 className="text-lg font-bold">أعلى 5 خطوط إنتاج</h3>
@@ -627,10 +678,10 @@ export const FactoryManagerDashboard: React.FC = () => {
               لا توجد بيانات
             </div>
           )}
-        </Card>
+        </Card>}
 
         {/* Chart 4: Top 5 Products */}
-        <Card>
+        {isVisible('top_products') && <Card>
           <div className="flex items-center gap-2 mb-4">
             <span className="material-icons-round text-violet-500">inventory_2</span>
             <h3 className="text-lg font-bold">أعلى 5 منتجات</h3>
@@ -652,10 +703,10 @@ export const FactoryManagerDashboard: React.FC = () => {
               لا توجد بيانات
             </div>
           )}
-        </Card>
+        </Card>}
 
         {/* Chart: Top 5 Products Table Detail */}
-        <Card className="lg:col-span-2">
+        {isVisible('product_performance') && <Card className="lg:col-span-2">
           <div className="flex items-center gap-2 mb-4">
             <span className="material-icons-round text-primary">table_chart</span>
             <h3 className="text-lg font-bold">ملخص أداء المنتجات</h3>
@@ -696,7 +747,7 @@ export const FactoryManagerDashboard: React.FC = () => {
           ) : (
             <div className="py-8 text-center text-slate-400 text-sm">لا توجد بيانات</div>
           )}
-        </Card>
+        </Card>}
       </div>
     </div>
   );

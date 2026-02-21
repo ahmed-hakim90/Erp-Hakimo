@@ -33,6 +33,7 @@ export const SupervisorDetails: React.FC = () => {
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const _rawLines = useAppStore((s) => s._rawLines);
   const productionLines = useAppStore((s) => s.productionLines);
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
 
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +56,7 @@ export const SupervisorDetails: React.FC = () => {
     return () => { cancelled = true; };
   }, [id]);
 
-  // ── Single-report print state ──
+  // ── Print state ──
 
   const [printReport, setPrintReport] = useState<ReportPrintRow | null>(null);
   const singlePrintRef = useRef<HTMLDivElement>(null);
@@ -107,17 +108,21 @@ export const SupervisorDetails: React.FC = () => {
   const printRows = useMemo(() => mapReportsToPrintRows(reports, lookups), [reports, lookups]);
   const printTotals = useMemo(() => computePrintTotals(printRows), [printRows]);
 
-  // ── react-to-print ──
+  // ── Print handlers ──
 
   const handlePrint = useReactToPrint({ contentRef: printComponentRef });
-
-  // ── PDF / WhatsApp handlers ──
+  const handleSinglePrint = useReactToPrint({ contentRef: singlePrintRef });
 
   const handlePDF = async () => {
     if (!printComponentRef.current) return;
     setExporting(true);
-    try { await exportToPDF(printComponentRef.current, `تقرير-${supervisor?.name ?? ''}`); }
-    finally { setExporting(false); }
+    try {
+      await exportToPDF(printComponentRef.current, `تقرير-${supervisor?.name ?? ''}`, {
+        paperSize: printTemplate?.paperSize,
+        orientation: printTemplate?.orientation,
+        copies: printTemplate?.copies,
+      });
+    } finally { setExporting(false); }
   };
 
   const handleWhatsApp = async () => {
@@ -126,10 +131,6 @@ export const SupervisorDetails: React.FC = () => {
     try { await shareToWhatsApp(printComponentRef.current, `تقرير ${supervisor?.name ?? ''}`); }
     finally { setExporting(false); }
   };
-
-  // ── Single report print ──
-
-  const handleSinglePrint = useReactToPrint({ contentRef: singlePrintRef });
 
   const triggerSinglePrint = useCallback(
     (report: ProductionReport) => {
@@ -253,7 +254,12 @@ export const SupervisorDetails: React.FC = () => {
             <span className="material-icons-round text-sm">print</span>طباعة
           </Button>
           <Button variant="outline" disabled={reports.length === 0 || exporting} onClick={handlePDF}>
-            {exporting ? <span className="material-icons-round animate-spin text-sm">refresh</span> : <span className="material-icons-round text-sm">picture_as_pdf</span>}PDF
+            {exporting ? (
+              <span className="material-icons-round animate-spin text-sm">refresh</span>
+            ) : (
+              <span className="material-icons-round text-sm">picture_as_pdf</span>
+            )}
+            PDF
           </Button>
           <Button variant="outline" disabled={reports.length === 0 || exporting} onClick={handleWhatsApp}>
             <span className="material-icons-round text-sm">share</span>واتساب
@@ -269,8 +275,9 @@ export const SupervisorDetails: React.FC = () => {
           subtitle={`${uniqueDays} يوم عمل — ${reports.length} تقرير`}
           rows={printRows}
           totals={printTotals}
+          printSettings={printTemplate}
         />
-        <SingleReportPrint ref={singlePrintRef} report={printReport} />
+        <SingleReportPrint ref={singlePrintRef} report={printReport} printSettings={printTemplate} />
       </div>
 
       {/* ── KPI Cards ── */}
@@ -527,6 +534,7 @@ export const SupervisorDetails: React.FC = () => {
           </div>
         )}
       </Card>
+
     </div>
   );
 };

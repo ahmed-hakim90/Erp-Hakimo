@@ -28,6 +28,22 @@ import { FactoryManagerDashboard } from './pages/FactoryManagerDashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { useAppStore } from './store/useAppStore';
 import { onAuthChange } from './services/firebase';
+import { getHomeRoute } from './utils/permissions';
+
+/** Redirects to the role-appropriate dashboard after login */
+const LoginRedirect: React.FC = () => {
+  const permissions = useAppStore((s) => s.userPermissions);
+  const home = getHomeRoute(permissions);
+  return <Navigate to={home} replace />;
+};
+
+/** Shows the main Dashboard or redirects to the role-specific one on `/` */
+const HomeRedirect: React.FC = () => {
+  const permissions = useAppStore((s) => s.userPermissions);
+  const home = getHomeRoute(permissions);
+  if (home === '/') return <Dashboard />;
+  return <Navigate to={home} replace />;
+};
 
 const App: React.FC = () => {
   const initializeApp = useAppStore((s) => s.initializeApp);
@@ -84,7 +100,7 @@ const App: React.FC = () => {
 
         {/* Public: Login */}
         <Route path="/login" element={
-          isAuthenticated ? <Navigate to="/" replace /> : <Login />
+          isAuthenticated ? <LoginRedirect /> : <Login />
         } />
 
         {/* Protected: All app routes inside Layout */}
@@ -92,7 +108,7 @@ const App: React.FC = () => {
           !isAuthenticated ? <Navigate to="/login" replace /> : (
             <Layout>
               <Routes>
-                <Route path="/" element={<ProtectedRoute permission="dashboard.view"><Dashboard /></ProtectedRoute>} />
+                <Route path="/" element={<ProtectedRoute permission="dashboard.view"><HomeRedirect /></ProtectedRoute>} />
                 <Route path="/products" element={<ProtectedRoute permission="products.view"><Products /></ProtectedRoute>} />
                 <Route path="/products/:id" element={<ProtectedRoute permission="products.view"><ProductDetails /></ProtectedRoute>} />
                 <Route path="/lines" element={<ProtectedRoute permission="lines.view"><Lines /></ProtectedRoute>} />

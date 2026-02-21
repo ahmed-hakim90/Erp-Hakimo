@@ -4,6 +4,7 @@
  */
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import type { PaperSize, PaperOrientation } from '../types';
 
 // ─── Capture a DOM element as a canvas ──────────────────────────────────────
 
@@ -31,44 +32,77 @@ const downloadBlob = (blob: Blob, fileName: string) => {
 
 const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-// ─── Export element to PDF (A4, multi-page) ─────────────────────────────────
+const PAPER_PT: Record<string, [number, number]> = {
+  a4: [595.28, 841.89],
+  a5: [419.53, 595.28],
+  thermal: [226.77, 841.89],
+};
 
-export const exportToPDF = async (el: HTMLElement, fileName: string) => {
+// ─── Export element to PDF (configurable paper & orientation) ────────────────
+
+export interface ExportPDFOptions {
+  paperSize?: PaperSize;
+  orientation?: PaperOrientation;
+  copies?: number;
+}
+
+export const exportToPDF = async (
+  el: HTMLElement,
+  fileName: string,
+  options?: ExportPDFOptions,
+) => {
   const canvas = await capture(el);
   const imgData = canvas.toDataURL('image/png');
   const imgW = canvas.width;
   const imgH = canvas.height;
 
-  const A4W = 595.28; // pt
-  const A4H = 841.89;
-  const m = 20; // margin
+  const paperSize = options?.paperSize ?? 'a4';
+  const orientation = options?.orientation ?? 'portrait';
+  const copies = options?.copies ?? 1;
 
-  const cw = A4W - m * 2;
-  const ratio = cw / imgW;
-  const scaledH = imgH * ratio;
+  const [baseW, baseH] = PAPER_PT[paperSize] || PAPER_PT.a4;
+  const pageW = orientation === 'landscape' ? baseH : baseW;
+  const pageH = orientation === 'landscape' ? baseW : baseH;
+  const m = 20;
 
-  const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  const format = paperSize === 'thermal' ? [baseW, baseH] : paperSize;
 
-  if (scaledH + m * 2 <= A4H) {
-    pdf.addImage(imgData, 'PNG', m, m, cw, scaledH);
-  } else {
-    const pageH = A4H - m * 2;
-    let offset = 0;
-    while (offset < scaledH) {
-      if (offset > 0) pdf.addPage();
-      const srcY = offset / ratio;
-      const srcH = Math.min(pageH / ratio, imgH - srcY);
-      const dstH = srcH * ratio;
-      const slice = document.createElement('canvas');
-      slice.width = imgW;
-      slice.height = srcH;
-      const ctx = slice.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(canvas, 0, srcY, imgW, srcH, 0, 0, imgW, srcH);
-        pdf.addImage(slice.toDataURL('image/png'), 'PNG', m, m, cw, dstH);
+  const pdf = new jsPDF({ orientation, unit: 'pt', format });
+
+  const addPageContent = (isFirst: boolean) => {
+    const cw = pageW - m * 2;
+    const ratio = cw / imgW;
+    const scaledH = imgH * ratio;
+
+    if (!isFirst) pdf.addPage();
+
+    if (scaledH + m * 2 <= pageH) {
+      pdf.addImage(imgData, 'PNG', m, m, cw, scaledH);
+    } else {
+      const contentH = pageH - m * 2;
+      let offset = 0;
+      let firstSlice = true;
+      while (offset < scaledH) {
+        if (!firstSlice) pdf.addPage();
+        firstSlice = false;
+        const srcY = offset / ratio;
+        const srcH = Math.min(contentH / ratio, imgH - srcY);
+        const dstH = srcH * ratio;
+        const slice = document.createElement('canvas');
+        slice.width = imgW;
+        slice.height = srcH;
+        const ctx = slice.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(canvas, 0, srcY, imgW, srcH, 0, 0, imgW, srcH);
+          pdf.addImage(slice.toDataURL('image/png'), 'PNG', m, m, cw, dstH);
+        }
+        offset += contentH;
       }
-      offset += pageH;
     }
+  };
+
+  for (let c = 0; c < copies; c++) {
+    addPageContent(c === 0);
   }
 
   pdf.save(`${fileName}.pdf`);

@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
 import { Card, KPIBox, Button, Badge, LoadingSkeleton } from '../components/UI';
@@ -54,6 +54,7 @@ export const ProductDetails: React.FC = () => {
   const costCenterValues = useAppStore((s) => s.costCenterValues);
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
 
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
@@ -190,8 +191,13 @@ export const ProductDetails: React.FC = () => {
   const handlePDF = async () => {
     if (!printComponentRef.current) return;
     setExporting(true);
-    try { await exportToPDF(printComponentRef.current, `تقرير-${productDisplayName}`); }
-    finally { setExporting(false); }
+    try {
+      await exportToPDF(printComponentRef.current, `تقرير-${productDisplayName}`, {
+        paperSize: printTemplate?.paperSize,
+        orientation: printTemplate?.orientation,
+        copies: printTemplate?.copies,
+      });
+    } finally { setExporting(false); }
   };
 
   const handleWhatsApp = async () => {
@@ -271,7 +277,12 @@ export const ProductDetails: React.FC = () => {
                 <span className="material-icons-round text-sm">print</span>طباعة
               </Button>
               <Button variant="outline" disabled={exporting} onClick={handlePDF}>
-                {exporting ? <span className="material-icons-round animate-spin text-sm">refresh</span> : <span className="material-icons-round text-sm">picture_as_pdf</span>}PDF
+                {exporting ? (
+                  <span className="material-icons-round animate-spin text-sm">refresh</span>
+                ) : (
+                  <span className="material-icons-round text-sm">picture_as_pdf</span>
+                )}
+                PDF
               </Button>
               <Button variant="outline" disabled={exporting} onClick={handleWhatsApp}>
                 <span className="material-icons-round text-sm">share</span>واتساب
@@ -289,6 +300,7 @@ export const ProductDetails: React.FC = () => {
           subtitle={`${product?.code || rawProduct?.code || ''} — ${uniqueDays} يوم عمل`}
           rows={printRows}
           totals={printTotals}
+          printSettings={printTemplate}
         />
       </div>
 
@@ -651,6 +663,7 @@ export const ProductDetails: React.FC = () => {
           </div>
         )}
       </Card>
+
     </div>
   );
 };
