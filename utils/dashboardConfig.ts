@@ -123,14 +123,14 @@ export const DEFAULT_BRANDING: BrandingSettings = {
 };
 
 export const DEFAULT_THEME: ThemeSettings = {
-  primaryColor: '#1392ec',
+  primaryColor: '#24308f',
   secondaryColor: '#64748b',
   successColor: '#10b981',
   warningColor: '#f59e0b',
   dangerColor: '#ef4444',
   backgroundColor: '#f6f7f8',
   darkMode: 'light',
-  baseFontFamily: 'Inter',
+  baseFontFamily: 'Cairo',
   baseFontSize: 14,
   borderRadius: 12,
   density: 'comfortable',

@@ -3,7 +3,7 @@ import { DEFAULT_THEME } from './dashboardConfig';
 
 function hexToRgbString(hex: string): string {
   const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!match) return '19 146 236';
+  if (!match) return '36 48 143';
   return `${parseInt(match[1], 16)} ${parseInt(match[2], 16)} ${parseInt(match[3], 16)}`;
 }
 
