@@ -31,55 +31,61 @@ function permsFrom(enabled: Permission[]): Record<string, boolean> {
   return obj;
 }
 
-/** Default roles seeded on first run */
-export const DEFAULT_ROLES: Omit<FirestoreRole, 'id'>[] = [
-  {
-    name: 'مدير النظام',
-    color: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
-    permissions: allPerms(true),
-  },
-  {
-    name: 'مدير المصنع',
-    color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-    permissions: permsFrom([
-      'dashboard.view',
-      'supervisorDashboard.view',
-      'products.view', 'lines.view', 'supervisors.view',
-      'reports.view', 'lineStatus.view', 'lineProductConfig.view',
-      'settings.view',
-      'plans.view',
-      'factoryDashboard.view',
-      'print', 'export',
-    ]),
-  },
-  {
-    name: 'مشرف الصالة',
-    color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-    permissions: permsFrom([
-      'dashboard.view',
-      'supervisorDashboard.view',
-      'products.view', 'lines.view', 'supervisors.view',
-      'reports.view', 'reports.create', 'reports.edit',
-      'lineStatus.view', 'lineStatus.edit',
-      'lineProductConfig.view',
-      'settings.view',
-      'plans.view', 'plans.create', 'plans.edit',
-      'quickAction.view',
-      'print', 'export',
-    ]),
-  },
-  {
-    name: 'مشرف',
-    color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-    permissions: permsFrom([
-      'dashboard.view',
-      'supervisorDashboard.view',
-      'reports.view', 'reports.create',
-      'quickAction.view',
-      'print', 'export',
-    ]),
-  },
-];
+/** Default roles seeded on first run (lazy to avoid circular-import TDZ) */
+let _defaultRoles: Omit<FirestoreRole, 'id'>[] | null = null;
+function getDefaultRoles(): Omit<FirestoreRole, 'id'>[] {
+  if (!_defaultRoles) {
+    _defaultRoles = [
+      {
+        name: 'مدير النظام',
+        color: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
+        permissions: allPerms(true),
+      },
+      {
+        name: 'مدير المصنع',
+        color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+        permissions: permsFrom([
+          'dashboard.view',
+          'employeeDashboard.view',
+          'products.view', 'lines.view', 'employees.view',
+          'reports.view', 'lineStatus.view', 'lineProductConfig.view',
+          'settings.view',
+          'plans.view',
+          'factoryDashboard.view',
+          'print', 'export',
+        ]),
+      },
+      {
+        name: 'مشرف الصالة',
+        color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+        permissions: permsFrom([
+          'dashboard.view',
+          'employeeDashboard.view',
+          'products.view', 'lines.view', 'employees.view',
+          'reports.view', 'reports.create', 'reports.edit',
+          'lineStatus.view', 'lineStatus.edit',
+          'lineProductConfig.view',
+          'settings.view',
+          'plans.view', 'plans.create', 'plans.edit',
+          'quickAction.view',
+          'print', 'export',
+        ]),
+      },
+      {
+        name: 'مشرف',
+        color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+        permissions: permsFrom([
+          'dashboard.view',
+          'employeeDashboard.view',
+          'reports.view', 'reports.create',
+          'quickAction.view',
+          'print', 'export',
+        ]),
+      },
+    ];
+  }
+  return _defaultRoles;
+}
 
 export const roleService = {
   async getAll(): Promise<FirestoreRole[]> {
@@ -155,7 +161,7 @@ export const roleService = {
     if (existing.length > 0) return existing;
 
     const created: FirestoreRole[] = [];
-    for (const role of DEFAULT_ROLES) {
+    for (const role of getDefaultRoles()) {
       const id = await this.create(role);
       if (id) created.push({ ...role, id });
     }

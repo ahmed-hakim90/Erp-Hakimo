@@ -106,7 +106,7 @@ export const reportService = {
 
     // Required field validation
     const required: (keyof typeof data)[] = [
-      'supervisorId',
+      'employeeId',
       'productId',
       'lineId',
       'date',
@@ -230,15 +230,15 @@ export const reportService = {
   },
 
   /**
-   * Fetch reports filtered by supervisor.
+   * Fetch reports filtered by employee.
    * Sorts in-memory to avoid needing a Firestore composite index.
    */
-  async getBySupervisor(supervisorId: string): Promise<ProductionReport[]> {
+  async getByEmployee(employeeId: string): Promise<ProductionReport[]> {
     if (!isConfigured) return [];
     try {
       const q = query(
         collection(db, COLLECTION),
-        where('supervisorId', '==', supervisorId)
+        where('employeeId', '==', employeeId)
       );
       const snap = await getDocs(q);
       const reports = snap.docs.map(
@@ -246,7 +246,7 @@ export const reportService = {
       );
       return reports.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     } catch (error) {
-      console.error('reportService.getBySupervisor error:', error);
+      console.error('reportService.getByEmployee error:', error);
       throw error;
     }
   },

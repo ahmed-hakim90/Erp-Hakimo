@@ -11,7 +11,7 @@ interface ReportRow {
   التاريخ: string;
   'خط الإنتاج': string;
   المنتج: string;
-  المشرف: string;
+  الموظف: string;
   'الكمية المنتجة': number;
   الهالك: number;
   'نسبة الهالك %': string;
@@ -22,7 +22,7 @@ interface ReportRow {
 interface LookupFns {
   getLineName: (id: string) => string;
   getProductName: (id: string) => string;
-  getSupervisorName: (id: string) => string;
+  getEmployeeName: (id: string) => string;
 }
 
 /**
@@ -42,7 +42,7 @@ const mapReportsToRows = (
       التاريخ: r.date,
       'خط الإنتاج': lookups.getLineName(r.lineId),
       المنتج: lookups.getProductName(r.productId),
-      المشرف: lookups.getSupervisorName(r.supervisorId),
+      الموظف: lookups.getEmployeeName(r.employeeId),
       'الكمية المنتجة': r.quantityProduced || 0,
       الهالك: r.quantityWaste || 0,
       'نسبة الهالك %': `${wasteRatio}%`,
@@ -68,7 +68,7 @@ const appendSummary = (rows: ReportRow[]): ReportRow[] => {
     التاريخ: 'الإجمالي',
     'خط الإنتاج': '',
     المنتج: '',
-    المشرف: `${rows.length} تقرير`,
+    الموظف: `${rows.length} تقرير`,
     'الكمية المنتجة': totalProduced,
     الهالك: totalWaste,
     'نسبة الهالك %': `${wasteRatio}%`,
@@ -111,16 +111,16 @@ const downloadExcel = (rows: Record<string, any>[], sheetName: string, fileName:
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Export supervisor reports to Excel.
+ * Export employee reports to Excel.
  */
 export const exportSupervisorReports = (
-  supervisorName: string,
+  employeeName: string,
   reports: ProductionReport[],
   lookups: LookupFns
 ) => {
   const rows = appendSummary(mapReportsToRows(reports, lookups));
   const date = new Date().toISOString().slice(0, 10);
-  downloadExcel(rows, `تقارير ${supervisorName}`, `تقارير-${supervisorName}-${date}`);
+  downloadExcel(rows, `تقارير ${employeeName}`, `تقارير-${employeeName}-${date}`);
 };
 
 /**

@@ -3,7 +3,7 @@
  * Resolves Arabic column headers and maps names → IDs using lookup arrays.
  */
 import * as XLSX from 'xlsx';
-import type { ProductionReport, FirestoreProduct, FirestoreProductionLine, FirestoreSupervisor } from '../types';
+import type { ProductionReport, FirestoreProduct, FirestoreProductionLine, FirestoreEmployee } from '../types';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -14,8 +14,8 @@ export interface ParsedReportRow {
   lineId: string;
   productName: string;
   productId: string;
-  supervisorName: string;
-  supervisorId: string;
+  employeeName: string;
+  employeeId: string;
   quantityProduced: number;
   quantityWaste: number;
   workersCount: number;
@@ -33,7 +33,7 @@ export interface ImportResult {
 interface Lookups {
   products: FirestoreProduct[];
   lines: FirestoreProductionLine[];
-  supervisors: FirestoreSupervisor[];
+  employees: FirestoreEmployee[];
 }
 
 // ─── Header mapping (Arabic → field) ────────────────────────────────────────
@@ -46,8 +46,10 @@ const HEADER_MAP: Record<string, string> = {
   'الخط': 'lineName',
   'المنتج': 'productName',
   'منتج': 'productName',
-  'المشرف': 'supervisorName',
-  'مشرف': 'supervisorName',
+  'المشرف': 'employeeName',
+  'مشرف': 'employeeName',
+  'الموظف': 'employeeName',
+  'موظف': 'employeeName',
   'الكمية المنتجة': 'quantityProduced',
   'كمية الانتاج': 'quantityProduced',
   'كمية الإنتاج': 'quantityProduced',
@@ -168,10 +170,10 @@ export function parseExcelFile(
             if (productName && !product) errors.push(`المنتج "${productName}" غير موجود`);
             if (!productName) errors.push('المنتج مفقود');
 
-            const supervisorName = String(getValue('supervisorName') ?? '').trim();
-            const supervisor = supervisorName ? findByName(lookups.supervisors, supervisorName) : undefined;
-            if (supervisorName && !supervisor) errors.push(`المشرف "${supervisorName}" غير موجود`);
-            if (!supervisorName) errors.push('المشرف مفقود');
+            const employeeName = String(getValue('employeeName') ?? '').trim();
+            const employee = employeeName ? findByName(lookups.employees, employeeName) : undefined;
+            if (employeeName && !employee) errors.push(`الموظف "${employeeName}" غير موجود`);
+            if (!employeeName) errors.push('الموظف مفقود');
 
             const quantityProduced = Number(getValue('quantityProduced')) || 0;
             if (quantityProduced <= 0) errors.push('الكمية المنتجة يجب أن تكون أكبر من 0');
@@ -190,8 +192,8 @@ export function parseExcelFile(
               lineId: line?.id ?? '',
               productName,
               productId: product?.id ?? '',
-              supervisorName,
-              supervisorId: supervisor?.id ?? '',
+              employeeName,
+              employeeId: employee?.id ?? '',
               quantityProduced,
               quantityWaste,
               workersCount,
@@ -228,7 +230,7 @@ export function toReportData(
     date: row.date,
     lineId: row.lineId,
     productId: row.productId,
-    supervisorId: row.supervisorId,
+    employeeId: row.employeeId,
     quantityProduced: row.quantityProduced,
     quantityWaste: row.quantityWaste,
     workersCount: row.workersCount,

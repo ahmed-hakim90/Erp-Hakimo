@@ -18,9 +18,11 @@ import {
   computePrintTotals,
   ReportPrintRow,
 } from '../components/ProductionReportPrint';
+import { SelectableTable } from '../components/SelectableTable';
+import type { TableColumn, TableBulkAction } from '../components/SelectableTable';
 
 const emptyForm = {
-  supervisorId: '',
+  employeeId: '',
   productId: '',
   lineId: '',
   date: getTodayDateString(),
@@ -33,10 +35,10 @@ const emptyForm = {
 export const Reports: React.FC = () => {
   const todayReports = useAppStore((s) => s.todayReports);
   const productionReports = useAppStore((s) => s.productionReports);
-  const supervisors = useAppStore((s) => s.supervisors);
+  const employees = useAppStore((s) => s.employees);
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const _rawLines = useAppStore((s) => s._rawLines);
-  const _rawSupervisors = useAppStore((s) => s._rawSupervisors);
+  const _rawEmployees = useAppStore((s) => s._rawEmployees);
   const uid = useAppStore((s) => s.uid);
   const createReport = useAppStore((s) => s.createReport);
   const updateReport = useAppStore((s) => s.updateReport);
@@ -78,22 +80,23 @@ export const Reports: React.FC = () => {
 
   // Bulk print ref
   const bulkPrintRef = useRef<HTMLDivElement>(null);
+  const [bulkPrintSource, setBulkPrintSource] = useState<ProductionReport[] | null>(null);
 
   // Date range filter
   const [startDate, setStartDate] = useState(getTodayDateString());
   const [endDate, setEndDate] = useState(getTodayDateString());
   const [viewMode, setViewMode] = useState<'today' | 'range'>('today');
 
-  // Supervisor-only filter: basic supervisors see only their own reports
-  const mySupervisorId = useMemo(() => {
+  // Employee-only filter: basic employees see only their own reports
+  const myEmployeeId = useMemo(() => {
     if (can('reports.edit')) return null;
-    const linked = _rawSupervisors.find((s) => s.userId === uid);
+    const linked = _rawEmployees.find((s) => s.userId === uid);
     return linked?.id ?? null;
-  }, [_rawSupervisors, uid, can]);
+  }, [_rawEmployees, uid, can]);
 
   const allReports = viewMode === 'today' ? todayReports : productionReports;
-  const displayedReports = mySupervisorId
-    ? allReports.filter((r) => r.supervisorId === mySupervisorId)
+  const displayedReports = myEmployeeId
+    ? allReports.filter((r) => r.employeeId === myEmployeeId)
     : allReports;
 
   const reportCosts = useMemo(() => {
@@ -112,21 +115,21 @@ export const Reports: React.FC = () => {
     (lid: string) => _rawLines.find((l) => l.id === lid)?.name ?? '—',
     [_rawLines]
   );
-  const getSupervisorName = useCallback(
-    (sid: string) => supervisors.find((s) => s.id === sid)?.name ?? '—',
-    [supervisors]
+  const getEmployeeName = useCallback(
+    (sid: string) => employees.find((s) => s.id === sid)?.name ?? '—',
+    [employees]
   );
 
   const lookups = useMemo(
-    () => ({ getLineName, getProductName, getSupervisorName }),
-    [getLineName, getProductName, getSupervisorName]
+    () => ({ getLineName, getProductName, getEmployeeName }),
+    [getLineName, getProductName, getEmployeeName]
   );
 
   // ── Bulk print data ────────────────────────────────────────────────────────
 
   const printRows = useMemo(
-    () => mapReportsToPrintRows(displayedReports, lookups),
-    [displayedReports, lookups]
+    () => mapReportsToPrintRows(bulkPrintSource ?? displayedReports, lookups),
+    [bulkPrintSource, displayedReports, lookups]
   );
   const printTotals = useMemo(() => computePrintTotals(printRows), [printRows]);
 
@@ -140,13 +143,13 @@ export const Reports: React.FC = () => {
       date: report.date,
       lineName: getLineName(report.lineId),
       productName: getProductName(report.productId),
-      supervisorName: getSupervisorName(report.supervisorId),
+      employeeName: getEmployeeName(report.employeeId),
       quantityProduced: report.quantityProduced || 0,
       quantityWaste: report.quantityWaste || 0,
       workersCount: report.workersCount || 0,
       workHours: report.workHours || 0,
     }),
-    [getLineName, getProductName, getSupervisorName]
+    [getLineName, getProductName, getEmployeeName]
   );
 
   const triggerSinglePrint = useCallback(
@@ -213,7 +216,7 @@ export const Reports: React.FC = () => {
   const openEdit = (report: ProductionReport) => {
     setEditId(report.id!);
     setForm({
-      supervisorId: report.supervisorId,
+      employeeId: report.employeeId,
       productId: report.productId,
       lineId: report.lineId,
       date: report.date,
@@ -226,7 +229,7 @@ export const Reports: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!form.lineId || !form.productId || !form.supervisorId) return;
+    if (!form.lineId || !form.productId || !form.employeeId) return;
     setSaving(true);
 
     if (editId) {
@@ -282,7 +285,7 @@ export const Reports: React.FC = () => {
       const result = await parseExcelFile(file, {
         products: _rawProducts,
         lines: _rawLines,
-        supervisors: _rawSupervisors,
+        employees: _rawEmployees,
       });
       setImportResult(result);
     } catch {
@@ -315,6 +318,93 @@ export const Reports: React.FC = () => {
     setShowImportModal(false);
     setImportResult(null);
   };
+
+  // ── SelectableTable config ──────────────────────────────────────────────────
+
+  const reportColumns = useMemo<TableColumn<ProductionReport>[]>(() => {
+    const cols: TableColumn<ProductionReport>[] = [
+      { header: 'التاريخ', render: (r) => <span className="font-bold text-slate-700 dark:text-slate-300">{r.date}</span> },
+      { header: 'خط الإنتاج', render: (r) => <span className="font-medium">{getLineName(r.lineId)}</span> },
+      { header: 'المنتج', render: (r) => <span className="font-medium">{getProductName(r.productId)}</span> },
+      { header: 'الموظف', render: (r) => <span className="font-medium">{getEmployeeName(r.employeeId)}</span> },
+      {
+        header: 'الكمية المنتجة',
+        headerClassName: 'text-center',
+        className: 'text-center',
+        render: (r) => (
+          <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-sm font-black ring-1 ring-emerald-500/20">
+            {formatNumber(r.quantityProduced)}
+          </span>
+        ),
+      },
+      { header: 'الهالك', headerClassName: 'text-center', className: 'text-center text-rose-500 font-bold', render: (r) => <>{formatNumber(r.quantityWaste)}</> },
+      { header: 'عمال', headerClassName: 'text-center', className: 'text-center font-bold', render: (r) => <>{r.workersCount}</> },
+      { header: 'ساعات', headerClassName: 'text-center', className: 'text-center font-bold', render: (r) => <>{r.workHours}</> },
+    ];
+    if (canViewCosts) {
+      cols.push({
+        header: 'تكلفة الوحدة',
+        headerClassName: 'text-center',
+        className: 'text-center',
+        render: (r) =>
+          r.id && reportCosts.get(r.id) ? (
+            <span className="text-sm font-black text-primary">{formatCost(reportCosts.get(r.id)!)} ج.م</span>
+          ) : (
+            <span className="text-sm text-slate-300">—</span>
+          ),
+      });
+    }
+    return cols;
+  }, [canViewCosts, getLineName, getProductName, getEmployeeName, reportCosts]);
+
+  const handleBulkPrintSelected = useCallback(async (items: ProductionReport[]) => {
+    setBulkPrintSource(items);
+    await new Promise((r) => setTimeout(r, 300));
+    handleBulkPrint();
+    setTimeout(() => setBulkPrintSource(null), 1000);
+  }, [handleBulkPrint]);
+
+  const reportBulkActions = useMemo<TableBulkAction<ProductionReport>[]>(() => [
+    { label: 'طباعة المحدد', icon: 'print', action: handleBulkPrintSelected, permission: 'print' },
+    { label: 'تصدير المحدد', icon: 'download', action: (items) => exportReportsByDateRange(items, startDate, endDate, lookups), permission: 'export' },
+  ], [handleBulkPrintSelected, startDate, endDate, lookups]);
+
+  const renderReportActions = (report: ProductionReport) => (
+    <div className="flex items-center gap-1 justify-end sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+      {can("print") && (
+        <>
+          <button onClick={() => triggerSingleShare(report)} className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/10 rounded-lg transition-all" title="مشاركة عبر واتساب" disabled={exporting}>
+            <span className="material-icons-round text-lg">share</span>
+          </button>
+          <button onClick={() => triggerSinglePrint(report)} className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all" title="طباعة التقرير">
+            <span className="material-icons-round text-lg">print</span>
+          </button>
+        </>
+      )}
+      {can("reports.edit") && (
+        <button onClick={() => openEdit(report)} className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all" title="تعديل التقرير">
+          <span className="material-icons-round text-lg">edit</span>
+        </button>
+      )}
+      {can("reports.delete") && (
+        <button onClick={() => setDeleteConfirmId(report.id!)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-lg transition-all" title="حذف التقرير">
+          <span className="material-icons-round text-lg">delete</span>
+        </button>
+      )}
+    </div>
+  );
+
+  const reportTableFooter = (
+    <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+      <span className="text-sm text-slate-500 font-bold">إجمالي <span className="text-primary">{displayedReports.length}</span> تقرير</span>
+      {displayedReports.length > 0 && (
+        <div className="flex items-center gap-4 text-xs font-bold">
+          <span className="text-emerald-600">إنتاج: {formatNumber(displayedReports.reduce((s, r) => s + r.quantityProduced, 0))}</span>
+          <span className="text-rose-500">هالك: {formatNumber(displayedReports.reduce((s, r) => s + r.quantityWaste, 0))}</span>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -439,122 +529,17 @@ export const Reports: React.FC = () => {
       </div>
 
       {/* Reports Table */}
-      <Card className="!p-0 border-none overflow-hidden shadow-xl shadow-slate-200/50">
-        <div className="overflow-x-auto">
-          <table className="w-full text-right border-collapse">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em]">التاريخ</th>
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em]">خط الإنتاج</th>
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em]">المنتج</th>
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em]">المشرف</th>
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-center">الكمية المنتجة</th>
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-center">الهالك</th>
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-center">عمال</th>
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-center">ساعات</th>
-                {canViewCosts && (
-                  <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-center">تكلفة الوحدة</th>
-                )}
-                <th className="px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-left">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {displayedReports.length === 0 && (
-                <tr>
-                  <td colSpan={canViewCosts ? 10 : 9} className="px-6 py-16 text-center text-slate-400">
-                    <span className="material-icons-round text-5xl mb-3 block opacity-30">bar_chart</span>
-                    <p className="font-bold text-lg">لا توجد تقارير{viewMode === 'today' ? ' لهذا اليوم' : ' في هذه الفترة'}</p>
-                    <p className="text-sm mt-1">
-                      {can("reports.create")
-                        ? 'اضغط "إنشاء تقرير" لإضافة تقرير جديد'
-                        : 'لا توجد تقارير لعرضها حالياً'}
-                    </p>
-                  </td>
-                </tr>
-              )}
-              {displayedReports.map((report) => (
-                <tr key={report.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors group">
-                  <td className="px-5 py-4 text-sm font-bold text-slate-700 dark:text-slate-300">{report.date}</td>
-                  <td className="px-5 py-4 text-sm font-medium">{getLineName(report.lineId)}</td>
-                  <td className="px-5 py-4 text-sm font-medium">{getProductName(report.productId)}</td>
-                  <td className="px-5 py-4 text-sm font-medium">{getSupervisorName(report.supervisorId)}</td>
-                  <td className="px-5 py-4 text-center">
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-sm font-black ring-1 ring-emerald-500/20">
-                      {formatNumber(report.quantityProduced)}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-center text-rose-500 font-bold text-sm">{formatNumber(report.quantityWaste)}</td>
-                  <td className="px-5 py-4 text-center text-sm font-bold">{report.workersCount}</td>
-                  <td className="px-5 py-4 text-center text-sm font-bold">{report.workHours}</td>
-                  {canViewCosts && (
-                    <td className="px-5 py-4 text-center">
-                      {report.id && reportCosts.get(report.id) ? (
-                        <span className="text-sm font-black text-primary">{formatCost(reportCosts.get(report.id)!)} ج.م</span>
-                      ) : (
-                        <span className="text-sm text-slate-300">—</span>
-                      )}
-                    </td>
-                  )}
-                  <td className="px-5 py-4 text-left">
-                    <div className="flex items-center gap-1 justify-end sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                      {can("print") && (
-                        <>
-                          <button
-                            onClick={() => triggerSingleShare(report)}
-                            className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/10 rounded-lg transition-all"
-                            title="مشاركة عبر واتساب"
-                            disabled={exporting}
-                          >
-                            <span className="material-icons-round text-lg">share</span>
-                          </button>
-                          <button
-                            onClick={() => triggerSinglePrint(report)}
-                            className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
-                            title="طباعة التقرير"
-                          >
-                            <span className="material-icons-round text-lg">print</span>
-                          </button>
-                        </>
-                      )}
-                      {can("reports.edit") && (
-                        <button
-                          onClick={() => openEdit(report)}
-                          className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
-                          title="تعديل التقرير"
-                        >
-                          <span className="material-icons-round text-lg">edit</span>
-                        </button>
-                      )}
-                      {can("reports.delete") && (
-                        <button
-                          onClick={() => setDeleteConfirmId(report.id!)}
-                          className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-lg transition-all"
-                          title="حذف التقرير"
-                        >
-                          <span className="material-icons-round text-lg">delete</span>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <span className="text-sm text-slate-500 font-bold">إجمالي <span className="text-primary">{displayedReports.length}</span> تقرير</span>
-          {displayedReports.length > 0 && (
-            <div className="flex items-center gap-4 text-xs font-bold">
-              <span className="text-emerald-600">
-                إنتاج: {formatNumber(displayedReports.reduce((s, r) => s + r.quantityProduced, 0))}
-              </span>
-              <span className="text-rose-500">
-                هالك: {formatNumber(displayedReports.reduce((s, r) => s + r.quantityWaste, 0))}
-              </span>
-            </div>
-          )}
-        </div>
-      </Card>
+      <SelectableTable<ProductionReport>
+        data={displayedReports}
+        columns={reportColumns}
+        getId={(r) => r.id!}
+        bulkActions={reportBulkActions}
+        renderActions={renderReportActions}
+        emptyIcon="bar_chart"
+        emptyTitle={`لا توجد تقارير${viewMode === 'today' ? ' لهذا اليوم' : ' في هذه الفترة'}`}
+        emptySubtitle={can("reports.create") ? 'اضغط "إنشاء تقرير" لإضافة تقرير جديد' : 'لا توجد تقارير لعرضها حالياً'}
+        footer={reportTableFooter}
+      />
 
       {/* ══ Hidden print components (off-screen, only rendered for print) ══ */}
       <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
@@ -591,12 +576,12 @@ export const Reports: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">المشرف *</label>
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">الموظف *</label>
                   <SearchableSelect
-                    placeholder="اختر المشرف"
-                    options={supervisors.map((s) => ({ value: s.id, label: s.name }))}
-                    value={form.supervisorId}
-                    onChange={(v) => setForm({ ...form, supervisorId: v })}
+                    placeholder="اختر الموظف"
+                    options={employees.map((s) => ({ value: s.id, label: s.name }))}
+                    value={form.employeeId}
+                    onChange={(v) => setForm({ ...form, employeeId: v })}
                   />
                 </div>
               </div>
@@ -735,7 +720,7 @@ export const Reports: React.FC = () => {
               <Button
                 variant="primary"
                 onClick={handleSave}
-                disabled={saving || !form.lineId || !form.productId || !form.supervisorId || !form.quantityProduced || !form.workersCount || !form.workHours}
+                disabled={saving || !form.lineId || !form.productId || !form.employeeId || !form.quantityProduced || !form.workersCount || !form.workHours}
               >
                 {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
                 <span className="material-icons-round text-sm">{editId ? 'save' : 'add'}</span>
@@ -850,7 +835,7 @@ export const Reports: React.FC = () => {
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500">التاريخ</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500">خط الإنتاج</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500">المنتج</th>
-                          <th className="px-3 py-2.5 text-xs font-black text-slate-500">المشرف</th>
+                          <th className="px-3 py-2.5 text-xs font-black text-slate-500">الموظف</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500 text-center">الكمية</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500 text-center">الهالك</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500 text-center">عمال</th>
@@ -873,7 +858,7 @@ export const Reports: React.FC = () => {
                               <td className="px-3 py-2 font-medium">{row.date}</td>
                               <td className={`px-3 py-2 ${row.lineId ? '' : 'text-rose-500'}`}>{row.lineName || '—'}</td>
                               <td className={`px-3 py-2 ${row.productId ? '' : 'text-rose-500'}`}>{row.productName || '—'}</td>
-                              <td className={`px-3 py-2 ${row.supervisorId ? '' : 'text-rose-500'}`}>{row.supervisorName || '—'}</td>
+                              <td className={`px-3 py-2 ${row.employeeId ? '' : 'text-rose-500'}`}>{row.employeeName || '—'}</td>
                               <td className="px-3 py-2 text-center font-bold">{row.quantityProduced}</td>
                               <td className="px-3 py-2 text-center text-rose-500">{row.quantityWaste}</td>
                               <td className="px-3 py-2 text-center">{row.workersCount}</td>

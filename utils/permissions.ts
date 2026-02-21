@@ -17,7 +17,7 @@ export type Permission =
   | 'dashboard.view'
   | 'products.view' | 'products.create' | 'products.edit' | 'products.delete'
   | 'lines.view' | 'lines.create' | 'lines.edit' | 'lines.delete'
-  | 'supervisors.view' | 'supervisors.create' | 'supervisors.edit' | 'supervisors.delete'
+  | 'employees.view' | 'employees.create' | 'employees.edit' | 'employees.delete'
   | 'reports.view' | 'reports.create' | 'reports.edit' | 'reports.delete'
   | 'lineStatus.view' | 'lineStatus.edit'
   | 'lineProductConfig.view'
@@ -28,9 +28,16 @@ export type Permission =
   | 'quickAction.view'
   | 'costs.view' | 'costs.manage'
   | 'plans.view' | 'plans.create' | 'plans.edit'
-  | 'supervisorDashboard.view'
+  | 'employeeDashboard.view'
+  | 'selfService.view'
   | 'factoryDashboard.view'
   | 'adminDashboard.view'
+  | 'attendance.view' | 'attendance.import' | 'attendance.edit'
+  | 'leave.view' | 'leave.create' | 'leave.manage'
+  | 'loan.view' | 'loan.create' | 'loan.manage'
+  | 'approval.view' | 'approval.manage' | 'approval.delegate' | 'approval.escalate' | 'approval.override'
+  | 'payroll.view' | 'payroll.generate' | 'payroll.finalize' | 'payroll.lock'
+  | 'hrSettings.view' | 'hrSettings.edit'
   | 'print' | 'export';
 
 // ─── Permission Groups (for admin UI) ────────────────────────────────────────
@@ -75,13 +82,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
-    key: 'supervisors',
-    label: 'المشرفين',
+    key: 'employees',
+    label: 'الموظفين',
     permissions: [
-      { key: 'supervisors.view', label: 'عرض' },
-      { key: 'supervisors.create', label: 'إنشاء' },
-      { key: 'supervisors.edit', label: 'تعديل' },
-      { key: 'supervisors.delete', label: 'حذف' },
+      { key: 'employees.view', label: 'عرض' },
+      { key: 'employees.create', label: 'إنشاء' },
+      { key: 'employees.edit', label: 'تعديل' },
+      { key: 'employees.delete', label: 'حذف' },
     ],
   },
   {
@@ -167,10 +174,73 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
-    key: 'supervisorDashboard',
-    label: 'لوحة المشرف',
+    key: 'attendance',
+    label: 'الحضور والانصراف',
     permissions: [
-      { key: 'supervisorDashboard.view', label: 'عرض لوحة المشرف' },
+      { key: 'attendance.view', label: 'عرض الحضور' },
+      { key: 'attendance.import', label: 'استيراد بيانات' },
+      { key: 'attendance.edit', label: 'تعديل الحضور' },
+    ],
+  },
+  {
+    key: 'leave',
+    label: 'الإجازات',
+    permissions: [
+      { key: 'leave.view', label: 'عرض الإجازات' },
+      { key: 'leave.create', label: 'طلب إجازة' },
+      { key: 'leave.manage', label: 'إدارة الإجازات' },
+    ],
+  },
+  {
+    key: 'loan',
+    label: 'السُلف والقروض',
+    permissions: [
+      { key: 'loan.view', label: 'عرض السُلف' },
+      { key: 'loan.create', label: 'طلب سلفة' },
+      { key: 'loan.manage', label: 'إدارة السُلف' },
+    ],
+  },
+  {
+    key: 'approval',
+    label: 'الموافقات',
+    permissions: [
+      { key: 'approval.view', label: 'عرض الموافقات' },
+      { key: 'approval.manage', label: 'إدارة الموافقات' },
+      { key: 'approval.delegate', label: 'تفويض الموافقات' },
+      { key: 'approval.escalate', label: 'تصعيد الموافقات' },
+      { key: 'approval.override', label: 'تجاوز الموافقات (مدير النظام)' },
+    ],
+  },
+  {
+    key: 'payroll',
+    label: 'الرواتب',
+    permissions: [
+      { key: 'payroll.view', label: 'عرض كشف الرواتب' },
+      { key: 'payroll.generate', label: 'إنشاء / احتساب الرواتب' },
+      { key: 'payroll.finalize', label: 'اعتماد كشف الرواتب' },
+      { key: 'payroll.lock', label: 'قفل الشهر نهائياً' },
+    ],
+  },
+  {
+    key: 'hrSettings',
+    label: 'إعدادات الموارد البشرية',
+    permissions: [
+      { key: 'hrSettings.view', label: 'عرض إعدادات HR' },
+      { key: 'hrSettings.edit', label: 'تعديل إعدادات HR' },
+    ],
+  },
+  {
+    key: 'employeeDashboard',
+    label: 'لوحة الموظف',
+    permissions: [
+      { key: 'employeeDashboard.view', label: 'عرض لوحة الموظف' },
+    ],
+  },
+  {
+    key: 'selfService',
+    label: 'الخدمة الذاتية',
+    permissions: [
+      { key: 'selfService.view', label: 'الخدمة الذاتية للموظف' },
     ],
   },
   {
@@ -222,7 +292,7 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
     label: 'لوحات التحكم',
     items: [
       { path: '/', icon: 'dashboard', label: 'الرئيسية', permission: 'dashboard.view' },
-      { path: '/supervisor-dashboard', icon: 'assignment_ind', label: 'لوحة المشرف', permission: 'supervisorDashboard.view' },
+      { path: '/employee-dashboard', icon: 'assignment_ind', label: 'لوحة الموظف', permission: 'employeeDashboard.view' },
       { path: '/factory-dashboard', icon: 'analytics', label: 'لوحة مدير المصنع', permission: 'factoryDashboard.view' },
       { path: '/admin-dashboard', icon: 'shield', label: 'لوحة مدير النظام', permission: 'adminDashboard.view' },
     ],
@@ -242,8 +312,16 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
     key: 'hr',
     label: 'فريق العمل',
     items: [
-      { path: '/supervisors', icon: 'groups', label: 'المشرفين', permission: 'supervisors.view' },
-      { path: '/users', icon: 'manage_accounts', label: 'المستخدمين', permission: 'users.view' },
+      { path: '/employees', icon: 'groups', label: 'الموظفين', permission: 'employees.view' },
+      { path: '/organization', icon: 'account_tree', label: 'الهيكل التنظيمي', permission: 'hrSettings.view' },
+      { path: '/self-service', icon: 'person', label: 'الخدمة الذاتية', permission: 'selfService.view' },
+      { path: '/attendance', icon: 'fingerprint', label: 'سجل الحضور', permission: 'attendance.view' },
+      { path: '/attendance/import', icon: 'upload_file', label: 'استيراد الحضور', permission: 'attendance.import' },
+      { path: '/leave-requests', icon: 'beach_access', label: 'الإجازات', permission: 'leave.view' },
+      { path: '/loan-requests', icon: 'payments', label: 'السُلف', permission: 'loan.view' },
+      { path: '/approval-center', icon: 'fact_check', label: 'مركز الموافقات', permission: 'approval.view' },
+      { path: '/payroll', icon: 'receipt_long', label: 'كشف الرواتب', permission: 'payroll.view' },
+      { path: '/hr-settings', icon: 'tune', label: 'إعدادات HR', permission: 'hrSettings.view' },
     ],
   },
   {
@@ -272,13 +350,14 @@ export const SIDEBAR_ITEMS: SidebarItem[] = SIDEBAR_GROUPS.flatMap((g) => g.item
 
 export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/': 'dashboard.view',
-  '/supervisor-dashboard': 'supervisorDashboard.view',
+  '/employee-dashboard': 'employeeDashboard.view',
   '/products': 'products.view',
   '/products/:id': 'products.view',
   '/lines': 'lines.view',
   '/lines/:id': 'lines.view',
-  '/supervisors': 'supervisors.view',
-  '/supervisors/:id': 'supervisors.view',
+  '/employees': 'employees.view',
+  '/employees/:id': 'employees.view',
+  '/self-service': 'selfService.view',
   '/reports': 'reports.view',
   '/quick-action': 'quickAction.view',
   '/users': 'users.view',
@@ -291,6 +370,14 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/cost-settings': 'costs.manage',
   '/roles': 'roles.manage',
   '/settings': 'settings.view',
+  '/attendance': 'attendance.view',
+  '/attendance/import': 'attendance.import',
+  '/leave-requests': 'leave.view',
+  '/loan-requests': 'loan.view',
+  '/approval-center': 'approval.view',
+  '/payroll': 'payroll.view',
+  '/organization': 'hrSettings.view',
+  '/hr-settings': 'hrSettings.view',
 };
 
 // ─── Role-based Home Route ───────────────────────────────────────────────────
@@ -298,7 +385,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
 const HOME_ROUTES: { permission: Permission; path: string }[] = [
   { permission: 'adminDashboard.view', path: '/admin-dashboard' },
   { permission: 'factoryDashboard.view', path: '/factory-dashboard' },
-  { permission: 'supervisorDashboard.view', path: '/supervisor-dashboard' },
+  { permission: 'employeeDashboard.view', path: '/employee-dashboard' },
   { permission: 'dashboard.view', path: '/' },
 ];
 

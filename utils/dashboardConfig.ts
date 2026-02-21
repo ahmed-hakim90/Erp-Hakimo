@@ -101,7 +101,7 @@ export const DEFAULT_PRINT_TEMPLATE: PrintTemplateSettings = {
   copies: 1,
   decimalPlaces: 0,
   showWaste: true,
-  showSupervisor: true,
+  showEmployee: true,
   showQRCode: false,
 };
 

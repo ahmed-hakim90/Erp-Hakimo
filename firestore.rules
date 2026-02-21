@@ -94,11 +94,19 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ── Supervisors Collection ────────────────────────────────────────────
-    match /supervisors/{docId} {
+    // ── Employees Collection ─────────────────────────────────────────────
+    match /employees/{docId} {
       allow read: if isActiveUser();
-      allow create: if hasPermission('supervisors.create');
-      allow update: if hasPermission('supervisors.edit');
+      allow create: if hasPermission('employees.create');
+      allow update: if hasPermission('employees.edit');
+      allow delete: if isAdmin();
+    }
+
+    // ── Approval Requests Collection ──────────────────────────────────────
+    match /approval_requests/{docId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if hasPermission('approval.manage') || isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -178,6 +186,160 @@ service cloud.firestore {
       allow read: if isActiveUser();
       allow create, update: if isAdmin();
       allow delete: if isAdmin();
+    }
+
+    // ── HR: Departments ──────────────────────────────────────────────────
+    match /departments/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if hasPermission('attendance.edit') || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Job Positions ─────────────────────────────────────────────────
+    match /job_positions/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if hasPermission('attendance.edit') || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Shifts ────────────────────────────────────────────────────────
+    match /shifts/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if hasPermission('attendance.edit') || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Settings (single doc) ─────────────────────────────────────────
+    match /hr_settings/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Penalty Rules ─────────────────────────────────────────────────
+    match /penalty_rules/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Late Rules ────────────────────────────────────────────────────
+    match /late_rules/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Allowance Types ───────────────────────────────────────────────
+    match /allowance_types/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Attendance Raw Logs ───────────────────────────────────────────
+    match /attendance_raw_logs/{docId} {
+      allow read: if hasPermission('attendance.view');
+      allow create: if hasPermission('attendance.import');
+      allow update: if hasPermission('attendance.edit');
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Attendance Logs (processed) ───────────────────────────────────
+    match /attendance_logs/{docId} {
+      allow read: if hasPermission('attendance.view');
+      allow create: if hasPermission('attendance.import');
+      allow update: if hasPermission('attendance.edit');
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Leave Requests ────────────────────────────────────────────────
+    match /leave_requests/{docId} {
+      allow read: if isActiveUser();
+      allow create: if hasPermission('leave.create') || hasPermission('leave.manage');
+      allow update: if hasPermission('leave.manage') || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Leave Balances ────────────────────────────────────────────────
+    match /leave_balances/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if hasPermission('leave.manage') || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Employee Loans ────────────────────────────────────────────────
+    match /employee_loans/{docId} {
+      allow read: if isActiveUser();
+      allow create: if hasPermission('loan.create') || hasPermission('loan.manage');
+      allow update: if hasPermission('loan.manage') || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Approval Settings ─────────────────────────────────────────────
+    match /approval_settings/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if hasPermission('approval.manage') || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Approval Delegations ──────────────────────────────────────────
+    match /approval_delegations/{docId} {
+      allow read: if isActiveUser();
+      allow create: if hasPermission('approval.delegate') || hasPermission('approval.manage');
+      allow update: if hasPermission('approval.manage') || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR: Approval Audit Logs ───────────────────────────────────────────
+    match /approval_audit_logs/{docId} {
+      allow read: if hasPermission('approval.view');
+      allow create: if isActiveUser();
+      allow update, delete: if false;
+    }
+
+    // ── Payroll: Payroll Months ───────────────────────────────────────────
+    match /payroll_months/{docId} {
+      allow read: if hasPermission('payroll.view');
+      allow create: if hasPermission('payroll.generate');
+      allow update: if hasPermission('payroll.finalize') || hasPermission('payroll.lock');
+      allow delete: if isAdmin();
+    }
+
+    // ── Payroll: Payroll Records ──────────────────────────────────────────
+    match /payroll_records/{docId} {
+      allow read: if hasPermission('payroll.view');
+      allow create: if hasPermission('payroll.generate');
+      allow update: if hasPermission('payroll.finalize') || hasPermission('payroll.lock');
+      allow delete: if hasPermission('payroll.generate');
+    }
+
+    // ── Payroll: Payroll Audit Logs ───────────────────────────────────────
+    match /payroll_audit_logs/{docId} {
+      allow read: if hasPermission('payroll.view');
+      allow create: if isActiveUser();
+      allow update, delete: if false;
+    }
+
+    // ── Payroll: Cost Summary ─────────────────────────────────────────────
+    match /payroll_cost_summary/{docId} {
+      allow read: if hasPermission('payroll.view');
+      allow create, update: if hasPermission('payroll.finalize');
+      allow delete: if isAdmin();
+    }
+
+    // ── HR Config: Modules ────────────────────────────────────────────────
+    match /hr_config_modules/{docId} {
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── HR Config: Audit Logs ─────────────────────────────────────────────
+    match /hr_config_audit_logs/{docId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update, delete: if false;
     }
 
     // ── Catch-all: deny everything else ───────────────────────────────────

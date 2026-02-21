@@ -11,22 +11,31 @@ import { Products } from './pages/Products';
 import { ProductDetails } from './pages/ProductDetails';
 import { Lines } from './pages/Lines';
 import { LineDetails } from './pages/LineDetails';
-import { Supervisors } from './pages/Supervisors';
-import { SupervisorDetails } from './pages/SupervisorDetails';
+import { Employees } from './pages/Employees';
+import { EmployeeProfile } from './pages/EmployeeProfile';
 import { Reports } from './pages/Reports';
 import { RolesManagement } from './pages/RolesManagement';
 import { Settings } from './pages/Settings';
-import { Users } from './pages/Users';
 import { QuickAction } from './pages/QuickAction';
 import { ActivityLogPage } from './pages/ActivityLog';
 import { CostCenters } from './pages/CostCenters';
 import { CostCenterDistribution } from './pages/CostCenterDistribution';
 import { CostSettings } from './pages/CostSettings';
 import { ProductionPlans } from './pages/ProductionPlans';
-import { SupervisorDashboard } from './pages/SupervisorDashboard';
+import { EmployeeDashboard } from './pages/EmployeeDashboard';
+import { EmployeeSelfService } from './pages/EmployeeSelfService';
 import { FactoryManagerDashboard } from './pages/FactoryManagerDashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { PendingApproval } from './pages/PendingApproval';
+import { AttendanceImport } from './modules/hr/pages/AttendanceImport';
+import { AttendanceList } from './modules/hr/pages/AttendanceList';
+import { LeaveRequests } from './modules/hr/pages/LeaveRequests';
+import { LoanRequests } from './modules/hr/pages/LoanRequests';
+import { ApprovalCenter } from './modules/hr/pages/ApprovalCenter';
+import { Payroll } from './modules/hr/pages/Payroll';
+import { HRSettings } from './modules/hr/pages/HRSettings';
+import { Organization } from './modules/hr/pages/Organization';
+import { HRImport } from './modules/hr/pages/HRImport';
 import { useAppStore } from './store/useAppStore';
 import { onAuthChange } from './services/firebase';
 import { getHomeRoute } from './utils/permissions';
@@ -126,13 +135,18 @@ const App: React.FC = () => {
                 <Route path="/products/:id" element={<ProtectedRoute permission="products.view"><ProductDetails /></ProtectedRoute>} />
                 <Route path="/lines" element={<ProtectedRoute permission="lines.view"><Lines /></ProtectedRoute>} />
                 <Route path="/lines/:id" element={<ProtectedRoute permission="lines.view"><LineDetails /></ProtectedRoute>} />
-                <Route path="/supervisors" element={<ProtectedRoute permission="supervisors.view"><Supervisors /></ProtectedRoute>} />
-                <Route path="/supervisors/:id" element={<ProtectedRoute permission="supervisors.view"><SupervisorDetails /></ProtectedRoute>} />
+                <Route path="/employees" element={<ProtectedRoute permission="employees.view"><Employees /></ProtectedRoute>} />
+                <Route path="/employees/import" element={<ProtectedRoute permission="employees.create"><HRImport /></ProtectedRoute>} />
+                <Route path="/employees/:id" element={<ProtectedRoute permission="employees.view"><EmployeeProfile /></ProtectedRoute>} />
                 <Route path="/reports" element={<ProtectedRoute permission="reports.view"><Reports /></ProtectedRoute>} />
                 <Route path="/quick-action" element={<ProtectedRoute permission="quickAction.view"><QuickAction /></ProtectedRoute>} />
-                <Route path="/users" element={<ProtectedRoute permission="users.view"><Users /></ProtectedRoute>} />
+                <Route path="/users" element={<Navigate to="/employees" replace />} />
+                <Route path="/supervisors" element={<Navigate to="/employees" replace />} />
+                <Route path="/supervisors/:id" element={<Navigate to="/employees" replace />} />
                 <Route path="/activity-log" element={<ProtectedRoute permission="activityLog.view"><ActivityLogPage /></ProtectedRoute>} />
-                <Route path="/supervisor-dashboard" element={<ProtectedRoute permission="supervisorDashboard.view"><SupervisorDashboard /></ProtectedRoute>} />
+                <Route path="/employee-dashboard" element={<ProtectedRoute permission="employeeDashboard.view"><EmployeeDashboard /></ProtectedRoute>} />
+                <Route path="/supervisor-dashboard" element={<Navigate to="/employee-dashboard" replace />} />
+                <Route path="/self-service" element={<ProtectedRoute permission="selfService.view"><EmployeeSelfService /></ProtectedRoute>} />
                 <Route path="/factory-dashboard" element={<ProtectedRoute permission="factoryDashboard.view"><FactoryManagerDashboard /></ProtectedRoute>} />
                 <Route path="/admin-dashboard" element={<ProtectedRoute permission="adminDashboard.view"><AdminDashboard /></ProtectedRoute>} />
                 <Route path="/production-plans" element={<ProtectedRoute permission="plans.view"><ProductionPlans /></ProtectedRoute>} />
@@ -141,6 +155,14 @@ const App: React.FC = () => {
                 <Route path="/cost-settings" element={<ProtectedRoute permission="costs.manage"><CostSettings /></ProtectedRoute>} />
                 <Route path="/roles" element={<ProtectedRoute permission="roles.manage"><RolesManagement /></ProtectedRoute>} />
                 <Route path="/settings" element={<ProtectedRoute permission="settings.view"><Settings /></ProtectedRoute>} />
+                <Route path="/attendance" element={<ProtectedRoute permission="attendance.view"><AttendanceList /></ProtectedRoute>} />
+                <Route path="/attendance/import" element={<ProtectedRoute permission="attendance.import"><AttendanceImport /></ProtectedRoute>} />
+                <Route path="/leave-requests" element={<ProtectedRoute permission="leave.view"><LeaveRequests /></ProtectedRoute>} />
+                <Route path="/loan-requests" element={<ProtectedRoute permission="loan.view"><LoanRequests /></ProtectedRoute>} />
+                <Route path="/approval-center" element={<ProtectedRoute permission="approval.view"><ApprovalCenter /></ProtectedRoute>} />
+                <Route path="/payroll" element={<ProtectedRoute permission="payroll.view"><Payroll /></ProtectedRoute>} />
+                <Route path="/organization" element={<ProtectedRoute permission="hrSettings.view"><Organization /></ProtectedRoute>} />
+                <Route path="/hr-settings" element={<ProtectedRoute permission="hrSettings.view"><HRSettings /></ProtectedRoute>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Layout>

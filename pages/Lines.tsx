@@ -168,7 +168,7 @@ export const Lines: React.FC = () => {
                 <div className="flex justify-between items-start mb-5">
                   <div>
                     <h4 className="font-bold text-lg text-slate-800 dark:text-white">{line.name}</h4>
-                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">{line.supervisorName}</span>
+                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">{line.employeeName}</span>
                   </div>
                   <Badge variant={getVariant(line.status)} pulse={line.status === ProductionLineStatus.ACTIVE}>
                     {getStatusLabel(line.status)}

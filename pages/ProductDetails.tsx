@@ -47,7 +47,7 @@ export const ProductDetails: React.FC = () => {
   const products = useAppStore((s) => s.products);
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const _rawLines = useAppStore((s) => s._rawLines);
-  const supervisors = useAppStore((s) => s.supervisors);
+  const employees = useAppStore((s) => s.employees);
   const lineProductConfigs = useAppStore((s) => s.lineProductConfigs);
   const todayReports = useAppStore((s) => s.todayReports);
   const costCenters = useAppStore((s) => s.costCenters);
@@ -174,13 +174,13 @@ export const ProductDetails: React.FC = () => {
     if (costByLine.length === 0) return null;
     return costByLine.reduce((best, cur) => cur.costPerUnit < best.costPerUnit ? cur : best);
   }, [costByLine]);
-  const getSupervisorName = (supId: string) => supervisors.find((s) => s.id === supId)?.name ?? '—';
+  const getEmployeeName = (empId: string) => employees.find((s) => s.id === empId)?.name ?? '—';
 
   const lookups = useMemo(() => ({
     getLineName,
     getProductName: () => product?.name || rawProduct?.name || '—',
-    getSupervisorName,
-  }), [_rawLines, supervisors, product, rawProduct]);
+    getEmployeeName,
+  }), [_rawLines, employees, product, rawProduct]);
 
   const printRows = useMemo(() => mapReportsToPrintRows(reports, lookups), [reports, lookups]);
   const printTotals = useMemo(() => computePrintTotals(printRows), [printRows]);
@@ -611,7 +611,7 @@ export const ProductDetails: React.FC = () => {
                 <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
                   <th className="px-5 py-3 text-xs font-black text-slate-500 uppercase tracking-[0.15em]">التاريخ</th>
                   <th className="px-5 py-3 text-xs font-black text-slate-500 uppercase tracking-[0.15em]">خط الإنتاج</th>
-                  <th className="px-5 py-3 text-xs font-black text-slate-500 uppercase tracking-[0.15em]">المشرف</th>
+                  <th className="px-5 py-3 text-xs font-black text-slate-500 uppercase tracking-[0.15em]">الموظف</th>
                   <th className="px-5 py-3 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-center">الكمية</th>
                   <th className="px-5 py-3 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-center">الهالك</th>
                   <th className="px-5 py-3 text-xs font-black text-slate-500 uppercase tracking-[0.15em] text-center">عمال</th>
@@ -632,7 +632,7 @@ export const ProductDetails: React.FC = () => {
                   <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                     <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">{r.date}</td>
                     <td className="px-5 py-3 text-sm font-medium text-slate-600 dark:text-slate-400">{getLineName(r.lineId)}</td>
-                    <td className="px-5 py-3 text-sm font-medium text-slate-600 dark:text-slate-400">{getSupervisorName(r.supervisorId)}</td>
+                    <td className="px-5 py-3 text-sm font-medium text-slate-600 dark:text-slate-400">{getEmployeeName(r.employeeId)}</td>
                     <td className="px-5 py-3 text-center">
                       <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-sm font-black ring-1 ring-emerald-500/20">
                         {formatNumber(r.quantityProduced)}

@@ -7,7 +7,7 @@ import type {
   ProductionReport,
   FirestoreProduct,
   FirestoreProductionLine,
-  FirestoreSupervisor,
+  FirestoreEmployee,
   LineProductConfig,
   LineStatus,
   Product,
@@ -235,7 +235,7 @@ export const buildProducts = (
 export const buildProductionLines = (
   rawLines: FirestoreProductionLine[],
   rawProducts: FirestoreProduct[],
-  rawSupervisors: FirestoreSupervisor[],
+  rawEmployees: FirestoreEmployee[],
   todayReports: ProductionReport[],
   lineStatuses: LineStatus[],
   configs: LineProductConfig[],
@@ -273,15 +273,15 @@ export const buildProductionLines = (
         (a, b) => (b.date || '').localeCompare(a.date || '')
       );
       const latest = sorted[0];
-      const supervisorName = latest
-        ? rawSupervisors.find((s) => s.id === latest.supervisorId)?.name ?? '—'
+      const employeeName = latest
+        ? rawEmployees.find((s) => s.id === latest.employeeId)?.name ?? '—'
         : '—';
 
       return {
         id: line.id!,
         name: line.name,
         code: line.id!,
-        supervisorName,
+        employeeName,
         status: line.status as ProductionLineStatus,
         currentProduct,
         currentProductId: activePlan.productId,
@@ -311,17 +311,17 @@ export const buildProductionLines = (
     const currentProduct =
       rawProducts.find((p) => p.id === status?.currentProductId)?.name ?? '—';
 
-    const supervisorId = lineReports.length
-      ? lineReports[0].supervisorId
+    const employeeId = lineReports.length
+      ? lineReports[0].employeeId
       : undefined;
-    const supervisorName =
-      rawSupervisors.find((s) => s.id === supervisorId)?.name ?? '—';
+    const employeeName =
+      rawEmployees.find((s) => s.id === employeeId)?.name ?? '—';
 
     return {
       id: line.id!,
       name: line.name,
       code: line.id!,
-      supervisorName,
+      employeeName,
       status: line.status as ProductionLineStatus,
       currentProduct,
       currentProductId: status?.currentProductId ?? '',

@@ -12,7 +12,7 @@ export interface ProductionLine {
   id: string;
   name: string;
   code: string;
-  supervisorName: string;
+  employeeName: string;
   status: ProductionLineStatus;
   currentProduct: string;
   currentProductId: string;
@@ -37,17 +37,30 @@ export interface Product {
   imageUrl?: string;
 }
 
-export interface Supervisor {
+export type EmploymentType = 'full_time' | 'part_time' | 'contract' | 'daily';
+
+export const EMPLOYMENT_TYPE_LABELS: Record<EmploymentType, string> = {
+  full_time: 'دوام كامل',
+  part_time: 'دوام جزئي',
+  contract: 'عقد',
+  daily: 'يومي',
+};
+
+export interface Employee {
   id: string;
   name: string;
-  role: string;
+  departmentId: string;
+  jobPositionId: string;
+  level: number;
+  managerId?: string;
+  employmentType: EmploymentType;
+  baseSalary: number;
+  hourlyRate: number;
+  shiftId?: string;
+  vehicleId?: string;
+  hasSystemAccess: boolean;
   isActive: boolean;
-  lineId?: string;
-  efficiency: number;
-  monthlyHours: number;
-  monthlyShifts: number;
-  status: 'online' | 'offline';
-  imageUrl?: string;
+  code?: string;
 }
 
 // ─── Firestore Document Types (match collection schemas) ────────────────────
@@ -68,15 +81,24 @@ export interface FirestoreProductionLine {
   status: ProductionLineStatus;
 }
 
-export interface FirestoreSupervisor {
+export interface FirestoreEmployee {
   id?: string;
   name: string;
-  role?: 'supervisor' | 'hall_supervisor' | 'factory_manager' | 'admin';
-  isActive?: boolean;
-  /** Firebase Auth UID — links this supervisor to their login account */
+  departmentId: string;
+  jobPositionId: string;
+  level: number;
+  managerId?: string;
+  employmentType: EmploymentType;
+  baseSalary: number;
+  hourlyRate: number;
+  shiftId?: string;
+  vehicleId?: string;
+  hasSystemAccess: boolean;
+  isActive: boolean;
   userId?: string;
-  /** Email — for display (primary source of truth is in users collection) */
   email?: string;
+  code?: string;
+  createdAt?: any;
 }
 
 // ─── Activity Log ────────────────────────────────────────────────────────────
@@ -87,6 +109,13 @@ export type ActivityAction =
   | 'CREATE_REPORT'
   | 'UPDATE_REPORT'
   | 'DELETE_REPORT'
+  | 'CREATE_LEAVE_REQUEST'
+  | 'APPROVE_LEAVE'
+  | 'REJECT_LEAVE'
+  | 'CREATE_LOAN_REQUEST'
+  | 'APPROVE_LOAN'
+  | 'REJECT_LOAN'
+  | 'PROCESS_INSTALLMENT'
   | 'CREATE_USER'
   | 'UPDATE_USER_ROLE'
   | 'TOGGLE_USER_ACTIVE'
@@ -112,7 +141,7 @@ export interface LineProductConfig {
 
 export interface ProductionReport {
   id?: string;
-  supervisorId: string;
+  employeeId: string;
   productId: string;
   lineId: string;
   date: string;
@@ -216,7 +245,7 @@ export interface PrintTemplateSettings {
   copies: number;
   decimalPlaces: number;
   showWaste: boolean;
-  showSupervisor: boolean;
+  showEmployee: boolean;
   showQRCode: boolean;
 }
 

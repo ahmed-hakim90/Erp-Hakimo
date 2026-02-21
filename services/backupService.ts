@@ -28,7 +28,7 @@ const BACKUPS_COLLECTION = 'backups';
 const ALL_COLLECTIONS = [
   'products',
   'production_lines',
-  'supervisors',
+  'employees',
   'production_reports',
   'line_status',
   'line_product_config',
@@ -41,6 +41,31 @@ const ALL_COLLECTIONS = [
   'users',
   'system_settings',
   'activity_logs',
+  // HR collections
+  'departments',
+  'job_positions',
+  'shifts',
+  'hr_settings',
+  'penalty_rules',
+  'late_rules',
+  'allowance_types',
+  'attendance_raw_logs',
+  'attendance_logs',
+  'leave_requests',
+  'leave_balances',
+  'employee_loans',
+  'approval_requests',
+  'approval_settings',
+  'approval_delegations',
+  'approval_audit_logs',
+  // Payroll collections
+  'payroll_months',
+  'payroll_records',
+  'payroll_audit_logs',
+  'payroll_cost_summary',
+  // HR Config collections
+  'hr_config_modules',
+  'hr_config_audit_logs',
 ] as const;
 
 const SETTINGS_COLLECTIONS = [

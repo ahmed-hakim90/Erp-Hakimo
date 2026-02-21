@@ -91,9 +91,9 @@ const RESTORE_MODES: { value: RestoreMode; label: string; icon: string; descript
 ];
 
 const SAMPLE_ROWS: ReportPrintRow[] = [
-  { date: '2026-02-21', lineName: 'خط 1', productName: 'منتج A', supervisorName: 'أحمد محمد', quantityProduced: 1200, quantityWaste: 35, workersCount: 12, workHours: 8 },
-  { date: '2026-02-21', lineName: 'خط 2', productName: 'منتج B', supervisorName: 'سعيد علي', quantityProduced: 950, quantityWaste: 20, workersCount: 10, workHours: 8 },
-  { date: '2026-02-21', lineName: 'خط 3', productName: 'منتج C', supervisorName: 'خالد حسن', quantityProduced: 800, quantityWaste: 15, workersCount: 8, workHours: 7.5 },
+  { date: '2026-02-21', lineName: 'خط 1', productName: 'منتج A', employeeName: 'أحمد محمد', quantityProduced: 1200, quantityWaste: 35, workersCount: 12, workHours: 8 },
+  { date: '2026-02-21', lineName: 'خط 2', productName: 'منتج B', employeeName: 'سعيد علي', quantityProduced: 950, quantityWaste: 20, workersCount: 10, workHours: 8 },
+  { date: '2026-02-21', lineName: 'خط 3', productName: 'منتج C', employeeName: 'خالد حسن', quantityProduced: 800, quantityWaste: 15, workersCount: 8, workHours: 7.5 },
 ];
 
 const ALERT_FIELDS: { key: keyof AlertSettings; label: string; icon: string; unit: string; description: string }[] = [
@@ -108,7 +108,7 @@ export const Settings: React.FC = () => {
   const isAuthenticated = useAppStore((s) => s.isAuthenticated);
   const products = useAppStore((s) => s.products);
   const productionLines = useAppStore((s) => s.productionLines);
-  const supervisors = useAppStore((s) => s.supervisors);
+  const employees = useAppStore((s) => s.employees);
   const userPermissions = useAppStore((s) => s.userPermissions);
   const systemSettings = useAppStore((s) => s.systemSettings);
   const updateSystemSettings = useAppStore((s) => s.updateSystemSettings);
@@ -978,7 +978,7 @@ export const Settings: React.FC = () => {
               <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-5 text-center">
                 <span className="material-icons-round text-primary text-3xl mb-2 block">groups</span>
                 <p className="text-xs text-slate-400 font-bold mb-1">المشرفين</p>
-                <p className="text-2xl font-black text-slate-800 dark:text-white">{supervisors.length}</p>
+                <p className="text-2xl font-black text-slate-800 dark:text-white">{employees.length}</p>
               </div>
             </div>
           </Card>
@@ -1546,7 +1546,7 @@ export const Settings: React.FC = () => {
             <div className="space-y-3">
               {([
                 { key: 'showWaste' as const, label: 'عرض الهالك', icon: 'delete_sweep', desc: 'إظهار عمود ونسبة الهالك في التقرير' },
-                { key: 'showSupervisor' as const, label: 'عرض المشرف', icon: 'person', desc: 'إظهار اسم المشرف في التقرير' },
+                { key: 'showEmployee' as const, label: 'عرض الموظف', icon: 'person', desc: 'إظهار اسم الموظف في التقرير' },
                 { key: 'showQRCode' as const, label: 'عرض رمز QR', icon: 'qr_code', desc: 'إظهار رمز QR للتحقق من صحة التقرير' },
               ]).map((toggle) => (
                 <div

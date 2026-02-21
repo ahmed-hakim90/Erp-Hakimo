@@ -12,7 +12,7 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   ProductionLine,
   Product,
-  Supervisor,
+  Employee,
   ProductionReport,
   ProductionPlan,
   LineStatus,
@@ -24,7 +24,7 @@ import {
   SystemSettings,
   FirestoreProduct,
   FirestoreProductionLine,
-  FirestoreSupervisor,
+  FirestoreEmployee,
   FirestoreRole,
   FirestoreUser,
 } from '../types';
@@ -38,7 +38,7 @@ import {
 } from '../services/firebase';
 import { productService } from '../services/productService';
 import { lineService } from '../services/lineService';
-import { supervisorService } from '../services/supervisorService';
+import { employeeService } from '../modules/hr/employeeService';
 import { reportService } from '../services/reportService';
 import { lineStatusService } from '../services/lineStatusService';
 import { lineProductConfigService } from '../services/lineProductConfigService';
@@ -81,12 +81,15 @@ interface AppState {
   // UI-ready data (consumed by components)
   productionLines: ProductionLine[];
   products: Product[];
-  supervisors: Supervisor[];
+  employees: Employee[];
 
   // Raw Firestore data (used for rebuilding UI data)
   _rawProducts: FirestoreProduct[];
   _rawLines: FirestoreProductionLine[];
-  _rawSupervisors: FirestoreSupervisor[];
+  _rawEmployees: FirestoreEmployee[];
+
+  // Current logged-in employee record (resolved after login)
+  currentEmployee: FirestoreEmployee | null;
   productionReports: ProductionReport[];
   todayReports: ProductionReport[];
   monthlyReports: ProductionReport[];
@@ -152,7 +155,7 @@ interface AppState {
   // Fetch (one-time)
   fetchProducts: () => Promise<void>;
   fetchLines: () => Promise<void>;
-  fetchSupervisors: () => Promise<void>;
+  fetchEmployees: () => Promise<void>;
   fetchReports: (startDate?: string, endDate?: string) => Promise<void>;
   fetchLineStatuses: () => Promise<void>;
   fetchLineProductConfigs: () => Promise<void>;
@@ -168,10 +171,10 @@ interface AppState {
   updateLine: (id: string, data: Partial<FirestoreProductionLine>) => Promise<void>;
   deleteLine: (id: string) => Promise<void>;
 
-  // Mutations — Supervisors
-  createSupervisor: (data: Omit<FirestoreSupervisor, 'id'>) => Promise<string | null>;
-  updateSupervisor: (id: string, data: Partial<FirestoreSupervisor>) => Promise<void>;
-  deleteSupervisor: (id: string) => Promise<void>;
+  // Mutations — Employees
+  createEmployee: (data: Omit<FirestoreEmployee, 'id'>) => Promise<string | null>;
+  updateEmployee: (id: string, data: Partial<FirestoreEmployee>) => Promise<void>;
+  deleteEmployee: (id: string) => Promise<void>;
 
   // Mutations — Reports
   createReport: (data: Omit<ProductionReport, 'id' | 'createdAt'>) => Promise<string | null>;
@@ -217,7 +220,7 @@ interface AppState {
   // Legacy setters (backward compat)
   setProductionLines: (lines: ProductionLine[]) => void;
   setProducts: (products: Product[]) => void;
-  setSupervisors: (supervisors: Supervisor[]) => void;
+  setEmployees: (employees: Employee[]) => void;
   setLoading: (loading: boolean) => void;
 }
 
@@ -227,11 +230,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Initial state
   productionLines: [],
   products: [],
-  supervisors: [],
+  employees: [],
 
   _rawProducts: [],
   _rawLines: [],
-  _rawSupervisors: [],
+  _rawEmployees: [],
+  currentEmployee: null,
   productionReports: [],
   todayReports: [],
   monthlyReports: [],
@@ -414,10 +418,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       userPermissions: emptyPermissions(),
       productionLines: [],
       products: [],
-      supervisors: [],
+      employees: [],
       _rawProducts: [],
       _rawLines: [],
-      _rawSupervisors: [],
+      _rawEmployees: [],
+      currentEmployee: null,
       productionReports: [],
       todayReports: [],
       monthlyReports: [],
@@ -574,11 +579,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Internal: Load all app data (after auth) ────────────────────────────
 
   _loadAppData: async () => {
-    const [rawProducts, rawLines, rawSupervisors, configs, productionPlans, costCenters, costCenterValues, costAllocations, laborSettings, systemSettingsRaw] =
+    const [rawProducts, rawLines, rawEmployees, configs, productionPlans, costCenters, costCenterValues, costAllocations, laborSettings, systemSettingsRaw] =
       await Promise.all([
         productService.getAll(),
         lineService.getAll(),
-        supervisorService.getAll(),
+        employeeService.getAll(),
         lineProductConfigService.getAll(),
         productionPlanService.getAll(),
         costCenterService.getAll(),
@@ -613,10 +618,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       ? { ...DEFAULT_SYSTEM_SETTINGS, ...systemSettingsRaw }
       : DEFAULT_SYSTEM_SETTINGS;
 
+    // Resolve current employee record for the logged-in user
+    const uid = get().uid;
+    const currentEmployee = uid
+      ? rawEmployees.find((e) => e.userId === uid) ?? null
+      : null;
+
     set({
       _rawProducts: rawProducts,
       _rawLines: rawLines,
-      _rawSupervisors: rawSupervisors,
+      _rawEmployees: rawEmployees,
+      currentEmployee,
       lineProductConfigs: configs,
       todayReports,
       monthlyReports,
@@ -635,21 +647,27 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const products = buildProducts(rawProducts, todayReports, configs);
     const productionLines = buildProductionLines(
-      rawLines, rawProducts, rawSupervisors, todayReports, lineStatuses, configs,
+      rawLines, rawProducts, rawEmployees, todayReports, lineStatuses, configs,
       productionPlans, planReports
     );
-    const supervisors: Supervisor[] = rawSupervisors.map((s) => ({
-      id: s.id!,
-      name: s.name,
-      role: s.role ?? 'supervisor',
-      isActive: s.isActive !== false,
-      efficiency: 0,
-      monthlyHours: 0,
-      monthlyShifts: 0,
-      status: 'offline' as const,
+    const employees: Employee[] = rawEmployees.map((e) => ({
+      id: e.id!,
+      name: e.name,
+      departmentId: e.departmentId ?? '',
+      jobPositionId: e.jobPositionId ?? '',
+      level: e.level ?? 1,
+      managerId: e.managerId,
+      employmentType: e.employmentType ?? 'full_time',
+      baseSalary: e.baseSalary ?? 0,
+      hourlyRate: e.hourlyRate ?? 0,
+      shiftId: e.shiftId,
+      vehicleId: e.vehicleId,
+      hasSystemAccess: e.hasSystemAccess ?? false,
+      isActive: e.isActive !== false,
+      code: e.code,
     }));
 
-    set({ products, productionLines, supervisors });
+    set({ products, productionLines, employees });
   },
 
   // ── Role Switching ─────────────────────────────────────────────────────────
@@ -742,21 +760,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchSupervisors: async () => {
+  fetchEmployees: async () => {
     try {
-      const rawSupervisors = await supervisorService.getAll();
-      set({ _rawSupervisors: rawSupervisors });
-      const supervisors: Supervisor[] = rawSupervisors.map((s) => ({
-        id: s.id!,
-        name: s.name,
-        role: s.role ?? 'supervisor',
-        isActive: s.isActive !== false,
-        efficiency: 0,
-        monthlyHours: 0,
-        monthlyShifts: 0,
-        status: 'offline' as const,
+      const rawEmployees = await employeeService.getAll();
+      set({ _rawEmployees: rawEmployees });
+      const employees: Employee[] = rawEmployees.map((e) => ({
+        id: e.id!,
+        name: e.name,
+        departmentId: e.departmentId ?? '',
+        jobPositionId: e.jobPositionId ?? '',
+        level: e.level ?? 1,
+        managerId: e.managerId,
+        employmentType: e.employmentType ?? 'full_time',
+        baseSalary: e.baseSalary ?? 0,
+        hourlyRate: e.hourlyRate ?? 0,
+        shiftId: e.shiftId,
+        vehicleId: e.vehicleId,
+        hasSystemAccess: e.hasSystemAccess ?? false,
+        isActive: e.isActive !== false,
+        code: e.code,
       }));
-      set({ supervisors });
+      set({ employees });
     } catch (error) {
       set({ error: (error as Error).message });
     }
@@ -912,12 +936,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  // ── Supervisors ──
+  // ── Employees ──
 
-  createSupervisor: async (data) => {
+  createEmployee: async (data) => {
     try {
-      const id = await supervisorService.create(data);
-      if (id) await get().fetchSupervisors();
+      const id = await employeeService.create(data);
+      if (id) await get().fetchEmployees();
       return id;
     } catch (error) {
       set({ error: (error as Error).message });
@@ -925,19 +949,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  updateSupervisor: async (id, data) => {
+  updateEmployee: async (id, data) => {
     try {
-      await supervisorService.update(id, data);
-      await get().fetchSupervisors();
+      await employeeService.update(id, data);
+      await get().fetchEmployees();
     } catch (error) {
       set({ error: (error as Error).message });
     }
   },
 
-  deleteSupervisor: async (id) => {
+  deleteEmployee: async (id) => {
     try {
-      await supervisorService.delete(id);
-      await get().fetchSupervisors();
+      await employeeService.delete(id);
+      await get().fetchEmployees();
     } catch (error) {
       set({ error: (error as Error).message });
     }
@@ -1228,7 +1252,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const {
       _rawLines,
       _rawProducts,
-      _rawSupervisors,
+      _rawEmployees,
       todayReports,
       lineStatuses,
       lineProductConfigs,
@@ -1238,7 +1262,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const productionLines = buildProductionLines(
       _rawLines,
       _rawProducts,
-      _rawSupervisors,
+      _rawEmployees,
       todayReports,
       lineStatuses,
       lineProductConfigs,
@@ -1252,7 +1276,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setProductionLines: (productionLines) => set({ productionLines }),
   setProducts: (products) => set({ products }),
-  setSupervisors: (supervisors) => set({ supervisors }),
+  setEmployees: (employees) => set({ employees }),
   setLoading: (loading) => set({ loading }),
 }));
 

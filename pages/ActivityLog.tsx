@@ -15,6 +15,15 @@ const ACTION_LABELS: Record<ActivityAction, { label: string; icon: string; varia
   CREATE_USER: { label: 'إنشاء مستخدم', icon: 'person_add', variant: 'success' },
   UPDATE_USER_ROLE: { label: 'تغيير دور', icon: 'swap_horiz', variant: 'warning' },
   TOGGLE_USER_ACTIVE: { label: 'تبديل حالة مستخدم', icon: 'toggle_on', variant: 'warning' },
+  APPROVE_USER: { label: 'موافقة على مستخدم', icon: 'check_circle', variant: 'success' },
+  REJECT_USER: { label: 'رفض مستخدم', icon: 'cancel', variant: 'danger' },
+  CREATE_LEAVE_REQUEST: { label: 'طلب إجازة', icon: 'beach_access', variant: 'info' },
+  APPROVE_LEAVE: { label: 'موافقة على إجازة', icon: 'check_circle', variant: 'success' },
+  REJECT_LEAVE: { label: 'رفض إجازة', icon: 'cancel', variant: 'danger' },
+  CREATE_LOAN_REQUEST: { label: 'طلب سلفة', icon: 'payments', variant: 'info' },
+  APPROVE_LOAN: { label: 'موافقة على سلفة', icon: 'check_circle', variant: 'success' },
+  REJECT_LOAN: { label: 'رفض سلفة', icon: 'cancel', variant: 'danger' },
+  PROCESS_INSTALLMENT: { label: 'معالجة قسط', icon: 'receipt', variant: 'warning' },
 };
 
 export const ActivityLogPage: React.FC = () => {

@@ -64,12 +64,12 @@ const DashboardPeriodFilter: React.FC<{
   </div>
 );
 
-// ─── Supervisor Dashboard ───────────────────────────────────────────────────
+// ─── Employee Dashboard ────────────────────────────────────────────────────
 
-export const SupervisorDashboard: React.FC = () => {
+export const EmployeeDashboard: React.FC = () => {
   const {
     uid,
-    _rawSupervisors,
+    _rawEmployees,
     _rawProducts,
     _rawLines,
     productionPlans,
@@ -79,7 +79,7 @@ export const SupervisorDashboard: React.FC = () => {
     loading,
   } = useShallowStore((s) => ({
     uid: s.uid,
-    _rawSupervisors: s._rawSupervisors,
+    _rawEmployees: s._rawEmployees,
     _rawProducts: s._rawProducts,
     _rawLines: s._rawLines,
     productionPlans: s.productionPlans,
@@ -93,21 +93,21 @@ export const SupervisorDashboard: React.FC = () => {
   const [periodReports, setPeriodReports] = useState<ProductionReport[]>([]);
   const [periodLoading, setPeriodLoading] = useState(false);
 
-  const supervisor = useMemo(
-    () => _rawSupervisors.find((s) => s.userId === uid),
-    [_rawSupervisors, uid]
+  const employee = useMemo(
+    () => _rawEmployees.find((s) => s.userId === uid),
+    [_rawEmployees, uid]
   );
 
   useEffect(() => {
-    if (!supervisor?.id) return;
+    if (!employee?.id) return;
 
     if (period === 'daily') {
-      setPeriodReports(todayReports.filter((r) => r.supervisorId === supervisor.id));
+      setPeriodReports(todayReports.filter((r) => r.employeeId === employee.id));
       return;
     }
 
     if (period === 'monthly') {
-      setPeriodReports(monthlyReports.filter((r) => r.supervisorId === supervisor.id));
+      setPeriodReports(monthlyReports.filter((r) => r.employeeId === employee.id));
       return;
     }
 
@@ -116,14 +116,14 @@ export const SupervisorDashboard: React.FC = () => {
     const { start, end } = getDateRange('weekly');
     reportService.getByDateRange(start, end).then((reports) => {
       if (!cancelled) {
-        setPeriodReports(reports.filter((r) => r.supervisorId === supervisor.id));
+        setPeriodReports(reports.filter((r) => r.employeeId === employee.id));
         setPeriodLoading(false);
       }
     }).catch(() => {
       if (!cancelled) setPeriodLoading(false);
     });
     return () => { cancelled = true; };
-  }, [period, supervisor?.id, todayReports, monthlyReports]);
+  }, [period, employee?.id, todayReports, monthlyReports]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
@@ -136,11 +136,11 @@ export const SupervisorDashboard: React.FC = () => {
     );
     const wasteRatio = calculateWasteRatio(totalWaste, totalProduction + totalWaste);
 
-    const supervisorLineIds = [...new Set(periodReports.map((r) => r.lineId))];
+    const employeeLineIds = [...new Set(periodReports.map((r) => r.lineId))];
     const activePlans = productionPlans.filter(
       (p) =>
         (p.status === 'in_progress' || p.status === 'planned') &&
-        supervisorLineIds.includes(p.lineId)
+        employeeLineIds.includes(p.lineId)
     );
 
     let totalPlannedQty = 0;
@@ -184,18 +184,18 @@ export const SupervisorDashboard: React.FC = () => {
   // ── Active Plan Card ──────────────────────────────────────────────────────
 
   const activePlan = useMemo(() => {
-    if (!supervisor?.id) return null;
+    if (!employee?.id) return null;
 
-    const supervisorLineIds = [...new Set(
+    const employeeLineIds = [...new Set(
       [...todayReports, ...monthlyReports]
-        .filter((r) => r.supervisorId === supervisor.id)
+        .filter((r) => r.employeeId === employee.id)
         .map((r) => r.lineId)
     )];
 
     const plan = productionPlans.find(
       (p) =>
         (p.status === 'in_progress' || p.status === 'planned') &&
-        supervisorLineIds.includes(p.lineId)
+        employeeLineIds.includes(p.lineId)
     );
 
     if (!plan) return null;
@@ -234,7 +234,7 @@ export const SupervisorDashboard: React.FC = () => {
       progress,
       status: plan.status,
     };
-  }, [supervisor?.id, productionPlans, planReports, todayReports, monthlyReports, periodReports, _rawProducts, _rawLines]);
+  }, [employee?.id, productionPlans, planReports, todayReports, monthlyReports, periodReports, _rawProducts, _rawLines]);
 
   // ── Personal Performance ──────────────────────────────────────────────────
 
@@ -283,7 +283,7 @@ export const SupervisorDashboard: React.FC = () => {
   if (loading) {
     return (
       <div className="space-y-8">
-        <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-white">لوحة المشرف</h2>
+        <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-white">لوحة الموظف</h2>
         <LoadingSkeleton type="card" rows={6} />
       </div>
     );
@@ -297,10 +297,10 @@ export const SupervisorDashboard: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-white">
-            لوحة المشرف
+            لوحة الموظف
           </h2>
           <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium text-sm">
-            {supervisor?.name ? `مرحباً ${supervisor.name}` : 'متابعة الأداء التشغيلي'}
+            {employee?.name ? `مرحباً ${employee.name}` : 'متابعة الأداء التشغيلي'}
           </p>
         </div>
         <DashboardPeriodFilter period={period} onChange={setPeriod} />
@@ -445,7 +445,7 @@ export const SupervisorDashboard: React.FC = () => {
                   <div className="text-center py-6 text-slate-400">
                     <span className="material-icons-round text-4xl mb-2 block opacity-30">event_note</span>
                     <p className="font-bold">لا توجد خطة إنتاج نشطة حالياً</p>
-                    <p className="text-sm mt-1">تواصل مع مشرف الصالة لإنشاء خطة جديدة</p>
+                    <p className="text-sm mt-1">تواصل مع موظف الصالة لإنشاء خطة جديدة</p>
                   </div>
                 </Card>
               )}

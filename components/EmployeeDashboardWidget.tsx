@@ -56,14 +56,14 @@ function getWeekDateRange(): { start: string; end: string } {
   return { start: fmt(start), end: fmt(end) };
 }
 
-// ─── Supervisor Dashboard ────────────────────────────────────────────────────
+// ─── Employee Dashboard Widget ───────────────────────────────────────────────
 
 interface Props {
-  supervisorId: string;
-  supervisorName: string;
+  employeeId: string;
+  employeeName: string;
 }
 
-export const SupervisorDashboard: React.FC<Props> = ({ supervisorId, supervisorName }) => {
+export const EmployeeDashboardWidget: React.FC<Props> = ({ employeeId, employeeName }) => {
   const {
     todayReports, monthlyReports, productionPlans, planReports,
     _rawProducts, _rawLines, loading,
@@ -101,8 +101,8 @@ export const SupervisorDashboard: React.FC<Props> = ({ supervisorId, supervisorN
   }, [period, todayReports, weeklyReports, monthlyReports]);
 
   const myReports = useMemo(
-    () => allPeriodReports.filter((r) => r.supervisorId === supervisorId),
-    [allPeriodReports, supervisorId]
+    () => allPeriodReports.filter((r) => r.employeeId === employeeId),
+    [allPeriodReports, employeeId]
   );
 
   // ── KPIs ──
@@ -123,7 +123,7 @@ export const SupervisorDashboard: React.FC<Props> = ({ supervisorId, supervisorN
     const myLineIds = [...new Set(myReports.map((r) => r.lineId))];
 
     const allMyLineReports = [...todayReports, ...monthlyReports].filter(
-      (r) => r.supervisorId === supervisorId
+      (r) => r.employeeId === employeeId
     );
     const allLineIds = [...new Set([...myLineIds, ...allMyLineReports.map((r) => r.lineId)])];
 
@@ -144,7 +144,7 @@ export const SupervisorDashboard: React.FC<Props> = ({ supervisorId, supervisorN
     const remaining = Math.max(plan.plannedQuantity - actualProduced, 0);
 
     return { plan, actualProduced, progress, remaining };
-  }, [myReports, todayReports, monthlyReports, productionPlans, planReports, supervisorId]);
+  }, [myReports, todayReports, monthlyReports, productionPlans, planReports, employeeId]);
 
   // ── Period-scoped plan production (only this supervisor's contribution in selected period) ──
   const periodPlanProduced = useMemo(() => {
@@ -206,7 +206,7 @@ export const SupervisorDashboard: React.FC<Props> = ({ supervisorId, supervisorN
         <div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-white">لوحة المشرف</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium text-sm">
-            مرحباً <span className="font-bold text-primary">{supervisorName}</span> — متابعة أدائك وإنتاجك
+            مرحباً <span className="font-bold text-primary">{employeeName}</span> — متابعة أدائك وإنتاجك
           </p>
         </div>
         <DashboardPeriodFilter value={period} onChange={setPeriod} />

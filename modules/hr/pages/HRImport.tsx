@@ -1,0 +1,657 @@
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card, Button, Badge } from '@/components/UI';
+import { getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { departmentsRef, jobPositionsRef, shiftsRef, employeesRef } from '../collections';
+import { parseHRExcel, type HRImportResult, type ParsedDepartmentRow, type ParsedPositionRow, type ParsedEmployeeRow, type HRLookups } from '../importHR';
+import type { FirestoreDepartment, FirestoreJobPosition, FirestoreShift, JobLevel } from '../types';
+import type { FirestoreEmployee, EmploymentType } from '@/types';
+import { EMPLOYMENT_TYPE_LABELS } from '@/types';
+import { JOB_LEVEL_LABELS } from '../types';
+import { downloadHRTemplate } from '@/utils/downloadTemplates';
+
+type ImportStep = 'upload' | 'preview' | 'importing' | 'done';
+type PreviewTab = 'employees' | 'departments' | 'positions';
+
+export const HRImport: React.FC = () => {
+  const navigate = useNavigate();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [step, setStep] = useState<ImportStep>('upload');
+  const [fileName, setFileName] = useState('');
+  const [result, setResult] = useState<HRImportResult | null>(null);
+  const [tab, setTab] = useState<PreviewTab>('employees');
+  const [lookups, setLookups] = useState<HRLookups | null>(null);
+  const [lookupsLoading, setLookupsLoading] = useState(true);
+  const [parseError, setParseError] = useState('');
+
+  // Import progress
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ depts: 0, positions: 0, employees: 0 });
+  const [importDone, setImportDone] = useState({ depts: 0, positions: 0, employees: 0, errors: 0 });
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      setLookupsLoading(true);
+      try {
+        const [deptSnap, posSnap, shiftSnap, empSnap] = await Promise.all([
+          getDocs(departmentsRef()),
+          getDocs(jobPositionsRef()),
+          getDocs(shiftsRef()),
+          getDocs(employeesRef()),
+        ]);
+        setLookups({
+          departments: deptSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreDepartment)),
+          positions: posSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreJobPosition)),
+          shifts: shiftSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreShift)),
+          employees: empSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployee)),
+        });
+      } catch (e) {
+        console.error('Failed to load lookups:', e);
+      } finally {
+        setLookupsLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !lookups) return;
+    setFileName(file.name);
+    setParseError('');
+
+    try {
+      const parsed = await parseHRExcel(file, lookups);
+      setResult(parsed);
+      if (parsed.employees.rows.length > 0) setTab('employees');
+      else if (parsed.departments.rows.length > 0) setTab('departments');
+      else if (parsed.positions.rows.length > 0) setTab('positions');
+      setStep('preview');
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : 'فشل في قراءة الملف');
+    }
+  }, [lookups]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !lookups) return;
+
+    const fakeEvent = { target: { files: [file] } } as unknown as React.ChangeEvent<HTMLInputElement>;
+    handleFileSelect(fakeEvent);
+  }, [handleFileSelect, lookups]);
+
+  const handleImport = useCallback(async () => {
+    if (!result) return;
+    setStep('importing');
+    setImporting(true);
+
+    const errors: string[] = [];
+    const createdDeptMap: Record<string, string> = {};
+    const createdPosMap: Record<string, string> = {};
+    let deptCount = 0, posCount = 0, empCount = 0;
+
+    // 1. Create departments
+    const validDepts = result.departments.rows.filter((r) => r.errors.length === 0);
+    for (const dept of validDepts) {
+      try {
+        const ref = await addDoc(departmentsRef(), {
+          name: dept.name,
+          code: dept.code,
+          managerId: '',
+          isActive: true,
+          createdAt: serverTimestamp(),
+        });
+        createdDeptMap[dept.name.toLowerCase()] = ref.id;
+        deptCount++;
+        setImportProgress((p) => ({ ...p, depts: deptCount }));
+      } catch (err) {
+        errors.push(`خطأ في إنشاء القسم "${dept.name}": ${err instanceof Error ? err.message : 'خطأ'}`);
+      }
+    }
+
+    // Helper: resolve departmentId from name (existing + newly created)
+    const resolveDeptId = (name: string): string => {
+      const n = name.trim().toLowerCase();
+      if (createdDeptMap[n]) return createdDeptMap[n];
+      const existing = lookups?.departments.find((d) => d.name.trim().toLowerCase() === n);
+      return existing?.id ?? '';
+    };
+
+    // 2. Create positions
+    const validPositions = result.positions.rows.filter((r) => r.errors.length === 0);
+    for (const pos of validPositions) {
+      try {
+        const departmentId = resolveDeptId(pos.departmentName);
+        const ref = await addDoc(jobPositionsRef(), {
+          title: pos.title,
+          departmentId,
+          level: pos.level,
+          hasSystemAccessDefault: false,
+          isActive: true,
+          createdAt: serverTimestamp(),
+        });
+        createdPosMap[pos.title.toLowerCase()] = ref.id;
+        posCount++;
+        setImportProgress((p) => ({ ...p, positions: posCount }));
+      } catch (err) {
+        errors.push(`خطأ في إنشاء المنصب "${pos.title}": ${err instanceof Error ? err.message : 'خطأ'}`);
+      }
+    }
+
+    // Helper: resolve positionId from title
+    const resolvePosId = (title: string): string => {
+      const t = title.trim().toLowerCase();
+      if (createdPosMap[t]) return createdPosMap[t];
+      const existing = lookups?.positions.find((p) => p.title.trim().toLowerCase() === t);
+      return existing?.id ?? '';
+    };
+
+    // Helper: resolve shiftId from name
+    const resolveShiftId = (name: string): string => {
+      if (!name) return '';
+      const n = name.trim().toLowerCase();
+      const existing = lookups?.shifts.find((s) => s.name.trim().toLowerCase() === n);
+      return existing?.id ?? '';
+    };
+
+    // 3. Create employees
+    const validEmps = result.employees.rows.filter((r) => r.errors.length === 0);
+    for (const emp of validEmps) {
+      try {
+        await addDoc(employeesRef(), {
+          name: emp.name,
+          code: emp.code || '',
+          departmentId: resolveDeptId(emp.departmentName),
+          jobPositionId: resolvePosId(emp.positionTitle),
+          level: emp.level,
+          employmentType: emp.employmentType,
+          baseSalary: emp.baseSalary,
+          hourlyRate: emp.hourlyRate,
+          shiftId: resolveShiftId(emp.shiftName),
+          managerId: '',
+          vehicleId: '',
+          hasSystemAccess: false,
+          isActive: true,
+          createdAt: serverTimestamp(),
+        });
+        empCount++;
+        setImportProgress((p) => ({ ...p, employees: empCount }));
+      } catch (err) {
+        errors.push(`خطأ في إنشاء الموظف "${emp.name}": ${err instanceof Error ? err.message : 'خطأ'}`);
+      }
+    }
+
+    setImportDone({ depts: deptCount, positions: posCount, employees: empCount, errors: errors.length });
+    setImportErrors(errors);
+    setImporting(false);
+    setStep('done');
+  }, [result, lookups]);
+
+  const handleReset = useCallback(() => {
+    setStep('upload');
+    setFileName('');
+    setResult(null);
+    setParseError('');
+    setImportProgress({ depts: 0, positions: 0, employees: 0 });
+    setImportDone({ depts: 0, positions: 0, employees: 0, errors: 0 });
+    setImportErrors([]);
+    if (fileRef.current) fileRef.current.value = '';
+  }, []);
+
+  const totalValid = result
+    ? result.departments.valid + result.positions.valid + result.employees.valid
+    : 0;
+  const totalErrors = result
+    ? result.departments.errors + result.positions.errors + result.employees.errors
+    : 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-800 dark:text-white">
+            استيراد بيانات الموظفين
+          </h2>
+          <p className="text-sm text-slate-500 font-medium">
+            استيراد الأقسام والمناصب والموظفين من ملف Excel
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => navigate('/employees')} className="self-start sm:self-auto shrink-0">
+          <span className="material-icons-round text-sm">arrow_forward</span>
+          العودة للموظفين
+        </Button>
+      </div>
+
+      {/* Steps indicator */}
+      <div className="flex items-center gap-2 text-xs font-bold">
+        {(['upload', 'preview', 'importing', 'done'] as ImportStep[]).map((s, i) => {
+          const labels = ['رفع الملف', 'معاينة', 'استيراد', 'تم'];
+          const icons = ['upload_file', 'preview', 'sync', 'check_circle'];
+          const isActive = step === s;
+          const isPast = ['upload', 'preview', 'importing', 'done'].indexOf(step) > i;
+          return (
+            <React.Fragment key={s}>
+              {i > 0 && <div className={`flex-1 h-0.5 ${isPast ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`} />}
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all ${
+                isActive ? 'bg-primary/10 text-primary' : isPast ? 'text-primary' : 'text-slate-400'
+              }`}>
+                <span className="material-icons-round text-sm">{icons[i]}</span>
+                <span className="hidden sm:inline">{labels[i]}</span>
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      {/* Upload Step */}
+      {step === 'upload' && (
+        <>
+          <Card>
+            <div
+              className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl p-10 text-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all"
+              onClick={() => !lookupsLoading && fileRef.current?.click()}
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+            >
+              {lookupsLoading ? (
+                <>
+                  <span className="material-icons-round text-5xl text-slate-300 dark:text-slate-600 mb-3 block animate-pulse">hourglass_empty</span>
+                  <p className="text-sm font-bold text-slate-400">جاري تحميل البيانات المرجعية...</p>
+                </>
+              ) : (
+                <>
+                  <span className="material-icons-round text-5xl text-slate-300 dark:text-slate-600 mb-3 block">cloud_upload</span>
+                  <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    اسحب ملف Excel هنا أو اضغط للاختيار
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    يدعم ملفات .xlsx و .xls — يمكن أن يحتوي على أوراق: الأقسام، المناصب، الموظفين
+                  </p>
+                </>
+              )}
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={handleFileSelect}
+                disabled={lookupsLoading}
+              />
+            </div>
+          </Card>
+
+          {parseError && (
+            <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl p-4 flex items-center gap-3">
+              <span className="material-icons-round text-rose-500">error</span>
+              <p className="text-sm font-bold text-rose-700 dark:text-rose-400">{parseError}</p>
+            </div>
+          )}
+
+          <Card>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+              <div className="flex-1">
+                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">تحميل القالب</h3>
+                <p className="text-xs text-slate-400">
+                  قم بتحميل ملف Excel نموذجي يحتوي على الأعمدة المطلوبة (3 أوراق: الأقسام، المناصب، الموظفين)
+                </p>
+              </div>
+              <Button variant="outline" onClick={downloadHRTemplate} className="shrink-0">
+                <span className="material-icons-round text-sm">download</span>
+                تحميل القالب
+              </Button>
+            </div>
+          </Card>
+
+          {!lookupsLoading && lookups && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+                <p className="text-xs text-slate-400 font-bold mb-1">أقسام حالية</p>
+                <p className="text-xl font-black text-slate-700 dark:text-white">{lookups.departments.length}</p>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+                <p className="text-xs text-slate-400 font-bold mb-1">مناصب حالية</p>
+                <p className="text-xl font-black text-slate-700 dark:text-white">{lookups.positions.length}</p>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+                <p className="text-xs text-slate-400 font-bold mb-1">ورديات حالية</p>
+                <p className="text-xl font-black text-slate-700 dark:text-white">{lookups.shifts.length}</p>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+                <p className="text-xs text-slate-400 font-bold mb-1">موظفين حاليين</p>
+                <p className="text-xl font-black text-slate-700 dark:text-white">{lookups.employees.length}</p>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Preview Step */}
+      {step === 'preview' && result && (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <span className="material-icons-round text-blue-500 text-3xl mb-2 block">description</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">إجمالي الصفوف</p>
+              <p className="text-2xl font-black">
+                {(result.departments.rows.length + result.positions.rows.length + result.employees.rows.length).toLocaleString('ar-EG')}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">check_circle</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">صالحة للاستيراد</p>
+              <p className="text-2xl font-black text-emerald-600">{totalValid.toLocaleString('ar-EG')}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <span className="material-icons-round text-rose-500 text-3xl mb-2 block">error</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">بها أخطاء</p>
+              <p className="text-2xl font-black text-rose-600">{totalErrors.toLocaleString('ar-EG')}</p>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+            {([
+              { key: 'employees' as PreviewTab, label: 'الموظفين', count: result.employees.rows.length, icon: 'groups' },
+              { key: 'departments' as PreviewTab, label: 'الأقسام', count: result.departments.rows.length, icon: 'business' },
+              { key: 'positions' as PreviewTab, label: 'المناصب', count: result.positions.rows.length, icon: 'work' },
+            ]).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm font-bold transition-all ${
+                  tab === t.key
+                    ? 'bg-white dark:bg-slate-900 text-primary shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <span className="material-icons-round text-base">{t.icon}</span>
+                <span className="hidden sm:inline">{t.label}</span>
+                {t.count > 0 && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                    tab === t.key ? 'bg-primary/10 text-primary' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                  }`}>
+                    {t.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Department preview */}
+          {tab === 'departments' && (
+            <Card title={`الأقسام — ${result.departments.valid} صالح، ${result.departments.errors} خطأ`}>
+              {result.departments.rows.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">لا توجد بيانات أقسام في الملف (ورقة "الأقسام")</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 text-xs font-bold">
+                        <th className="text-right py-3 px-3">#</th>
+                        <th className="text-right py-3 px-3">الاسم</th>
+                        <th className="text-right py-3 px-3">الرمز</th>
+                        <th className="text-right py-3 px-3">الحالة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.departments.rows.map((row) => (
+                        <tr key={row.rowIndex} className={`border-b border-slate-50 dark:border-slate-800/50 ${row.errors.length > 0 ? 'bg-rose-50/50 dark:bg-rose-900/10' : ''}`}>
+                          <td className="py-2.5 px-3 font-mono text-slate-400 text-xs">{row.rowIndex}</td>
+                          <td className="py-2.5 px-3 font-bold">{row.name || '—'}</td>
+                          <td className="py-2.5 px-3 font-mono text-xs">{row.code || '—'}</td>
+                          <td className="py-2.5 px-3">
+                            {row.errors.length > 0 ? (
+                              <div className="space-y-0.5">
+                                {row.errors.map((err, i) => (
+                                  <div key={i} className="flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400">
+                                    <span className="material-icons-round text-xs">error</span>
+                                    {err}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <Badge variant="success">صالح</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* Position preview */}
+          {tab === 'positions' && (
+            <Card title={`المناصب — ${result.positions.valid} صالح، ${result.positions.errors} خطأ`}>
+              {result.positions.rows.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">لا توجد بيانات مناصب في الملف (ورقة "المناصب")</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 text-xs font-bold">
+                        <th className="text-right py-3 px-3">#</th>
+                        <th className="text-right py-3 px-3">المنصب</th>
+                        <th className="text-right py-3 px-3">القسم</th>
+                        <th className="text-right py-3 px-3">المستوى</th>
+                        <th className="text-right py-3 px-3">الحالة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.positions.rows.map((row) => (
+                        <tr key={row.rowIndex} className={`border-b border-slate-50 dark:border-slate-800/50 ${row.errors.length > 0 ? 'bg-rose-50/50 dark:bg-rose-900/10' : ''}`}>
+                          <td className="py-2.5 px-3 font-mono text-slate-400 text-xs">{row.rowIndex}</td>
+                          <td className="py-2.5 px-3 font-bold">{row.title || '—'}</td>
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">{row.departmentName || '—'}</td>
+                          <td className="py-2.5 px-3 text-sm">{JOB_LEVEL_LABELS[row.level] ?? row.level}</td>
+                          <td className="py-2.5 px-3">
+                            {row.errors.length > 0 ? (
+                              <div className="space-y-0.5">
+                                {row.errors.map((err, i) => (
+                                  <div key={i} className="flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400">
+                                    <span className="material-icons-round text-xs">error</span>
+                                    {err}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <Badge variant="success">صالح</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* Employee preview */}
+          {tab === 'employees' && (
+            <Card title={`الموظفين — ${result.employees.valid} صالح، ${result.employees.errors} خطأ`}>
+              {result.employees.rows.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">لا توجد بيانات موظفين في الملف (ورقة "الموظفين")</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 text-xs font-bold">
+                        <th className="text-right py-3 px-3">#</th>
+                        <th className="text-right py-3 px-3">الاسم</th>
+                        <th className="text-right py-3 px-3">الرمز</th>
+                        <th className="text-right py-3 px-3">القسم</th>
+                        <th className="text-right py-3 px-3">المنصب</th>
+                        <th className="text-right py-3 px-3">المستوى</th>
+                        <th className="text-right py-3 px-3">نوع التوظيف</th>
+                        <th className="text-right py-3 px-3">الراتب</th>
+                        <th className="text-right py-3 px-3">الحالة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.employees.rows.map((row) => (
+                        <tr key={row.rowIndex} className={`border-b border-slate-50 dark:border-slate-800/50 ${row.errors.length > 0 ? 'bg-rose-50/50 dark:bg-rose-900/10' : ''}`}>
+                          <td className="py-2.5 px-3 font-mono text-slate-400 text-xs">{row.rowIndex}</td>
+                          <td className="py-2.5 px-3 font-bold">{row.name || '—'}</td>
+                          <td className="py-2.5 px-3 font-mono text-xs">{row.code || '—'}</td>
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 text-xs">{row.departmentName || '—'}</td>
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 text-xs">{row.positionTitle || '—'}</td>
+                          <td className="py-2.5 px-3 text-xs">{JOB_LEVEL_LABELS[row.level] ?? row.level}</td>
+                          <td className="py-2.5 px-3 text-xs">{EMPLOYMENT_TYPE_LABELS[row.employmentType] ?? row.employmentType}</td>
+                          <td className="py-2.5 px-3 font-mono text-xs">{row.baseSalary > 0 ? row.baseSalary.toLocaleString('ar-EG') : '—'}</td>
+                          <td className="py-2.5 px-3">
+                            {row.errors.length > 0 ? (
+                              <div className="space-y-0.5">
+                                {row.errors.map((err, i) => (
+                                  <div key={i} className="flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400">
+                                    <span className="material-icons-round text-xs">error</span>
+                                    {err}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <Badge variant="success">صالح</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={handleReset}>
+              <span className="material-icons-round text-sm">arrow_back</span>
+              إعادة
+            </Button>
+            <Button variant="primary" onClick={handleImport} disabled={totalValid === 0}>
+              <span className="material-icons-round text-sm">upload</span>
+              استيراد {totalValid.toLocaleString('ar-EG')} سجل
+            </Button>
+          </div>
+        </>
+      )}
+
+      {/* Importing Step */}
+      {step === 'importing' && (
+        <Card>
+          <div className="text-center py-12 space-y-6">
+            <span className="material-icons-round text-5xl text-primary animate-spin block">sync</span>
+            <div>
+              <p className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-4">جاري الاستيراد...</p>
+              <div className="max-w-sm mx-auto space-y-3">
+                {result && result.departments.valid > 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-slate-500 w-16 text-left">الأقسام</span>
+                    <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-300"
+                        style={{ width: `${(importProgress.depts / result.departments.valid) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono text-slate-400">{importProgress.depts}/{result.departments.valid}</span>
+                  </div>
+                )}
+                {result && result.positions.valid > 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-slate-500 w-16 text-left">المناصب</span>
+                    <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-300"
+                        style={{ width: `${(importProgress.positions / result.positions.valid) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono text-slate-400">{importProgress.positions}/{result.positions.valid}</span>
+                  </div>
+                )}
+                {result && result.employees.valid > 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-slate-500 w-16 text-left">الموظفين</span>
+                    <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-300"
+                        style={{ width: `${(importProgress.employees / result.employees.valid) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono text-slate-400">{importProgress.employees}/{result.employees.valid}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Done Step */}
+      {step === 'done' && (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <span className="material-icons-round text-blue-500 text-3xl mb-2 block">business</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">أقسام</p>
+              <p className="text-2xl font-black text-blue-600">{importDone.depts}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <span className="material-icons-round text-indigo-500 text-3xl mb-2 block">work</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">مناصب</p>
+              <p className="text-2xl font-black text-indigo-600">{importDone.positions}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">groups</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">موظفين</p>
+              <p className="text-2xl font-black text-emerald-600">{importDone.employees}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <span className="material-icons-round text-rose-500 text-3xl mb-2 block">error</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">أخطاء</p>
+              <p className="text-2xl font-black text-rose-600">{importDone.errors}</p>
+            </div>
+          </div>
+
+          {importDone.errors === 0 && (importDone.depts + importDone.positions + importDone.employees) > 0 && (
+            <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 flex items-center gap-3">
+              <span className="material-icons-round text-emerald-500">check_circle</span>
+              <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                تم الاستيراد بنجاح! تمت إضافة {importDone.depts} قسم و{importDone.positions} منصب و{importDone.employees} موظف.
+              </p>
+            </div>
+          )}
+
+          {importErrors.length > 0 && (
+            <Card title="أخطاء الاستيراد">
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                {importErrors.map((err, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
+                    <span className="material-icons-round text-sm mt-0.5 shrink-0">error</span>
+                    <span>{err}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={handleReset}>
+              <span className="material-icons-round text-sm">refresh</span>
+              استيراد جديد
+            </Button>
+            <Button variant="primary" onClick={() => navigate('/employees')}>
+              <span className="material-icons-round text-sm">groups</span>
+              الذهاب للموظفين
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};

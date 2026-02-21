@@ -11,7 +11,7 @@ export interface ReportPrintRow {
   date: string;
   lineName: string;
   productName: string;
-  supervisorName: string;
+  employeeName: string;
   quantityProduced: number;
   quantityWaste: number;
   workersCount: number;
@@ -43,14 +43,14 @@ export const mapReportsToPrintRows = (
   lookups: {
     getLineName: (id: string) => string;
     getProductName: (id: string) => string;
-    getSupervisorName: (id: string) => string;
+    getEmployeeName: (id: string) => string;
   }
 ): ReportPrintRow[] =>
   reports.map((r) => ({
     date: r.date,
     lineName: lookups.getLineName(r.lineId),
     productName: lookups.getProductName(r.productId),
-    supervisorName: lookups.getSupervisorName(r.supervisorId),
+    employeeName: lookups.getEmployeeName(r.employeeId),
     quantityProduced: r.quantityProduced || 0,
     quantityWaste: r.quantityWaste || 0,
     workersCount: r.workersCount || 0,
@@ -94,7 +94,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
     const paper = PAPER_DIMENSIONS[ps.paperSize] || PAPER_DIMENSIONS.a4;
 
     const showWaste = ps.showWaste;
-    const showSupervisor = ps.showSupervisor;
+    const showEmployee = ps.showEmployee;
 
     return (
       <div
@@ -164,7 +164,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
               <Th>التاريخ</Th>
               <Th>خط الإنتاج</Th>
               <Th>المنتج</Th>
-              {showSupervisor && <Th>المشرف</Th>}
+              {showEmployee && <Th>الموظف</Th>}
               <Th align="center">الكمية المنتجة</Th>
               {showWaste && <Th align="center">الهالك</Th>}
               <Th align="center">عدد العمال</Th>
@@ -178,7 +178,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
                 <Td>{row.date}</Td>
                 <Td>{row.lineName}</Td>
                 <Td>{row.productName}</Td>
-                {showSupervisor && <Td>{row.supervisorName}</Td>}
+                {showEmployee && <Td>{row.employeeName}</Td>}
                 <Td align="center" bold color="#059669">{fmtNum(row.quantityProduced, dp)}</Td>
                 {showWaste && <Td align="center" bold>{fmtNum(row.quantityWaste, dp)}</Td>}
                 <Td align="center">{row.workersCount}</Td>
@@ -187,7 +187,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
             ))}
             {/* Totals Row */}
             <tr style={{ background: '#e2e8f0', fontWeight: 800 }}>
-              <Td colSpan={showSupervisor ? 5 : 4}>الإجمالي</Td>
+              <Td colSpan={showEmployee ? 5 : 4}>الإجمالي</Td>
               <Td align="center" bold color="#059669">{fmtNum(t.totalProduced, dp)}</Td>
               {showWaste && <Td align="center" bold color="#f43f5e">{fmtNum(t.totalWaste, dp)}</Td>}
               <Td align="center">{fmtNum(t.totalWorkers, dp)}</Td>
@@ -200,7 +200,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
         {ps.paperSize !== 'thermal' && (
           <div style={{ marginTop: '15mm', display: 'flex', justifyContent: 'space-between', gap: '20mm' }}>
             <SignatureBlock label="مدير الإنتاج" />
-            {showSupervisor && <SignatureBlock label="مشرف الخط" />}
+            {showEmployee && <SignatureBlock label="موظف الخط" />}
             <SignatureBlock label="مراقب الجودة" />
           </div>
         )}
@@ -297,7 +297,7 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
             <DetailRow label="التاريخ" value={report.date} />
             <DetailRow label="خط الإنتاج" value={report.lineName} even />
             <DetailRow label="المنتج" value={report.productName} />
-            {ps.showSupervisor && <DetailRow label="المشرف" value={report.supervisorName} even />}
+            {ps.showEmployee && <DetailRow label="الموظف" value={report.employeeName} even />}
             <DetailRow label="الكمية المنتجة" value={`${fmtNum(report.quantityProduced, dp)} وحدة`} highlight="#059669" />
             {ps.showWaste && (
               <>
@@ -314,7 +314,7 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
         {ps.paperSize !== 'thermal' && (
           <div style={{ marginTop: '20mm', display: 'flex', justifyContent: 'space-between', gap: '20mm' }}>
             <SignatureBlock label="مدير الإنتاج" />
-            {ps.showSupervisor && <SignatureBlock label="مشرف الخط" />}
+            {ps.showEmployee && <SignatureBlock label="موظف الخط" />}
             <SignatureBlock label="مراقب الجودة" />
           </div>
         )}

@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { KPIBox, Card, Badge, Button, LoadingSkeleton } from '../components/UI';
-import { SupervisorDashboard } from '../components/SupervisorDashboard';
+import { EmployeeDashboardWidget } from '../components/EmployeeDashboardWidget';
 import { useAppStore } from '../store/useAppStore';
 import {
   formatNumber,
@@ -69,7 +69,7 @@ export const Dashboard: React.FC = () => {
   const products = useAppStore((s) => s.products);
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const _rawLines = useAppStore((s) => s._rawLines);
-  const _rawSupervisors = useAppStore((s) => s._rawSupervisors);
+  const _rawEmployees = useAppStore((s) => s._rawEmployees);
   const lineStatuses = useAppStore((s) => s.lineStatuses);
   const lineProductConfigs = useAppStore((s) => s.lineProductConfigs);
   const loading = useAppStore((s) => s.loading);
@@ -91,13 +91,13 @@ export const Dashboard: React.FC = () => {
     [systemSettings]
   );
 
-  const linkedSupervisor = useMemo(
-    () => _rawSupervisors.find((s) => s.userId === uid),
-    [_rawSupervisors, uid]
+  const linkedEmployee = useMemo(
+    () => _rawEmployees.find((s) => s.userId === uid),
+    [_rawEmployees, uid]
   );
 
-  if (linkedSupervisor && !canViewCosts) {
-    return <SupervisorDashboard supervisorId={linkedSupervisor.id!} supervisorName={linkedSupervisor.name} />;
+  if (linkedEmployee && !canViewCosts) {
+    return <EmployeeDashboardWidget employeeId={linkedEmployee.id!} employeeName={linkedEmployee.name} />;
   }
 
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -629,7 +629,7 @@ export const Dashboard: React.FC = () => {
                   <div className="flex justify-between items-start mb-5">
                     <div>
                       <h4 className="font-bold text-lg text-slate-800 dark:text-white">{line.name}</h4>
-                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">{line.supervisorName}</span>
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">{line.employeeName}</span>
                     </div>
                     <Badge variant={getVariant(line.status)} pulse={line.status === ProductionLineStatus.ACTIVE}>
                       {getStatusLabel(line.status)}

@@ -14,10 +14,10 @@ export const QuickAction: React.FC = () => {
   const createReport = useAppStore((s) => s.createReport);
   const _rawLines = useAppStore((s) => s._rawLines);
   const _rawProducts = useAppStore((s) => s._rawProducts);
-  const supervisors = useAppStore((s) => s.supervisors);
+  const employees = useAppStore((s) => s.employees);
   const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
 
-  const [supervisorId, setSupervisorId] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
   const [lineId, setLineId] = useState('');
   const [productId, setProductId] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -42,17 +42,17 @@ export const QuickAction: React.FC = () => {
     (id: string) => _rawProducts.find((p) => p.id === id)?.name ?? '—',
     [_rawProducts]
   );
-  const getSupervisorName = useCallback(
-    (id: string) => supervisors.find((s) => s.id === id)?.name ?? '—',
-    [supervisors]
+  const getEmployeeName = useCallback(
+    (id: string) => employees.find((s) => s.id === id)?.name ?? '—',
+    [employees]
   );
 
   const handleSave = async () => {
-    if (!lineId || !productId || !supervisorId || !quantity || !workers || !hours) return;
+    if (!lineId || !productId || !employeeId || !quantity || !workers || !hours) return;
     setSaving(true);
 
     const data = {
-      supervisorId,
+      employeeId,
       lineId,
       productId,
       date: today,
@@ -69,7 +69,7 @@ export const QuickAction: React.FC = () => {
         date: today,
         lineName: getLineName(lineId),
         productName: getProductName(productId),
-        supervisorName: getSupervisorName(supervisorId),
+        employeeName: getEmployeeName(employeeId),
         quantityProduced: data.quantityProduced,
         quantityWaste: data.quantityWaste,
         workersCount: data.workersCount,
@@ -82,7 +82,7 @@ export const QuickAction: React.FC = () => {
   };
 
   const handleReset = () => {
-    setSupervisorId('');
+    setEmployeeId('');
     setLineId('');
     setProductId('');
     setQuantity('');
@@ -154,7 +154,7 @@ export const QuickAction: React.FC = () => {
     }
   };
 
-  const activeSupervisors = supervisors.filter((s) => s.isActive);
+  const activeEmployees = employees.filter((s) => s.isActive);
 
   return (
     <div className="space-y-6">
@@ -178,12 +178,12 @@ export const QuickAction: React.FC = () => {
         <Card title="بيانات التقرير">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
-              <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 block">المشرف *</label>
+              <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 block">الموظف *</label>
               <SearchableSelect
-                placeholder="اختر المشرف"
-                options={activeSupervisors.map((s) => ({ value: s.id, label: s.name }))}
-                value={supervisorId}
-                onChange={setSupervisorId}
+                placeholder="اختر الموظف"
+                options={activeEmployees.map((s) => ({ value: s.id, label: s.name }))}
+                value={employeeId}
+                onChange={setEmployeeId}
               />
             </div>
             <div>
@@ -254,7 +254,7 @@ export const QuickAction: React.FC = () => {
           <div className="flex flex-wrap gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
             <Button
               onClick={handleSave}
-              disabled={saving || !lineId || !productId || !supervisorId || !quantity || !workers || !hours || !canCreateReport}
+              disabled={saving || !lineId || !productId || !employeeId || !quantity || !workers || !hours || !canCreateReport}
             >
               {saving ? (
                 <>
@@ -344,8 +344,8 @@ export const QuickAction: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 text-center border border-slate-100 dark:border-slate-700">
-                    <p className="text-[10px] font-bold text-slate-400 mb-1">المشرف</p>
-                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{printReport.supervisorName}</p>
+                    <p className="text-[10px] font-bold text-slate-400 mb-1">الموظف</p>
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{printReport.employeeName}</p>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 text-center border border-slate-100 dark:border-slate-700">
                     <p className="text-[10px] font-bold text-slate-400 mb-1">عدد العمال</p>

@@ -1,0 +1,1107 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAppStore } from '../store/useAppStore';
+import { Card, Button, Badge } from '../components/UI';
+import { SelectableTable, type TableColumn, type TableBulkAction } from '../components/SelectableTable';
+import type { FirestoreEmployee, FirestoreUser, EmploymentType } from '../types';
+import { EMPLOYMENT_TYPE_LABELS } from '../types';
+import { usePermission } from '../utils/permissions';
+import { userService } from '../services/userService';
+import { activityLogService } from '../services/activityLogService';
+import { employeeService } from '../modules/hr/employeeService';
+import { JOB_LEVEL_LABELS } from '../modules/hr/types';
+import type { FirestoreDepartment, FirestoreJobPosition, FirestoreShift } from '../modules/hr/types';
+import { getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { departmentsRef, jobPositionsRef, shiftsRef } from '../modules/hr/collections';
+import type { JobLevel } from '../modules/hr/types';
+import { getTodayDateString } from '../utils/calculations';
+
+const emptyForm: Omit<FirestoreEmployee, 'id' | 'createdAt'> = {
+  name: '',
+  departmentId: '',
+  jobPositionId: '',
+  level: 1,
+  managerId: '',
+  employmentType: 'full_time',
+  baseSalary: 0,
+  hourlyRate: 0,
+  shiftId: '',
+  vehicleId: '',
+  hasSystemAccess: false,
+  isActive: true,
+  code: '',
+};
+
+export const Employees: React.FC = () => {
+  const navigate = useNavigate();
+  const { can, canManageUsers } = usePermission();
+
+  const employees = useAppStore((s) => s.employees);
+  const _rawEmployees = useAppStore((s) => s._rawEmployees);
+  const createEmployee = useAppStore((s) => s.createEmployee);
+  const updateEmployee = useAppStore((s) => s.updateEmployee);
+  const deleteEmployee = useAppStore((s) => s.deleteEmployee);
+  const roles = useAppStore((s) => s.roles);
+  const createUser = useAppStore((s) => s.createUser);
+  const resetUserPassword = useAppStore((s) => s.resetUserPassword);
+  const login = useAppStore((s) => s.login);
+  const uid = useAppStore((s) => s.uid);
+  const userEmail = useAppStore((s) => s.userEmail);
+
+  const [departments, setDepartments] = useState<FirestoreDepartment[]>([]);
+  const [jobPositions, setJobPositions] = useState<FirestoreJobPosition[]>([]);
+  const [shifts, setShifts] = useState<FirestoreShift[]>([]);
+  const [allUsers, setAllUsers] = useState<FirestoreUser[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+
+  const [search, setSearch] = useState('');
+  const [filterDepartment, setFilterDepartment] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [filterEmploymentType, setFilterEmploymentType] = useState('');
+  const [filterSystemAccess, setFilterSystemAccess] = useState<'all' | 'yes' | 'no'>('all');
+
+  const [showModal, setShowModal] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [formEmail, setFormEmail] = useState('');
+  const [formPassword, setFormPassword] = useState('');
+  const [formRoleId, setFormRoleId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [toggleConfirmId, setToggleConfirmId] = useState<string | null>(null);
+  const [showReAuth, setShowReAuth] = useState(false);
+  const [reAuthPassword, setReAuthPassword] = useState('');
+  const [reAuthLoading, setReAuthLoading] = useState(false);
+  const [reAuthPending, setReAuthPending] = useState<{ employeeId: string; newUid: string; email: string } | null>(null);
+
+  // Quick-add states
+  const [quickAddType, setQuickAddType] = useState<'department' | 'position' | 'shift' | null>(null);
+  const [quickAddName, setQuickAddName] = useState('');
+  const [quickAddCode, setQuickAddCode] = useState('');
+  const [quickAddSaving, setQuickAddSaving] = useState(false);
+
+  const usersMap = useMemo(() => {
+    const m: Record<string, FirestoreUser> = {};
+    allUsers.forEach((u) => {
+      if (u.id) m[u.id] = u;
+    });
+    return m;
+  }, [allUsers]);
+
+  const pendingUsers = useMemo(() => allUsers.filter((u) => !u.isActive), [allUsers]);
+
+  const loadRefData = useCallback(async () => {
+    setDataLoading(true);
+    try {
+      const [deptSnap, posSnap, shiftSnap] = await Promise.all([
+        getDocs(departmentsRef()),
+        getDocs(jobPositionsRef()),
+        getDocs(shiftsRef()),
+      ]);
+      setDepartments(deptSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreDepartment)));
+      setJobPositions(posSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreJobPosition)));
+      setShifts(shiftSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreShift)));
+    } catch (e) {
+      console.error('loadRefData error:', e);
+    } finally {
+      setDataLoading(false);
+    }
+  }, []);
+
+  const loadUsers = useCallback(async () => {
+    if (!canManageUsers) return;
+    try {
+      const list = await userService.getAll();
+      setAllUsers(list);
+    } catch (e) {
+      console.error('loadUsers error:', e);
+    }
+  }, [canManageUsers]);
+
+  useEffect(() => {
+    loadRefData();
+  }, [loadRefData]);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
+
+  const getDepartmentName = (id: string) => departments.find((d) => d.id === id)?.name ?? '—';
+  const getJobPositionTitle = (id: string) => jobPositions.find((j) => j.id === id)?.title ?? '—';
+  const getShiftName = (id: string) => shifts.find((s) => s.id === id)?.name ?? '—';
+  const getManagerName = (id: string) => _rawEmployees.find((e) => e.id === id)?.name ?? '—';
+
+  const summaryKpis = useMemo(() => {
+    const total = _rawEmployees.length;
+    const active = _rawEmployees.filter((e) => e.isActive !== false).length;
+    const inactive = total - active;
+    const withSystemAccess = _rawEmployees.filter((e) => e.hasSystemAccess).length;
+    const pending = pendingUsers.length;
+    return { total, active, inactive, withSystemAccess, pending };
+  }, [_rawEmployees, pendingUsers.length]);
+
+  const filtered = useMemo(() => {
+    let list = _rawEmployees;
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (e) =>
+          e.name?.toLowerCase().includes(q) || (e.code && e.code.toLowerCase().includes(q))
+      );
+    }
+    if (filterDepartment) list = list.filter((e) => e.departmentId === filterDepartment);
+    if (filterStatus === 'active') list = list.filter((e) => e.isActive !== false);
+    if (filterStatus === 'inactive') list = list.filter((e) => e.isActive === false);
+    if (filterEmploymentType) list = list.filter((e) => e.employmentType === filterEmploymentType);
+    if (filterSystemAccess === 'yes') list = list.filter((e) => e.hasSystemAccess);
+    if (filterSystemAccess === 'no') list = list.filter((e) => !e.hasSystemAccess);
+    return list;
+  }, [_rawEmployees, search, filterDepartment, filterStatus, filterEmploymentType, filterSystemAccess]);
+
+  const openCreate = () => {
+    setEditId(null);
+    setForm({ ...emptyForm });
+    setFormEmail('');
+    setFormPassword('');
+    setFormRoleId(roles[0]?.id ?? '');
+    setShowModal(true);
+  };
+
+  const openEdit = (id: string) => {
+    const raw = _rawEmployees.find((e) => e.id === id);
+    if (!raw) return;
+    setEditId(id);
+    setForm({
+      name: raw.name ?? '',
+      departmentId: raw.departmentId ?? '',
+      jobPositionId: raw.jobPositionId ?? '',
+      level: raw.level ?? 1,
+      managerId: raw.managerId ?? '',
+      employmentType: (raw.employmentType as EmploymentType) ?? 'full_time',
+      baseSalary: raw.baseSalary ?? 0,
+      hourlyRate: raw.hourlyRate ?? 0,
+      shiftId: raw.shiftId ?? '',
+      vehicleId: raw.vehicleId ?? '',
+      hasSystemAccess: raw.hasSystemAccess ?? false,
+      isActive: raw.isActive !== false,
+      code: raw.code ?? '',
+    });
+    setFormEmail(raw.email ?? '');
+    setFormPassword('');
+    setFormRoleId(roles.find((r) => r.id === usersMap[raw.userId!]?.roleId)?.id ?? roles[0]?.id ?? '');
+    setShowModal(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    try {
+      const payload: Omit<FirestoreEmployee, 'id' | 'createdAt'> = {
+        name: form.name.trim(),
+        departmentId: form.departmentId || '',
+        jobPositionId: form.jobPositionId || '',
+        level: form.level,
+        managerId: form.managerId || '',
+        employmentType: form.employmentType as EmploymentType,
+        baseSalary: Number(form.baseSalary) || 0,
+        hourlyRate: Number(form.hourlyRate) || 0,
+        shiftId: form.shiftId || '',
+        vehicleId: form.vehicleId || '',
+        hasSystemAccess: form.hasSystemAccess,
+        isActive: form.isActive,
+        code: form.code || '',
+      };
+
+      if (editId) {
+        await updateEmployee(editId, payload);
+        setShowModal(false);
+      } else {
+        const id = await createEmployee(payload);
+        if (form.hasSystemAccess && formEmail.trim() && formPassword && id) {
+          const newUid = await createUser(
+            formEmail.trim(),
+            formPassword,
+            form.name.trim(),
+            formRoleId || roles[0]?.id!
+          );
+          if (newUid) {
+            setReAuthPending({ employeeId: id, newUid, email: formEmail.trim() });
+            setShowModal(false);
+            setShowReAuth(true);
+            return;
+          }
+        }
+        setShowModal(false);
+      }
+    } catch (err) {
+      console.error('Save employee error:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReAuth = async () => {
+    if (!reAuthPending || !userEmail || !reAuthPassword.trim()) return;
+    setReAuthLoading(true);
+    try {
+      await login(userEmail, reAuthPassword);
+      await updateEmployee(reAuthPending.employeeId, {
+        userId: reAuthPending.newUid,
+        email: reAuthPending.email,
+      });
+      setReAuthPending(null);
+      setShowReAuth(false);
+      setReAuthPassword('');
+    } catch (e) {
+      console.error('Re-auth failed:', e);
+    } finally {
+      setReAuthLoading(false);
+    }
+  };
+
+  const handleQuickAdd = async () => {
+    if (!quickAddName.trim() || !quickAddType) return;
+    setQuickAddSaving(true);
+    try {
+      if (quickAddType === 'department') {
+        const ref = await addDoc(departmentsRef(), {
+          name: quickAddName.trim(),
+          code: quickAddCode.trim() || quickAddName.trim().substring(0, 3).toUpperCase(),
+          managerId: '',
+          isActive: true,
+          createdAt: serverTimestamp(),
+        });
+        const newDept: FirestoreDepartment = {
+          id: ref.id,
+          name: quickAddName.trim(),
+          code: quickAddCode.trim() || quickAddName.trim().substring(0, 3).toUpperCase(),
+          managerId: '',
+          isActive: true,
+        };
+        setDepartments((prev) => [...prev, newDept]);
+        setForm((prev) => ({ ...prev, departmentId: ref.id }));
+      } else if (quickAddType === 'position') {
+        const ref = await addDoc(jobPositionsRef(), {
+          title: quickAddName.trim(),
+          departmentId: form.departmentId || '',
+          level: (form.level || 1) as JobLevel,
+          hasSystemAccessDefault: false,
+          isActive: true,
+          createdAt: serverTimestamp(),
+        });
+        const newPos: FirestoreJobPosition = {
+          id: ref.id,
+          title: quickAddName.trim(),
+          departmentId: form.departmentId || '',
+          level: (form.level || 1) as JobLevel,
+          hasSystemAccessDefault: false,
+          isActive: true,
+        };
+        setJobPositions((prev) => [...prev, newPos]);
+        setForm((prev) => ({ ...prev, jobPositionId: ref.id }));
+      } else if (quickAddType === 'shift') {
+        const ref = await addDoc(shiftsRef(), {
+          name: quickAddName.trim(),
+          startTime: '08:00',
+          endTime: '16:00',
+          breakMinutes: 60,
+          lateGraceMinutes: 15,
+          crossesMidnight: false,
+          isActive: true,
+          createdAt: serverTimestamp(),
+        });
+        const newShift: FirestoreShift = {
+          id: ref.id,
+          name: quickAddName.trim(),
+          startTime: '08:00',
+          endTime: '16:00',
+          breakMinutes: 60,
+          lateGraceMinutes: 15,
+          crossesMidnight: false,
+          isActive: true,
+        };
+        setShifts((prev) => [...prev, newShift]);
+        setForm((prev) => ({ ...prev, shiftId: ref.id }));
+      }
+      setQuickAddType(null);
+      setQuickAddName('');
+      setQuickAddCode('');
+    } catch (e) {
+      console.error('Quick add error:', e);
+    } finally {
+      setQuickAddSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    await deleteEmployee(id);
+    setDeleteConfirmId(null);
+  };
+
+  const handleToggleActive = async (id: string) => {
+    const raw = _rawEmployees.find((e) => e.id === id);
+    if (!raw) return;
+    await updateEmployee(id, { isActive: !raw.isActive });
+    setToggleConfirmId(null);
+  };
+
+  const handleSystemAccessToggle = async (id: string) => {
+    const raw = _rawEmployees.find((e) => e.id === id);
+    if (!raw) return;
+    await updateEmployee(id, { hasSystemAccess: !raw.hasSystemAccess });
+  };
+
+  const handleApprove = async (userUid: string) => {
+    try {
+      await userService.toggleActive(userUid, true);
+      if (uid && userEmail) {
+        activityLogService.log(uid, userEmail, 'APPROVE_USER', `الموافقة على مستخدم: ${usersMap[userUid]?.email ?? userUid}`);
+      }
+      await loadUsers();
+    } catch (e) {
+      console.error('handleApprove error:', e);
+    }
+  };
+
+  const handleReject = async (userUid: string) => {
+    try {
+      if (uid && userEmail) {
+        activityLogService.log(uid, userEmail, 'REJECT_USER', `رفض مستخدم: ${usersMap[userUid]?.email ?? userUid}`);
+      }
+      await loadUsers();
+    } catch (e) {
+      console.error('handleReject error:', e);
+    }
+  };
+
+  const positionOptions = useMemo(
+    () => jobPositions.filter((j) => j.departmentId === form.departmentId),
+    [jobPositions, form.departmentId]
+  );
+  const managerOptions = useMemo(
+    () =>
+      _rawEmployees.filter(
+        (e) => e.id !== editId && (e.level ?? 0) > form.level
+      ),
+    [_rawEmployees, editId, form.level]
+  );
+
+  // ── SelectableTable: columns ──
+  const employeeColumns = useMemo<TableColumn<FirestoreEmployee>[]>(() => [
+    {
+      header: 'الاسم',
+      render: (emp) => (
+        <div className="flex items-center gap-2">
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${emp.isActive !== false ? 'bg-primary/10' : 'bg-slate-100 dark:bg-slate-800'}`}>
+            <span className={`material-icons-round text-base ${emp.isActive !== false ? 'text-primary' : 'text-slate-400'}`}>person</span>
+          </div>
+          <div className="min-w-0">
+            <span className="font-bold text-slate-800 dark:text-white block truncate">{emp.name}</span>
+            {emp.code && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-primary/5 text-primary text-[10px] font-mono font-bold">{emp.code}</span>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      header: 'القسم',
+      render: (emp) => <span className="text-sm text-slate-600 dark:text-slate-400">{getDepartmentName(emp.departmentId ?? '')}</span>,
+    },
+    {
+      header: 'المنصب',
+      render: (emp) => <span className="text-sm text-slate-600 dark:text-slate-400">{getJobPositionTitle(emp.jobPositionId ?? '')}</span>,
+    },
+    {
+      header: 'المستوى',
+      render: (emp) => <span className="text-sm font-bold">{JOB_LEVEL_LABELS[(emp.level ?? 1) as 1 | 2 | 3 | 4] ?? emp.level}</span>,
+    },
+    {
+      header: 'نوع التوظيف',
+      render: (emp) => <span className="text-sm">{EMPLOYMENT_TYPE_LABELS[(emp.employmentType as EmploymentType)] ?? emp.employmentType}</span>,
+    },
+    {
+      header: 'دخول النظام',
+      headerClassName: 'text-center',
+      className: 'text-center',
+      render: (emp) => can('employees.edit') ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleSystemAccessToggle(emp.id!); }}
+          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${emp.hasSystemAccess ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+        >
+          <span className="material-icons-round text-xs">{emp.hasSystemAccess ? 'check' : 'close'}</span>
+          {emp.hasSystemAccess ? 'نعم' : 'لا'}
+        </button>
+      ) : (
+        <span className="text-sm">{emp.hasSystemAccess ? 'نعم' : 'لا'}</span>
+      ),
+    },
+    {
+      header: 'الحالة',
+      headerClassName: 'text-center',
+      className: 'text-center',
+      render: (emp) => (
+        <Badge variant={emp.isActive !== false ? 'success' : 'neutral'}>
+          {emp.isActive !== false ? 'نشط' : 'غير نشط'}
+        </Badge>
+      ),
+    },
+  ], [departments, jobPositions, can]);
+
+  // ── SelectableTable: row actions ──
+  const renderEmployeeActions = useCallback((emp: FirestoreEmployee) => (
+    <div className="flex items-center gap-1 justify-end sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+      <button
+        onClick={() => navigate(`/employees/${emp.id}`)}
+        className="p-2 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+        title="عرض الملف"
+      >
+        <span className="material-icons-round text-lg">person</span>
+      </button>
+      {can('employees.edit') && (
+        <button
+          onClick={() => openEdit(emp.id!)}
+          className="p-2 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+          title="تعديل"
+        >
+          <span className="material-icons-round text-lg">edit</span>
+        </button>
+      )}
+      {can('employees.edit') && (
+        <button
+          onClick={() => setToggleConfirmId(emp.id!)}
+          className="p-2 text-slate-400 hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all"
+          title={emp.isActive !== false ? 'تعطيل' : 'تفعيل'}
+        >
+          <span className="material-icons-round text-lg">toggle_on</span>
+        </button>
+      )}
+      {can('employees.delete') && (
+        <button
+          onClick={() => setDeleteConfirmId(emp.id!)}
+          className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-all"
+          title="حذف"
+        >
+          <span className="material-icons-round text-lg">delete</span>
+        </button>
+      )}
+    </div>
+  ), [can, navigate]);
+
+  // ── SelectableTable: bulk actions ──
+  const handleBulkActivate = useCallback(async (items: FirestoreEmployee[]) => {
+    for (const emp of items) {
+      if (emp.isActive === false) {
+        await updateEmployee(emp.id!, { isActive: true });
+        if (emp.userId) await userService.toggleActive(emp.userId, true);
+      }
+    }
+  }, [updateEmployee]);
+
+  const handleBulkDeactivate = useCallback(async (items: FirestoreEmployee[]) => {
+    for (const emp of items) {
+      if (emp.isActive !== false && emp.userId !== uid) {
+        await updateEmployee(emp.id!, { isActive: false });
+        if (emp.userId) await userService.toggleActive(emp.userId, false);
+      }
+    }
+  }, [updateEmployee, uid]);
+
+  const handleBulkExport = useCallback((items: FirestoreEmployee[]) => {
+    const headers = ['الاسم', 'الكود', 'القسم', 'المنصب', 'المستوى', 'نوع التوظيف', 'الحالة', 'دخول النظام'];
+    const rows = items.map((emp) => [
+      emp.name,
+      emp.code || '—',
+      getDepartmentName(emp.departmentId ?? ''),
+      getJobPositionTitle(emp.jobPositionId ?? ''),
+      JOB_LEVEL_LABELS[(emp.level ?? 1) as 1 | 2 | 3 | 4] ?? String(emp.level),
+      EMPLOYMENT_TYPE_LABELS[(emp.employmentType as EmploymentType)] ?? emp.employmentType,
+      emp.isActive !== false ? 'نشط' : 'غير نشط',
+      emp.hasSystemAccess ? 'نعم' : 'لا',
+    ]);
+    const csvContent = [headers, ...rows].map((r) => r.join(',')).join('\n');
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `الموظفين-${getTodayDateString()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [departments, jobPositions]);
+
+  const employeeBulkActions = useMemo<TableBulkAction<FirestoreEmployee>[]>(() => [
+    { label: 'تفعيل المحدد', icon: 'check_circle', action: handleBulkActivate, permission: 'employees.edit', variant: 'primary' },
+    { label: 'تعطيل المحدد', icon: 'block', action: handleBulkDeactivate, permission: 'employees.edit', variant: 'danger' },
+    { label: 'تصدير CSV', icon: 'download', action: handleBulkExport, permission: 'export' },
+  ], [handleBulkActivate, handleBulkDeactivate, handleBulkExport]);
+
+  const hasActiveFilters =
+    search.trim() ||
+    filterDepartment ||
+    filterStatus !== 'all' ||
+    filterEmploymentType ||
+    filterSystemAccess !== 'all';
+
+  const clearFilters = () => {
+    setSearch('');
+    setFilterDepartment('');
+    setFilterStatus('all');
+    setFilterEmploymentType('');
+    setFilterSystemAccess('all');
+  };
+
+  if (dataLoading && departments.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="h-8 w-64 bg-slate-200 dark:bg-slate-700 rounded-lg animate-pulse" />
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="h-24 bg-slate-200 dark:bg-slate-700 rounded-xl animate-pulse" />
+          ))}
+        </div>
+        <div className="h-96 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* 1. Page header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-800 dark:text-white">الموظفين</h2>
+          <p className="text-sm text-slate-500 font-medium">إدارة الموظفين والتسلسل الوظيفي والحسابات</p>
+        </div>
+        <div className="flex gap-2 self-start sm:self-auto">
+          {can('employees.create') && (
+            <Button variant="outline" onClick={() => navigate('/employees/import')} className="shrink-0">
+              <span className="material-icons-round text-sm">upload_file</span>
+              استيراد Excel
+            </Button>
+          )}
+          {can('employees.create') && (
+            <Button variant="primary" onClick={openCreate} className="shrink-0">
+              <span className="material-icons-round text-sm">add</span>
+              إضافة موظف
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* 2. Stats bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+        <Card className="p-4">
+          <p className="text-xs text-slate-500 font-bold mb-1">الإجمالي</p>
+          <p className="text-2xl font-black text-slate-800 dark:text-white">{summaryKpis.total}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-slate-500 font-bold mb-1">نشط</p>
+          <p className="text-2xl font-black text-emerald-600">{summaryKpis.active}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-slate-500 font-bold mb-1">غير نشط</p>
+          <p className="text-2xl font-black text-slate-500">{summaryKpis.inactive}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-slate-500 font-bold mb-1">لديهم دخول للنظام</p>
+          <p className="text-2xl font-black text-primary">{summaryKpis.withSystemAccess}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-slate-500 font-bold mb-1">في انتظار الموافقة</p>
+          <p className="text-2xl font-black text-amber-600">{summaryKpis.pending}</p>
+        </Card>
+      </div>
+
+      {/* 3. Pending users */}
+      {pendingUsers.length > 0 && canManageUsers && (
+        <Card>
+          <h3 className="text-lg font-bold mb-3">مستخدمون بانتظار الموافقة</h3>
+          <ul className="space-y-2">
+            {pendingUsers.map((u) => (
+              <li
+                key={u.id}
+                className="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0"
+              >
+                <span className="font-medium">{u.displayName}</span>
+                <span className="text-sm text-slate-500">{u.email}</span>
+                <div className="flex gap-2">
+                  <Button variant="secondary" className="text-xs py-1.5" onClick={() => handleApprove(u.id!)}>
+                    موافقة
+                  </Button>
+                  <Button variant="outline" className="text-xs py-1.5" onClick={() => handleReject(u.id!)}>
+                    رفض
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {/* 4. Filters */}
+      <Card>
+        <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-end">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-bold text-slate-500 mb-1">بحث (اسم / رمز)</label>
+            <input
+              type="text"
+              className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+              placeholder="بحث..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="w-full sm:w-40">
+            <label className="block text-xs font-bold text-slate-500 mb-1">القسم</label>
+            <select
+              className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+              value={filterDepartment}
+              onChange={(e) => setFilterDepartment(e.target.value)}
+            >
+              <option value="">الكل</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="w-full sm:w-40">
+            <label className="block text-xs font-bold text-slate-500 mb-1">نوع التوظيف</label>
+            <select
+              className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+              value={filterEmploymentType}
+              onChange={(e) => setFilterEmploymentType(e.target.value)}
+            >
+              <option value="">الكل</option>
+              {(Object.entries(EMPLOYMENT_TYPE_LABELS) as [EmploymentType, string][]).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div className="w-full sm:w-32">
+            <label className="block text-xs font-bold text-slate-500 mb-1">الحالة</label>
+            <select
+              className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as 'all' | 'active' | 'inactive')}
+            >
+              <option value="all">الكل</option>
+              <option value="active">نشط</option>
+              <option value="inactive">غير نشط</option>
+            </select>
+          </div>
+          <div className="w-full sm:w-36">
+            <label className="block text-xs font-bold text-slate-500 mb-1">دخول النظام</label>
+            <select
+              className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+              value={filterSystemAccess}
+              onChange={(e) => setFilterSystemAccess(e.target.value as 'all' | 'yes' | 'no')}
+            >
+              <option value="all">الكل</option>
+              <option value="yes">نعم</option>
+              <option value="no">لا</option>
+            </select>
+          </div>
+          {hasActiveFilters && (
+            <Button variant="outline" onClick={clearFilters}>
+              مسح الفلاتر
+            </Button>
+          )}
+        </div>
+      </Card>
+
+      {/* 5. SelectableTable with bulk actions */}
+      <SelectableTable<FirestoreEmployee>
+        data={filtered}
+        columns={employeeColumns}
+        getId={(emp) => emp.id!}
+        bulkActions={employeeBulkActions}
+        renderActions={renderEmployeeActions}
+        actionsHeader="إجراءات"
+        emptyIcon="groups"
+        emptyTitle="لا يوجد موظفون مطابقون للبحث"
+        emptySubtitle={can('employees.create') ? 'اضغط "إضافة موظف" لإضافة أول موظف' : undefined}
+        pageSize={20}
+      />
+
+      {/* 6. Create/Edit Modal */}
+      {showModal && (can('employees.create') || can('employees.edit')) && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <h3 className="text-lg font-bold">{editId ? 'تعديل موظف' : 'إضافة موظف جديد'}</h3>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">الاسم *</label>
+                  <input
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm focus:border-primary focus:ring-primary/20 p-3 outline-none font-medium"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="اسم الموظف"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">رمز الموظف</label>
+                  <input
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    value={form.code}
+                    onChange={(e) => setForm({ ...form, code: e.target.value })}
+                    placeholder="اختياري"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">القسم</label>
+                  <div className="flex gap-2">
+                    <select
+                      className="flex-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                      value={form.departmentId}
+                      onChange={(e) => setForm({ ...form, departmentId: e.target.value, jobPositionId: '' })}
+                    >
+                      <option value="">اختر القسم...</option>
+                      {departments.map((d) => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => { setQuickAddType('department'); setQuickAddName(''); setQuickAddCode(''); }}
+                      className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
+                      title="إضافة قسم جديد"
+                    >
+                      <span className="material-icons-round text-lg">add</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">المنصب</label>
+                  <div className="flex gap-2">
+                    <select
+                      className="flex-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                      value={form.jobPositionId}
+                      onChange={(e) => setForm({ ...form, jobPositionId: e.target.value })}
+                    >
+                      <option value="">اختر المنصب...</option>
+                      {positionOptions.map((j) => (
+                        <option key={j.id} value={j.id}>{j.title}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => { setQuickAddType('position'); setQuickAddName(''); }}
+                      className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
+                      title="إضافة منصب جديد"
+                    >
+                      <span className="material-icons-round text-lg">add</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">المستوى</label>
+                  <select
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    value={form.level}
+                    onChange={(e) => setForm({ ...form, level: Number(e.target.value) as 1 | 2 | 3 | 4 })}
+                  >
+                    {(Object.entries(JOB_LEVEL_LABELS) as [string, string][]).map(([k, v]) => (
+                      <option key={k} value={k}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">المدير المباشر</label>
+                  <select
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    value={form.managerId}
+                    onChange={(e) => setForm({ ...form, managerId: e.target.value })}
+                  >
+                    <option value="">لا يوجد</option>
+                    {managerOptions.map((e) => (
+                      <option key={e.id} value={e.id}>{e.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">نوع التوظيف</label>
+                  <select
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    value={form.employmentType}
+                    onChange={(e) => setForm({ ...form, employmentType: e.target.value as EmploymentType })}
+                  >
+                    {(Object.entries(EMPLOYMENT_TYPE_LABELS) as [EmploymentType, string][]).map(([k, v]) => (
+                      <option key={k} value={k}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">الوردية</label>
+                  <div className="flex gap-2">
+                    <select
+                      className="flex-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                      value={form.shiftId}
+                      onChange={(e) => setForm({ ...form, shiftId: e.target.value })}
+                    >
+                      <option value="">لا يوجد</option>
+                      {shifts.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => { setQuickAddType('shift'); setQuickAddName(''); }}
+                      className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
+                      title="إضافة وردية جديدة"
+                    >
+                      <span className="material-icons-round text-lg">add</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">الراتب الأساسي</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    value={form.baseSalary || ''}
+                    onChange={(e) => setForm({ ...form, baseSalary: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">أجر الساعة</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    value={form.hourlyRate || ''}
+                    onChange={(e) => setForm({ ...form, hourlyRate: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">رمز المركبة</label>
+                <input
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                  value={form.vehicleId}
+                  onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
+                  placeholder="اختياري"
+                />
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.hasSystemAccess}
+                    onChange={(e) => setForm({ ...form, hasSystemAccess: e.target.checked })}
+                    className="rounded border-slate-300 text-primary focus:ring-primary"
+                  />
+                  <span className="text-sm font-bold">لديه دخول للنظام</span>
+                </label>
+              </div>
+              {form.hasSystemAccess && !editId && (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 bg-slate-50 dark:bg-slate-800/50">
+                  <p className="text-sm font-bold text-slate-600 dark:text-slate-400">إنشاء حساب دخول</p>
+                  <input
+                    type="email"
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    placeholder="البريد الإلكتروني"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                  />
+                  <input
+                    type="password"
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    placeholder="كلمة المرور"
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                  />
+                  <select
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    value={formRoleId}
+                    onChange={(e) => setFormRoleId(e.target.value)}
+                  >
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">حالة الموظف</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="isActive"
+                      checked={form.isActive === true}
+                      onChange={() => setForm({ ...form, isActive: true })}
+                      className="text-primary focus:ring-primary"
+                    />
+                    <span className="text-sm">نشط</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="isActive"
+                      checked={form.isActive === false}
+                      onChange={() => setForm({ ...form, isActive: false })}
+                      className="text-primary focus:ring-primary"
+                    />
+                    <span className="text-sm">غير نشط</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3 shrink-0">
+              <Button variant="outline" onClick={() => setShowModal(false)}>إلغاء</Button>
+              <Button variant="primary" onClick={handleSave} disabled={saving || !form.name.trim()}>
+                {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
+                {editId ? 'حفظ التعديلات' : 'إضافة الموظف'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setDeleteConfirmId(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-800 p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="material-icons-round text-rose-500 text-3xl">delete_forever</span>
+            </div>
+            <h3 className="text-lg font-bold mb-2">تأكيد الحذف</h3>
+            <p className="text-sm text-slate-500 mb-6">هل أنت متأكد من حذف هذا الموظف؟ لا يمكن التراجع عن هذا الإجراء.</p>
+            <div className="flex items-center justify-center gap-3">
+              <Button variant="outline" onClick={() => setDeleteConfirmId(null)}>إلغاء</Button>
+              <button
+                onClick={() => handleDelete(deleteConfirmId)}
+                className="px-4 py-2.5 rounded-lg font-bold text-sm bg-rose-500 text-white hover:bg-rose-600 flex items-center gap-2"
+              >
+                نعم، احذف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toggle active confirmation */}
+      {toggleConfirmId && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setToggleConfirmId(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-800 p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-2">تغيير حالة الموظف</h3>
+            <p className="text-sm text-slate-500 mb-6">
+              {_rawEmployees.find((e) => e.id === toggleConfirmId)?.isActive !== false ? 'تعطيل الموظف؟' : 'تفعيل الموظف؟'}
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <Button variant="outline" onClick={() => setToggleConfirmId(null)}>إلغاء</Button>
+              <Button variant="primary" onClick={() => handleToggleActive(toggleConfirmId)}>تأكيد</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Re-auth modal */}
+      {showReAuth && reAuthPending && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => {}}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-800 p-6" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+              تم إنشاء الحساب. أدخل كلمة مرورك للعودة إلى جلسة المدير.
+            </p>
+            <input
+              type="password"
+              className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium mb-4"
+              placeholder="كلمة مرور المدير"
+              value={reAuthPassword}
+              onChange={(e) => setReAuthPassword(e.target.value)}
+            />
+            <div className="flex gap-3">
+              <Button variant="primary" onClick={handleReAuth} disabled={reAuthLoading || !reAuthPassword.trim()}>
+                {reAuthLoading ? <span className="material-icons-round animate-spin text-sm">refresh</span> : null}
+                تسجيل الدخول
+              </Button>
+              <Button variant="outline" onClick={() => { setShowReAuth(false); setReAuthPending(null); setReAuthPassword(''); }}>
+                إلغاء
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick-Add Modal (Department / Position / Shift) */}
+      {quickAddType && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={() => setQuickAddType(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="text-base font-bold">
+                {quickAddType === 'department' && 'إضافة قسم جديد'}
+                {quickAddType === 'position' && 'إضافة منصب جديد'}
+                {quickAddType === 'shift' && 'إضافة وردية جديدة'}
+              </h3>
+              <button onClick={() => setQuickAddType(null)} className="text-slate-400 hover:text-slate-600">
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">
+                  {quickAddType === 'department' && 'اسم القسم *'}
+                  {quickAddType === 'position' && 'اسم المنصب *'}
+                  {quickAddType === 'shift' && 'اسم الوردية *'}
+                </label>
+                <input
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                  value={quickAddName}
+                  onChange={(e) => setQuickAddName(e.target.value)}
+                  placeholder={
+                    quickAddType === 'department' ? 'مثال: قسم التجميع' :
+                    quickAddType === 'position' ? 'مثال: فني تجميع' :
+                    'مثال: الوردية الصباحية'
+                  }
+                  autoFocus
+                />
+              </div>
+              {quickAddType === 'department' && (
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">رمز القسم</label>
+                  <input
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                    value={quickAddCode}
+                    onChange={(e) => setQuickAddCode(e.target.value)}
+                    placeholder="مثال: ASM"
+                  />
+                </div>
+              )}
+              {quickAddType === 'position' && !form.departmentId && (
+                <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 p-2 rounded-lg">
+                  <span className="material-icons-round text-xs align-middle ml-1">info</span>
+                  لم تختر قسم بعد — سيتم ربط المنصب بالقسم المختار لاحقاً
+                </p>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
+              <Button variant="outline" onClick={() => setQuickAddType(null)}>إلغاء</Button>
+              <Button variant="primary" onClick={handleQuickAdd} disabled={quickAddSaving || !quickAddName.trim()}>
+                {quickAddSaving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
+                إضافة
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

@@ -80,7 +80,7 @@ export const LineDetails: React.FC = () => {
   const _rawLines = useAppStore((s) => s._rawLines);
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const lineProductConfigs = useAppStore((s) => s.lineProductConfigs);
-  const supervisors = useAppStore((s) => s.supervisors);
+  const employees = useAppStore((s) => s.employees);
   const productionPlans = useAppStore((s) => s.productionPlans);
   const planReports = useAppStore((s) => s.planReports);
   const laborSettings = useAppStore((s) => s.laborSettings);
@@ -467,7 +467,7 @@ export const LineDetails: React.FC = () => {
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
               <span className="text-xs sm:text-sm text-slate-400 font-medium flex items-center gap-1">
                 <span className="material-icons-round text-xs">person</span>
-                المشرف: <strong className="text-slate-600 dark:text-slate-300">{line?.supervisorName}</strong>
+                الموظف: <strong className="text-slate-600 dark:text-slate-300">{line?.employeeName}</strong>
               </span>
               {rawLine && (
                 <>
