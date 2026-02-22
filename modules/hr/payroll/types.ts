@@ -70,6 +70,8 @@ export interface FirestorePayrollRecord {
   overtimeAmount: number;
   allowancesTotal: number;
   allowancesBreakdown: AllowanceResult[];
+  employeeAllowancesTotal: number;
+  employeeAllowancesBreakdown: { name: string; amount: number; isRecurring: boolean }[];
 
   // Attendance summary
   workingDays: number;
@@ -85,6 +87,8 @@ export interface FirestorePayrollRecord {
   transportDeduction: number;
   unpaidLeaveDays: number;
   unpaidLeaveDeduction: number;
+  employeeDeductionsTotal: number;
+  employeeDeductionsBreakdown: { name: string; amount: number; isRecurring: boolean; reason: string }[];
 
   // Summary
   grossSalary: number;
@@ -161,6 +165,8 @@ export interface PayrollCalculationResult {
   overtimeAmount: number;
   allowancesTotal: number;
   allowancesBreakdown: AllowanceResult[];
+  employeeAllowancesTotal: number;
+  employeeAllowancesBreakdown: { name: string; amount: number; isRecurring: boolean }[];
   workingDays: number;
   presentDays: number;
   absentDays: number;
@@ -172,6 +178,8 @@ export interface PayrollCalculationResult {
   transportDeduction: number;
   unpaidLeaveDays: number;
   unpaidLeaveDeduction: number;
+  employeeDeductionsTotal: number;
+  employeeDeductionsBreakdown: { name: string; amount: number; isRecurring: boolean; reason: string }[];
   grossSalary: number;
   totalDeductions: number;
   netSalary: number;

@@ -103,6 +103,8 @@ export interface ApprovalConfig extends ConfigMetadata {
   escalationAfterDays: number;
   maxApprovalLevels: number;
   notifyOnPending: boolean;
+  hrAlwaysFinalLevel: boolean;
+  allowDelegation: boolean;
 }
 
 // ─── Module: Transport ──────────────────────────────────────────────────────

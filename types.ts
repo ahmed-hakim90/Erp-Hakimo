@@ -120,7 +120,8 @@ export type ActivityAction =
   | 'UPDATE_USER_ROLE'
   | 'TOGGLE_USER_ACTIVE'
   | 'APPROVE_USER'
-  | 'REJECT_USER';
+  | 'REJECT_USER'
+  | 'SALARY_CHANGE';
 
 export interface ActivityLog {
   id?: string;
@@ -158,6 +159,17 @@ export interface LineStatus {
   currentProductId: string;
   targetTodayQty: number;
   updatedAt?: any;
+}
+
+export interface LineWorkerAssignment {
+  id?: string;
+  lineId: string;
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  date: string;
+  assignedAt?: any;
+  assignedBy?: string;
 }
 
 export type PlanPriority = 'low' | 'medium' | 'high' | 'urgent';

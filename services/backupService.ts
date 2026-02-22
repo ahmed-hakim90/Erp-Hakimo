@@ -73,6 +73,15 @@ const SETTINGS_COLLECTIONS = [
   'roles',
   'labor_settings',
   'line_product_config',
+  'hr_settings',
+  'hr_config_modules',
+  'penalty_rules',
+  'late_rules',
+  'allowance_types',
+  'shifts',
+  'departments',
+  'job_positions',
+  'approval_settings',
 ] as const;
 
 export type RestoreMode = 'merge' | 'replace' | 'full_reset';

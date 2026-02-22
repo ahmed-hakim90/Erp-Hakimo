@@ -36,6 +36,16 @@ import { Payroll } from './modules/hr/pages/Payroll';
 import { HRSettings } from './modules/hr/pages/HRSettings';
 import { Organization } from './modules/hr/pages/Organization';
 import { HRImport } from './modules/hr/pages/HRImport';
+import { DelegationManagement } from './modules/hr/pages/DelegationManagement';
+import { HRDashboard } from './modules/hr/pages/HRDashboard';
+import { Vehicles } from './modules/hr/pages/Vehicles';
+import { EmployeeFinancials } from './modules/hr/pages/EmployeeFinancials';
+import { HRTransactions } from './modules/hr/pages/HRTransactions';
+import { Supervisors } from './pages/Supervisors';
+import { SupervisorDetails } from './pages/SupervisorDetails';
+import { ProductionWorkers } from './pages/ProductionWorkers';
+import { ProductionWorkerDetails } from './pages/ProductionWorkerDetails';
+import { LineWorkerAssignment } from './pages/LineWorkerAssignment';
 import { useAppStore } from './store/useAppStore';
 import { onAuthChange } from './services/firebase';
 import { getHomeRoute } from './utils/permissions';
@@ -138,11 +148,14 @@ const App: React.FC = () => {
                 <Route path="/employees" element={<ProtectedRoute permission="employees.view"><Employees /></ProtectedRoute>} />
                 <Route path="/employees/import" element={<ProtectedRoute permission="employees.create"><HRImport /></ProtectedRoute>} />
                 <Route path="/employees/:id" element={<ProtectedRoute permission="employees.view"><EmployeeProfile /></ProtectedRoute>} />
+                <Route path="/line-workers" element={<ProtectedRoute permission="lines.edit"><LineWorkerAssignment /></ProtectedRoute>} />
                 <Route path="/reports" element={<ProtectedRoute permission="reports.view"><Reports /></ProtectedRoute>} />
                 <Route path="/quick-action" element={<ProtectedRoute permission="quickAction.view"><QuickAction /></ProtectedRoute>} />
                 <Route path="/users" element={<Navigate to="/employees" replace />} />
-                <Route path="/supervisors" element={<Navigate to="/employees" replace />} />
-                <Route path="/supervisors/:id" element={<Navigate to="/employees" replace />} />
+                <Route path="/supervisors" element={<ProtectedRoute permission="employees.view"><Supervisors /></ProtectedRoute>} />
+                <Route path="/supervisors/:id" element={<ProtectedRoute permission="employees.view"><SupervisorDetails /></ProtectedRoute>} />
+                <Route path="/production-workers" element={<ProtectedRoute permission="employees.view"><ProductionWorkers /></ProtectedRoute>} />
+                <Route path="/production-workers/:id" element={<ProtectedRoute permission="employees.view"><ProductionWorkerDetails /></ProtectedRoute>} />
                 <Route path="/activity-log" element={<ProtectedRoute permission="activityLog.view"><ActivityLogPage /></ProtectedRoute>} />
                 <Route path="/employee-dashboard" element={<ProtectedRoute permission="employeeDashboard.view"><EmployeeDashboard /></ProtectedRoute>} />
                 <Route path="/supervisor-dashboard" element={<Navigate to="/employee-dashboard" replace />} />
@@ -162,7 +175,12 @@ const App: React.FC = () => {
                 <Route path="/approval-center" element={<ProtectedRoute permission="approval.view"><ApprovalCenter /></ProtectedRoute>} />
                 <Route path="/payroll" element={<ProtectedRoute permission="payroll.view"><Payroll /></ProtectedRoute>} />
                 <Route path="/organization" element={<ProtectedRoute permission="hrSettings.view"><Organization /></ProtectedRoute>} />
+                <Route path="/hr-dashboard" element={<ProtectedRoute permission="hrDashboard.view"><HRDashboard /></ProtectedRoute>} />
+                <Route path="/vehicles" element={<ProtectedRoute permission="vehicles.view"><Vehicles /></ProtectedRoute>} />
+                <Route path="/employee-financials" element={<ProtectedRoute permission="hrSettings.view"><EmployeeFinancials /></ProtectedRoute>} />
+                <Route path="/hr-transactions" element={<ProtectedRoute permission="hrDashboard.view"><HRTransactions /></ProtectedRoute>} />
                 <Route path="/hr-settings" element={<ProtectedRoute permission="hrSettings.view"><HRSettings /></ProtectedRoute>} />
+                <Route path="/delegations" element={<ProtectedRoute permission="approval.delegate"><DelegationManagement /></ProtectedRoute>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Layout>

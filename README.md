@@ -9,7 +9,7 @@
 ![Firebase](https://img.shields.io/badge/Firebase-12-orange)
 ![Zustand](https://img.shields.io/badge/Zustand-5-purple)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
-![Version](https://img.shields.io/badge/version-3.0.0-green)
+![Version](https://img.shields.io/badge/version-4.0.0-green)
 
 ## 🚀 نظرة عامة
 
@@ -24,6 +24,8 @@
 | الإدخال السريع | فورم سريع للمشرفين: إدخال → حفظ → طباعة → واتساب |
 | سجل النشاط | تسجيل تلقائي لكل العمليات (دخول، إنشاء، تعديل، حذف) |
 | Dashboard | لوحة تحكم تحليلية مع KPIs ورسوم بيانية لحظية |
+| الموارد البشرية | حضور، إجازات، سُلف، رواتب، هيكل تنظيمي |
+| محرك الموافقات | سلسلة موافقات مؤسسية + تفويض + تصعيد تلقائي |
 | الطباعة | طباعة مباشرة + PDF + صورة + مشاركة واتساب |
 
 ---
@@ -116,7 +118,7 @@ const { can, canCreateReport, canEditReport, canDeleteReport, canManageUsers } =
 | لوحة التحكم | `dashboard.view` |
 | المنتجات | `products.view` · `products.create` · `products.edit` · `products.delete` |
 | خطوط الإنتاج | `lines.view` · `lines.create` · `lines.edit` · `lines.delete` |
-| فريق العمل | `supervisors.view` · `supervisors.create` · `supervisors.edit` · `supervisors.delete` |
+| الموظفين | `employees.view` · `employees.create` · `employees.edit` · `employees.delete` |
 | التقارير | `reports.view` · `reports.create` · `reports.edit` · `reports.delete` |
 | حالة الخطوط | `lineStatus.view` · `lineStatus.edit` |
 | إعدادات المنتج-الخط | `lineProductConfig.view` |
@@ -186,8 +188,8 @@ const { can, canCreateReport, canEditReport, canDeleteReport, canManageUsers } =
 │   ├── ProductDetails.tsx          # تفاصيل المنتج + رسم بياني
 │   ├── Lines.tsx                   # قائمة خطوط الإنتاج
 │   ├── LineDetails.tsx             # تفاصيل الخط + الكفاءة + الاستخدام
-│   ├── Supervisors.tsx             # فريق العمل + إدارة الحسابات
-│   ├── SupervisorDetails.tsx       # تفاصيل المشرف + إنتاج اليوم/الشهر
+│   ├── Employees.tsx               # إدارة الموظفين + الحسابات
+│   ├── EmployeeProfile.tsx         # الملف الشخصي للموظف
 │   ├── Reports.tsx                 # تقارير الإنتاج + CRUD + طباعة
 │   ├── QuickAction.tsx             # الإدخال السريع (حفظ + طباعة + واتساب)
 │   ├── Users.tsx                   # إدارة المستخدمين (مسار احتياطي)
@@ -195,11 +197,17 @@ const { can, canCreateReport, canEditReport, canDeleteReport, canManageUsers } =
 │   ├── RolesManagement.tsx         # إدارة الأدوار والصلاحيات
 │   └── Settings.tsx                # الإعدادات وحالة النظام
 │
+├── modules/hr/                     # وحدة الموارد البشرية
+│   ├── approval/                   # محرك الموافقات المؤسسي
+│   ├── config/                     # إعدادات HR المركزية
+│   ├── payroll/                    # نظام الرواتب
+│   └── pages/                      # صفحات HR
+│
 ├── services/
 │   ├── firebase.ts                 # Firebase init + Auth functions
 │   ├── productService.ts           # Products CRUD
 │   ├── lineService.ts              # Production lines CRUD
-│   ├── supervisorService.ts        # Supervisors CRUD
+│   ├── employeeService.ts          # Employees CRUD (via modules/hr/)
 │   ├── reportService.ts            # Reports CRUD + date queries + real-time
 │   ├── lineStatusService.ts        # Line status real-time updates
 │   ├── lineProductConfigService.ts # إعدادات المنتج-الخط
@@ -233,8 +241,8 @@ const { can, canCreateReport, canEditReport, canDeleteReport, canManageUsers } =
 | `users` | بيانات المستخدمين (مرتبط بـ Firebase Auth) | `email`, `displayName`, `roleId`, `isActive`, `createdAt` |
 | `products` | المنتجات | `name`, `model`, `code`, `openingBalance` |
 | `production_lines` | خطوط الإنتاج | `name`, `dailyWorkingHours`, `maxWorkers`, `status` |
-| `supervisors` | فريق العمل | `name`, `role`, `isActive`, `userId`, `email` |
-| `production_reports` | تقارير الإنتاج | `date`, `lineId`, `productId`, `supervisorId`, `quantities...` |
+| `employees` | الموظفين | `name`, `departmentId`, `jobPositionId`, `isActive`, `baseSalary` |
+| `production_reports` | تقارير الإنتاج | `date`, `lineId`, `productId`, `employeeId`, `quantities...` |
 | `line_status` | حالة الخطوط (لحظي) | `lineId`, `currentProductId`, `targetTodayQty` |
 | `line_product_config` | إعدادات زمن التجميع | `lineId`, `productId`, `standardAssemblyTime` |
 | `activity_logs` | سجل النشاط | `userId`, `userEmail`, `action`, `description`, `timestamp` |
@@ -257,7 +265,7 @@ const { can, canCreateReport, canEditReport, canDeleteReport, canManageUsers } =
 | `users` | owner or `isAdmin` | owner or `isAdmin` | owner or `isAdmin` | `isAdmin` |
 | `products` | `isActiveUser` | `products.create` | `products.edit` | `isAdmin` |
 | `production_lines` | `isActiveUser` | `lines.create` | `lines.edit` | `isAdmin` |
-| `supervisors` | `isActiveUser` | `supervisors.create` | `supervisors.edit` | `isAdmin` |
+| `employees` | `isActiveUser` | `employees.create` | `employees.edit` | `isAdmin` |
 | `production_reports` | `isActiveUser` | `reports.create` | `reports.edit` | `isAdmin` |
 | `activity_logs` | `activityLog.view` | `isAuthenticated` | `isAdmin` | `isAdmin` |
 
@@ -401,6 +409,42 @@ Register → Firebase Auth (create) → Seed Roles → Create User Doc
 
 ---
 
+## 🏢 وحدة الموارد البشرية (HR Module)
+
+### البنية
+
+```
+modules/hr/
+├── approval/          — محرك الموافقات المؤسسي (Enterprise Approval Engine)
+│   ├── types.ts       — أنواع البيانات
+│   ├── approvalBuilder.ts    — بناء سلاسل الموافقات (snapshot-based)
+│   ├── approvalEngine.ts     — العمليات الأساسية (CRUD + workflow)
+│   ├── approvalValidation.ts — التحقق + RBAC
+│   ├── approvalDelegation.ts — خدمة التفويضات
+│   ├── approvalEscalation.ts — التصعيد التلقائي
+│   └── approvalAudit.ts      — سجل المراجعة
+├── config/            — إعدادات HR المركزية (8 وحدات)
+├── payroll/           — نظام الرواتب (استراتيجيات: شهري/يومي/بالساعة)
+├── pages/             — صفحات HR
+└── utils/             — أدوات مساعدة (payslipGenerator)
+```
+
+### الصفحات
+
+| الصفحة | المسار | الصلاحية |
+|--------|--------|----------|
+| سجل الحضور | `/attendance` | `attendance.view` |
+| استيراد الحضور | `/attendance/import` | `attendance.import` |
+| الإجازات | `/leave-requests` | `leave.view` |
+| السُلف | `/loan-requests` | `loan.view` |
+| مركز الموافقات | `/approval-center` | `approval.view` |
+| التفويضات | `/delegations` | `approval.delegate` |
+| كشف الرواتب | `/payroll` | `payroll.view` |
+| الهيكل التنظيمي | `/organization` | `hrSettings.view` |
+| إعدادات HR | `/hr-settings` | `hrSettings.view` |
+
+---
+
 ## 👨‍💻 المطور
 
 **Ahmed Abdel Hakim Said**
@@ -411,6 +455,6 @@ Register → Firebase Auth (create) → Seed Roles → Create User Doc
 
 **HAKIMO — نظام إنتاج متكامل** 🏭
 
-الإصدار 3.0.0 — مع مصادقة + صلاحيات ديناميكية + سجل نشاط
+الإصدار 4.0.0 — مع مصادقة + صلاحيات + HR + رواتب + موافقات مؤسسية
 
 </div>

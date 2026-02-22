@@ -211,14 +211,14 @@ TypeScript = JavaScript + أنواع بيانات. بيمنع الأخطاء ق�
 // تعريف شكل البيانات
 interface ProductionReport {
   id?: string;           // string اختياري (?) يعني ممكن مايبقاش موجود
-  supervisorId: string;  // string إجباري
+  employeeId: string;    // string إجباري
   quantityProduced: number;
   date: string;
 }
 
 // لو حاولت تبعت رقم مكان string — TypeScript هيقولك غلط
 const report: ProductionReport = {
-  supervisorId: 123,  // ❌ Error!
+  employeeId: 123,  // ❌ Error!
   date: "2026-02-21", // ✅
 };
 
@@ -262,9 +262,25 @@ const MyComponent: React.FC<{ title: string; count: number }> = ({ title, count 
 │   ├── Layout.tsx          ← الهيكل العام (Sidebar + Header + Footer)
 │   ├── ProtectedRoute.tsx  ← حماية الصفحات بالصلاحيات
 │   ├── ProductionReportPrint.tsx ← قالب الطباعة
-│   └── SupervisorDashboard.tsx  ← مكون لوحة المشرف
+│   └── EmployeeDashboardWidget.tsx  ← مكون لوحة الموظف
 │
-├── 📁 services/            ← التواصل مع Firebase (18 ملف)
+├── 📁 modules/hr/          ← وحدة الموارد البشرية
+│   ├── 📁 approval/        ← محرك الموافقات المؤسسي
+│   ├── 📁 config/          ← إعدادات HR المركزية
+│   ├── 📁 payroll/         ← نظام الرواتب
+│   ├── 📁 pages/           ← صفحات HR
+│   │   ├── ApprovalCenter.tsx     ← مركز الموافقات
+│   │   ├── AttendanceImport.tsx   ← استيراد الحضور
+│   │   ├── AttendanceList.tsx     ← سجل الحضور
+│   │   ├── DelegationManagement.tsx ← إدارة التفويضات
+│   │   ├── HRSettings.tsx         ← إعدادات HR المتقدمة
+│   │   ├── LeaveRequests.tsx      ← الإجازات
+│   │   ├── LoanRequests.tsx       ← السُلف
+│   │   ├── Organization.tsx       ← الهيكل التنظيمي
+│   │   └── Payroll.tsx            ← كشف الرواتب
+│   └── 📁 utils/           ← أدوات HR (payslipGenerator)
+│
+├── 📁 services/            ← التواصل مع Firebase
 │   ├── firebase.ts         ← إعداد Firebase
 │   ├── productService.ts   ← CRUD المنتجات
 │   ├── lineService.ts      ← CRUD خطوط الإنتاج
@@ -555,7 +571,7 @@ export const useAppStore = create((set, get) => ({
   // ══════════════════════════════════════════
   products: [],              // قائمة المنتجات
   productionLines: [],       // قائمة خطوط الإنتاج
-  supervisors: [],           // قائمة المشرفين
+  employees: [],             // قائمة الموظفين
   productionReports: [],     // التقارير
   productionPlans: [],       // خطط الإنتاج
   costCenters: [],           // مراكز التكلفة
@@ -662,7 +678,7 @@ const QuickAction = () => {
     const id = await createReport({
       lineId: selectedLine,
       productId: selectedProduct,
-      supervisorId: selectedSupervisor,
+      employeeId: selectedEmployee,
       date: selectedDate,
       quantityProduced: quantity,
       quantityWaste: waste,
@@ -746,7 +762,7 @@ export const productService = {
 |-----------|-------|---------|
 | `products` | المنتجات | `productService` |
 | `production_lines` | خطوط الإنتاج | `lineService` |
-| `supervisors` | المشرفين | `supervisorService` |
+| `employees` | الموظفين | `employeeService` |
 | `production_reports` | تقارير الإنتاج | `reportService` |
 | `production_plans` | خطط الإنتاج | `productionPlanService` |
 | `line_status` | حالة الخطوط (المنتج الحالي) | `lineStatusService` |
@@ -1026,7 +1042,7 @@ export function applyTheme(theme) {
 // شكل التقرير
 interface ProductionReport {
   id?: string;               // ID تلقائي من Firestore
-  supervisorId: string;      // مرتبط بمشرف
+  employeeId: string;        // مرتبط بالموظف
   productId: string;         // مرتبط بمنتج
   lineId: string;            // مرتبط بخط إنتاج
   date: string;              // "2026-02-21"
@@ -1201,13 +1217,13 @@ pdf.save('report.pdf');
 | لوحة التحكم | `Dashboard.tsx` | KPIs + مراقبة الخطوط + رسوم بيانية | `dashboard.view` |
 | لوحة المدير | `AdminDashboard.tsx` | KPIs متقدمة + تنبيهات + توزيع أدوار | `adminDashboard.view` |
 | لوحة المصنع | `FactoryManagerDashboard.tsx` | أداء المصنع + تكاليف | `factoryDashboard.view` |
-| لوحة المشرف | `SupervisorDashboard.tsx` | تقارير المشرف + أداؤه | `supervisorDashboard.view` |
+| لوحة الموظف | `EmployeeDashboard.tsx` | أداء الموظف + تقاريره | `employeeDashboard.view` |
 | المنتجات | `Products.tsx` | قائمة + بحث + إضافة + حذف | `products.view` |
 | تفاصيل منتج | `ProductDetails.tsx` | رسوم بيانية + تقارير + تكاليف | `products.view` |
 | خطوط الإنتاج | `Lines.tsx` | قائمة + حالات + إضافة | `lines.view` |
 | تفاصيل خط | `LineDetails.tsx` | أداء + منتجات + تكاليف | `lines.view` |
-| المشرفين | `Supervisors.tsx` | قائمة + ربط بحسابات | `supervisors.view` |
-| تفاصيل مشرف | `SupervisorDetails.tsx` | أداء + تقارير | `supervisors.view` |
+| الموظفين | `Employees.tsx` | قائمة + ربط بحسابات | `employees.view` |
+| تفاصيل موظف | `EmployeeProfile.tsx` | الملف الشخصي + أداء | `employees.view` |
 | التقارير | `Reports.tsx` | فلترة + Excel + PDF + واتساب | `reports.view` |
 | إجراء سريع | `QuickAction.tsx` | إنشاء تقرير بخطوة واحدة | `quickAction.view` |
 | خطط الإنتاج | `ProductionPlans.tsx` | إنشاء + متابعة + تقدم ذكي | `plans.view` |

@@ -1,9 +1,11 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, SearchableSelect } from '../components/UI';
 import { usePermission } from '../utils/permissions';
 import { exportToPDF, shareToWhatsApp, ShareResult } from '../utils/reportExport';
+import { lineAssignmentService } from '../services/lineAssignmentService';
+import type { LineWorkerAssignment } from '../types';
 import {
   SingleReportPrint,
   ReportPrintRow,
@@ -29,10 +31,20 @@ export const QuickAction: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [shareToast, setShareToast] = useState<string | null>(null);
   const [printReport, setPrintReport] = useState<ReportPrintRow | null>(null);
+  const [lineWorkers, setLineWorkers] = useState<LineWorkerAssignment[]>([]);
+  const [showLineWorkers, setShowLineWorkers] = useState(false);
 
   const printRef = useRef<HTMLDivElement>(null);
 
   const today = new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    if (!lineId) { setLineWorkers([]); return; }
+    lineAssignmentService.getByLineAndDate(lineId, today).then((list) => {
+      setLineWorkers(list);
+      if (list.length > 0) setWorkers(String(list.length));
+    }).catch(() => {});
+  }, [lineId, today]);
 
   const getLineName = useCallback(
     (id: string) => _rawLines.find((l) => l.id === id)?.name ?? '—',
@@ -154,7 +166,7 @@ export const QuickAction: React.FC = () => {
     }
   };
 
-  const activeEmployees = employees.filter((s) => s.isActive);
+  const activeEmployees = employees.filter((s) => s.isActive && s.level === 2);
 
   return (
     <div className="space-y-6">
@@ -178,9 +190,9 @@ export const QuickAction: React.FC = () => {
         <Card title="بيانات التقرير">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
-              <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 block">الموظف *</label>
+              <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 block">المشرف *</label>
               <SearchableSelect
-                placeholder="اختر الموظف"
+                placeholder="اختر المشرف"
                 options={activeEmployees.map((s) => ({ value: s.id, label: s.name }))}
                 value={employeeId}
                 onChange={setEmployeeId}
@@ -236,6 +248,16 @@ export const QuickAction: React.FC = () => {
                 placeholder="0"
                 min="1"
               />
+              {lineWorkers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowLineWorkers(true)}
+                  className="mt-1.5 text-xs text-primary font-bold hover:underline flex items-center gap-1"
+                >
+                  <span className="material-icons-round text-xs">groups</span>
+                  تم جلب {lineWorkers.length} عامل مسجل — اضغط للعرض
+                </button>
+              )}
             </div>
             <div>
               <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 block">ساعات العمل *</label>
@@ -359,6 +381,37 @@ export const QuickAction: React.FC = () => {
               </div>
             </Card>
           )}
+        </div>
+      )}
+
+      {/* Line Workers Modal */}
+      {showLineWorkers && lineWorkers.length > 0 && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowLineWorkers(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="material-icons-round text-primary">groups</span>
+                <h3 className="font-bold">عمالة {getLineName(lineId)} اليوم</h3>
+                <span className="px-2 py-0.5 bg-primary/10 text-primary text-xs font-bold rounded-lg">{lineWorkers.length}</span>
+              </div>
+              <button onClick={() => setShowLineWorkers(false)} className="text-slate-400 hover:text-slate-600">
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-800">
+              {lineWorkers.map((w, i) => (
+                <div key={w.id || i} className="flex items-center gap-3 py-2.5">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="material-icons-round text-primary text-sm">person</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{w.employeeName}</p>
+                    <p className="text-xs text-slate-400 font-mono">{w.employeeCode}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

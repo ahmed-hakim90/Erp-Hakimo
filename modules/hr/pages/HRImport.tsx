@@ -1,8 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Button, Badge } from '@/components/UI';
-import { getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getDocs, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/services/firebase';
 import { departmentsRef, jobPositionsRef, shiftsRef, employeesRef } from '../collections';
+import { HR_COLLECTIONS } from '../collections';
 import { parseHRExcel, type HRImportResult, type ParsedDepartmentRow, type ParsedPositionRow, type ParsedEmployeeRow, type HRLookups } from '../importHR';
 import type { FirestoreDepartment, FirestoreJobPosition, FirestoreShift, JobLevel } from '../types';
 import type { FirestoreEmployee, EmploymentType } from '@/types';
@@ -27,8 +29,8 @@ export const HRImport: React.FC = () => {
 
   // Import progress
   const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState({ depts: 0, positions: 0, employees: 0 });
-  const [importDone, setImportDone] = useState({ depts: 0, positions: 0, employees: 0, errors: 0 });
+  const [importProgress, setImportProgress] = useState({ depts: 0, positions: 0, employees: 0, updated: 0 });
+  const [importDone, setImportDone] = useState({ depts: 0, positions: 0, employees: 0, updated: 0, errors: 0 });
   const [importErrors, setImportErrors] = useState<string[]>([]);
 
   useEffect(() => {
@@ -156,34 +158,56 @@ export const HRImport: React.FC = () => {
       return existing?.id ?? '';
     };
 
-    // 3. Create employees
+    // 3. Create or Update employees
+    let updatedCount = 0;
     const validEmps = result.employees.rows.filter((r) => r.errors.length === 0);
     for (const emp of validEmps) {
       try {
-        await addDoc(employeesRef(), {
-          name: emp.name,
-          code: emp.code || '',
-          departmentId: resolveDeptId(emp.departmentName),
-          jobPositionId: resolvePosId(emp.positionTitle),
-          level: emp.level,
-          employmentType: emp.employmentType,
-          baseSalary: emp.baseSalary,
-          hourlyRate: emp.hourlyRate,
-          shiftId: resolveShiftId(emp.shiftName),
-          managerId: '',
-          vehicleId: '',
-          hasSystemAccess: false,
-          isActive: true,
-          createdAt: serverTimestamp(),
-        });
-        empCount++;
-        setImportProgress((p) => ({ ...p, employees: empCount }));
+        if (emp.existingId) {
+          // Build partial update object with only provided fields
+          const updateData: Record<string, any> = {};
+          if (emp.providedFields.includes('name')) updateData.name = emp.name;
+          if (emp.providedFields.includes('code')) updateData.code = emp.code;
+          if (emp.providedFields.includes('departmentName')) updateData.departmentId = resolveDeptId(emp.departmentName);
+          if (emp.providedFields.includes('positionTitle')) updateData.jobPositionId = resolvePosId(emp.positionTitle);
+          if (emp.providedFields.includes('level')) updateData.level = emp.level;
+          if (emp.providedFields.includes('employmentType')) updateData.employmentType = emp.employmentType;
+          if (emp.providedFields.includes('baseSalary')) updateData.baseSalary = emp.baseSalary;
+          if (emp.providedFields.includes('hourlyRate')) updateData.hourlyRate = emp.hourlyRate;
+          if (emp.providedFields.includes('shiftName')) updateData.shiftId = resolveShiftId(emp.shiftName);
+
+          if (Object.keys(updateData).length > 0) {
+            await updateDoc(doc(db, HR_COLLECTIONS.EMPLOYEES, emp.existingId), updateData);
+            updatedCount++;
+            setImportProgress((p) => ({ ...p, updated: updatedCount }));
+          }
+        } else {
+          await addDoc(employeesRef(), {
+            name: emp.name,
+            code: emp.code || '',
+            departmentId: resolveDeptId(emp.departmentName),
+            jobPositionId: resolvePosId(emp.positionTitle),
+            level: emp.level,
+            employmentType: emp.employmentType,
+            baseSalary: emp.baseSalary,
+            hourlyRate: emp.hourlyRate,
+            shiftId: resolveShiftId(emp.shiftName),
+            managerId: '',
+            vehicleId: '',
+            hasSystemAccess: false,
+            isActive: true,
+            createdAt: serverTimestamp(),
+          });
+          empCount++;
+          setImportProgress((p) => ({ ...p, employees: empCount }));
+        }
       } catch (err) {
-        errors.push(`خطأ في إنشاء الموظف "${emp.name}": ${err instanceof Error ? err.message : 'خطأ'}`);
+        const action = emp.existingId ? 'تحديث' : 'إنشاء';
+        errors.push(`خطأ في ${action} الموظف "${emp.name}": ${err instanceof Error ? err.message : 'خطأ'}`);
       }
     }
 
-    setImportDone({ depts: deptCount, positions: posCount, employees: empCount, errors: errors.length });
+    setImportDone({ depts: deptCount, positions: posCount, employees: empCount, updated: updatedCount, errors: errors.length });
     setImportErrors(errors);
     setImporting(false);
     setStep('done');
@@ -194,8 +218,8 @@ export const HRImport: React.FC = () => {
     setFileName('');
     setResult(null);
     setParseError('');
-    setImportProgress({ depts: 0, positions: 0, employees: 0 });
-    setImportDone({ depts: 0, positions: 0, employees: 0, errors: 0 });
+    setImportProgress({ depts: 0, positions: 0, employees: 0, updated: 0 });
+    setImportDone({ depts: 0, positions: 0, employees: 0, updated: 0, errors: 0 });
     setImportErrors([]);
     if (fileRef.current) fileRef.current.value = '';
   }, []);
@@ -206,6 +230,8 @@ export const HRImport: React.FC = () => {
   const totalErrors = result
     ? result.departments.errors + result.positions.errors + result.employees.errors
     : 0;
+  const totalUpdates = result?.employees.updates ?? 0;
+  const totalNew = totalValid - totalUpdates;
 
   return (
     <div className="space-y-6">
@@ -332,7 +358,7 @@ export const HRImport: React.FC = () => {
       {step === 'preview' && result && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className={`grid grid-cols-1 gap-4 ${totalUpdates > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-blue-500 text-3xl mb-2 block">description</span>
               <p className="text-xs text-slate-400 font-bold mb-1">إجمالي الصفوف</p>
@@ -341,10 +367,17 @@ export const HRImport: React.FC = () => {
               </p>
             </div>
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">check_circle</span>
-              <p className="text-xs text-slate-400 font-bold mb-1">صالحة للاستيراد</p>
-              <p className="text-2xl font-black text-emerald-600">{totalValid.toLocaleString('ar-EG')}</p>
+              <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">add_circle</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">جديد</p>
+              <p className="text-2xl font-black text-emerald-600">{totalNew.toLocaleString('ar-EG')}</p>
             </div>
+            {totalUpdates > 0 && (
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-amber-200 dark:border-amber-800 text-center">
+                <span className="material-icons-round text-amber-500 text-3xl mb-2 block">sync</span>
+                <p className="text-xs text-slate-400 font-bold mb-1">تحديث موظفين حاليين</p>
+                <p className="text-2xl font-black text-amber-600">{totalUpdates.toLocaleString('ar-EG')}</p>
+              </div>
+            )}
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-rose-500 text-3xl mb-2 block">error</span>
               <p className="text-xs text-slate-400 font-bold mb-1">بها أخطاء</p>
@@ -475,55 +508,82 @@ export const HRImport: React.FC = () => {
 
           {/* Employee preview */}
           {tab === 'employees' && (
-            <Card title={`الموظفين — ${result.employees.valid} صالح، ${result.employees.errors} خطأ`}>
+            <Card title={`الموظفين — ${result.employees.valid - result.employees.updates} جديد، ${result.employees.updates} تحديث، ${result.employees.errors} خطأ`}>
               {result.employees.rows.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-8">لا توجد بيانات موظفين في الملف (ورقة "الموظفين")</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 text-xs font-bold">
-                        <th className="text-right py-3 px-3">#</th>
-                        <th className="text-right py-3 px-3">الاسم</th>
-                        <th className="text-right py-3 px-3">الرمز</th>
-                        <th className="text-right py-3 px-3">القسم</th>
-                        <th className="text-right py-3 px-3">المنصب</th>
-                        <th className="text-right py-3 px-3">المستوى</th>
-                        <th className="text-right py-3 px-3">نوع التوظيف</th>
-                        <th className="text-right py-3 px-3">الراتب</th>
-                        <th className="text-right py-3 px-3">الحالة</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {result.employees.rows.map((row) => (
-                        <tr key={row.rowIndex} className={`border-b border-slate-50 dark:border-slate-800/50 ${row.errors.length > 0 ? 'bg-rose-50/50 dark:bg-rose-900/10' : ''}`}>
-                          <td className="py-2.5 px-3 font-mono text-slate-400 text-xs">{row.rowIndex}</td>
-                          <td className="py-2.5 px-3 font-bold">{row.name || '—'}</td>
-                          <td className="py-2.5 px-3 font-mono text-xs">{row.code || '—'}</td>
-                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 text-xs">{row.departmentName || '—'}</td>
-                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 text-xs">{row.positionTitle || '—'}</td>
-                          <td className="py-2.5 px-3 text-xs">{JOB_LEVEL_LABELS[row.level] ?? row.level}</td>
-                          <td className="py-2.5 px-3 text-xs">{EMPLOYMENT_TYPE_LABELS[row.employmentType] ?? row.employmentType}</td>
-                          <td className="py-2.5 px-3 font-mono text-xs">{row.baseSalary > 0 ? row.baseSalary.toLocaleString('ar-EG') : '—'}</td>
-                          <td className="py-2.5 px-3">
-                            {row.errors.length > 0 ? (
-                              <div className="space-y-0.5">
-                                {row.errors.map((err, i) => (
-                                  <div key={i} className="flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400">
-                                    <span className="material-icons-round text-xs">error</span>
-                                    {err}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <Badge variant="success">صالح</Badge>
-                            )}
-                          </td>
+                <>
+                  {result.employees.updates > 0 && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4 flex items-start gap-2">
+                      <span className="material-icons-round text-amber-500 text-lg mt-0.5">info</span>
+                      <div className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                        <p className="font-bold mb-0.5">تم اكتشاف موظفين حاليين</p>
+                        <p>الصفوف المميزة بـ "تحديث" سيتم تحديث بياناتها فقط بالأعمدة الموجودة في الملف — لن يتم مسح أي بيانات قديمة.</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 text-xs font-bold">
+                          <th className="text-right py-3 px-3">#</th>
+                          <th className="text-right py-3 px-3">العملية</th>
+                          <th className="text-right py-3 px-3">الاسم</th>
+                          <th className="text-right py-3 px-3">الرمز</th>
+                          <th className="text-right py-3 px-3">القسم</th>
+                          <th className="text-right py-3 px-3">المنصب</th>
+                          <th className="text-right py-3 px-3">المستوى</th>
+                          <th className="text-right py-3 px-3">نوع التوظيف</th>
+                          <th className="text-right py-3 px-3">الراتب</th>
+                          <th className="text-right py-3 px-3">الحالة</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {result.employees.rows.map((row) => (
+                          <tr key={row.rowIndex} className={`border-b border-slate-50 dark:border-slate-800/50 ${
+                            row.errors.length > 0
+                              ? 'bg-rose-50/50 dark:bg-rose-900/10'
+                              : row.existingId
+                                ? 'bg-amber-50/50 dark:bg-amber-900/10'
+                                : ''
+                          }`}>
+                            <td className="py-2.5 px-3 font-mono text-slate-400 text-xs">{row.rowIndex}</td>
+                            <td className="py-2.5 px-3">
+                              {row.errors.length > 0 ? null : row.existingId ? (
+                                <Badge variant="warning">تحديث</Badge>
+                              ) : (
+                                <Badge variant="success">جديد</Badge>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-bold">{row.name || '—'}</td>
+                            <td className="py-2.5 px-3 font-mono text-xs">{row.code || '—'}</td>
+                            <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 text-xs">{row.departmentName || '—'}</td>
+                            <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 text-xs">{row.positionTitle || '—'}</td>
+                            <td className="py-2.5 px-3 text-xs">{row.providedFields.includes('level') ? (JOB_LEVEL_LABELS[row.level] ?? row.level) : '—'}</td>
+                            <td className="py-2.5 px-3 text-xs">{row.providedFields.includes('employmentType') ? (EMPLOYMENT_TYPE_LABELS[row.employmentType] ?? row.employmentType) : '—'}</td>
+                            <td className="py-2.5 px-3 font-mono text-xs">{row.providedFields.includes('baseSalary') ? row.baseSalary.toLocaleString('ar-EG') : '—'}</td>
+                            <td className="py-2.5 px-3">
+                              {row.errors.length > 0 ? (
+                                <div className="space-y-0.5">
+                                  {row.errors.map((err, i) => (
+                                    <div key={i} className="flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400">
+                                      <span className="material-icons-round text-xs">error</span>
+                                      {err}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-emerald-600 font-bold">
+                                  {row.providedFields.filter((f) => f !== 'name' && f !== 'code').length} {row.existingId ? 'حقل للتحديث' : 'حقل'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </Card>
           )}
@@ -536,7 +596,10 @@ export const HRImport: React.FC = () => {
             </Button>
             <Button variant="primary" onClick={handleImport} disabled={totalValid === 0}>
               <span className="material-icons-round text-sm">upload</span>
-              استيراد {totalValid.toLocaleString('ar-EG')} سجل
+              {totalUpdates > 0
+                ? `استيراد ${totalNew.toLocaleString('ar-EG')} جديد + تحديث ${totalUpdates.toLocaleString('ar-EG')}`
+                : `استيراد ${totalValid.toLocaleString('ar-EG')} سجل`
+              }
             </Button>
           </div>
         </>
@@ -574,16 +637,28 @@ export const HRImport: React.FC = () => {
                     <span className="text-xs font-mono text-slate-400">{importProgress.positions}/{result.positions.valid}</span>
                   </div>
                 )}
-                {result && result.employees.valid > 0 && (
+                {result && (result.employees.valid - result.employees.updates) > 0 && (
                   <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-slate-500 w-16 text-left">الموظفين</span>
+                    <span className="text-xs font-bold text-slate-500 w-16 text-left">موظفين جدد</span>
                     <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-primary rounded-full transition-all duration-300"
-                        style={{ width: `${(importProgress.employees / result.employees.valid) * 100}%` }}
+                        style={{ width: `${(importProgress.employees / (result.employees.valid - result.employees.updates)) * 100}%` }}
                       />
                     </div>
-                    <span className="text-xs font-mono text-slate-400">{importProgress.employees}/{result.employees.valid}</span>
+                    <span className="text-xs font-mono text-slate-400">{importProgress.employees}/{result.employees.valid - result.employees.updates}</span>
+                  </div>
+                )}
+                {result && result.employees.updates > 0 && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-amber-500 w-16 text-left">تحديث</span>
+                    <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                        style={{ width: `${(importProgress.updated / result.employees.updates) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono text-slate-400">{importProgress.updated}/{result.employees.updates}</span>
                   </div>
                 )}
               </div>
@@ -595,7 +670,7 @@ export const HRImport: React.FC = () => {
       {/* Done Step */}
       {step === 'done' && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className={`grid grid-cols-2 gap-4 ${importDone.updated > 0 ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-blue-500 text-3xl mb-2 block">business</span>
               <p className="text-xs text-slate-400 font-bold mb-1">أقسام</p>
@@ -607,10 +682,17 @@ export const HRImport: React.FC = () => {
               <p className="text-2xl font-black text-indigo-600">{importDone.positions}</p>
             </div>
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">groups</span>
-              <p className="text-xs text-slate-400 font-bold mb-1">موظفين</p>
+              <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">person_add</span>
+              <p className="text-xs text-slate-400 font-bold mb-1">موظفين جدد</p>
               <p className="text-2xl font-black text-emerald-600">{importDone.employees}</p>
             </div>
+            {importDone.updated > 0 && (
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-amber-200 dark:border-amber-800 text-center">
+                <span className="material-icons-round text-amber-500 text-3xl mb-2 block">sync</span>
+                <p className="text-xs text-slate-400 font-bold mb-1">تم تحديثهم</p>
+                <p className="text-2xl font-black text-amber-600">{importDone.updated}</p>
+              </div>
+            )}
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-rose-500 text-3xl mb-2 block">error</span>
               <p className="text-xs text-slate-400 font-bold mb-1">أخطاء</p>
@@ -618,11 +700,16 @@ export const HRImport: React.FC = () => {
             </div>
           </div>
 
-          {importDone.errors === 0 && (importDone.depts + importDone.positions + importDone.employees) > 0 && (
+          {importDone.errors === 0 && (importDone.depts + importDone.positions + importDone.employees + importDone.updated) > 0 && (
             <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 flex items-center gap-3">
               <span className="material-icons-round text-emerald-500">check_circle</span>
               <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400">
-                تم الاستيراد بنجاح! تمت إضافة {importDone.depts} قسم و{importDone.positions} منصب و{importDone.employees} موظف.
+                تم الاستيراد بنجاح!
+                {importDone.depts > 0 && ` تمت إضافة ${importDone.depts} قسم`}
+                {importDone.positions > 0 && ` و${importDone.positions} منصب`}
+                {importDone.employees > 0 && ` و${importDone.employees} موظف جديد`}
+                {importDone.updated > 0 && ` وتحديث ${importDone.updated} موظف حالي`}
+                .
               </p>
             </div>
           )}

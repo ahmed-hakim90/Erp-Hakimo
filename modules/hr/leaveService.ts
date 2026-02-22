@@ -181,6 +181,17 @@ export const leaveRequestService = {
     });
   },
 
+  async update(id: string, data: Partial<FirestoreLeaveRequest>): Promise<void> {
+    if (!isConfigured) return;
+    await updateDoc(doc(db, HR_COLLECTIONS.LEAVE_REQUESTS, id), data as any);
+  },
+
+  async delete(id: string): Promise<void> {
+    if (!isConfigured) return;
+    const { deleteDoc: delDoc } = await import('firebase/firestore');
+    await delDoc(doc(db, HR_COLLECTIONS.LEAVE_REQUESTS, id));
+  },
+
   /**
    * Get approved leaves for a specific employee within a date range (for payroll).
    */

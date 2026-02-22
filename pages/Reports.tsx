@@ -1,16 +1,17 @@
 
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, Badge, SearchableSelect } from '../components/UI';
 import { formatNumber, getTodayDateString } from '../utils/calculations';
 import { buildReportsCosts, estimateReportCost, formatCost } from '../utils/costCalculations';
-import { ProductionReport } from '../types';
+import { ProductionReport, LineWorkerAssignment } from '../types';
 import { usePermission } from '../utils/permissions';
 import { exportReportsByDateRange } from '../utils/exportExcel';
 import { exportToPDF, shareToWhatsApp, ShareResult } from '../utils/reportExport';
 import { parseExcelFile, toReportData, ImportResult, ParsedReportRow } from '../utils/importExcel';
 import { downloadReportsTemplate } from '../utils/downloadTemplates';
+import { lineAssignmentService } from '../services/lineAssignmentService';
 import {
   ProductionReportPrint,
   SingleReportPrint,
@@ -56,7 +57,7 @@ export const Reports: React.FC = () => {
   const planSettings = useAppStore((s) => s.systemSettings.planSettings);
 
   const { can } = usePermission();
-  const canViewCosts = can('costs.view');
+  const canViewCosts = can('reports.viewCost');
 
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -82,6 +83,11 @@ export const Reports: React.FC = () => {
   const bulkPrintRef = useRef<HTMLDivElement>(null);
   const [bulkPrintSource, setBulkPrintSource] = useState<ProductionReport[] | null>(null);
 
+  // Line workers for auto-fill and viewing
+  const [formLineWorkers, setFormLineWorkers] = useState<LineWorkerAssignment[]>([]);
+  const [viewWorkersData, setViewWorkersData] = useState<{ lineId: string; date: string; workers: LineWorkerAssignment[] } | null>(null);
+  const [viewWorkersLoading, setViewWorkersLoading] = useState(false);
+
   // Date range filter
   const [startDate, setStartDate] = useState(getTodayDateString());
   const [endDate, setEndDate] = useState(getTodayDateString());
@@ -93,6 +99,16 @@ export const Reports: React.FC = () => {
     const linked = _rawEmployees.find((s) => s.userId === uid);
     return linked?.id ?? null;
   }, [_rawEmployees, uid, can]);
+
+  useEffect(() => {
+    if (!showModal || !form.lineId || !form.date) { setFormLineWorkers([]); return; }
+    lineAssignmentService.getByLineAndDate(form.lineId, form.date).then((list) => {
+      setFormLineWorkers(list);
+      if (list.length > 0 && !editId && form.workersCount === 0) {
+        setForm((prev) => ({ ...prev, workersCount: list.length }));
+      }
+    }).catch(() => setFormLineWorkers([]));
+  }, [showModal, form.lineId, form.date]);
 
   const allReports = viewMode === 'today' ? todayReports : productionReports;
   const displayedReports = myEmployeeId
@@ -247,6 +263,19 @@ export const Reports: React.FC = () => {
     setDeleteConfirmId(null);
   };
 
+  const handleViewWorkers = async (lineId: string, date: string) => {
+    setViewWorkersLoading(true);
+    setViewWorkersData({ lineId, date, workers: [] });
+    try {
+      const workers = await lineAssignmentService.getByLineAndDate(lineId, date);
+      setViewWorkersData({ lineId, date, workers });
+    } catch {
+      setViewWorkersData(null);
+    } finally {
+      setViewWorkersLoading(false);
+    }
+  };
+
   const handlePDF = async () => {
     if (!bulkPrintRef.current) return;
     setExporting(true);
@@ -338,7 +367,21 @@ export const Reports: React.FC = () => {
         ),
       },
       { header: 'الهالك', headerClassName: 'text-center', className: 'text-center text-rose-500 font-bold', render: (r) => <>{formatNumber(r.quantityWaste)}</> },
-      { header: 'عمال', headerClassName: 'text-center', className: 'text-center font-bold', render: (r) => <>{r.workersCount}</> },
+      {
+        header: 'عمال',
+        headerClassName: 'text-center',
+        className: 'text-center font-bold',
+        render: (r) => (
+          <button
+            onClick={(e) => { e.stopPropagation(); handleViewWorkers(r.lineId, r.date); }}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg hover:bg-primary/10 text-primary transition-colors"
+            title="عرض العمالة"
+          >
+            {r.workersCount}
+            <span className="material-icons-round text-xs">groups</span>
+          </button>
+        ),
+      },
       { header: 'ساعات', headerClassName: 'text-center', className: 'text-center font-bold', render: (r) => <>{r.workHours}</> },
     ];
     if (canViewCosts) {
@@ -576,10 +619,10 @@ export const Reports: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">الموظف *</label>
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">المشرف *</label>
                   <SearchableSelect
-                    placeholder="اختر الموظف"
-                    options={employees.map((s) => ({ value: s.id, label: s.name }))}
+                    placeholder="اختر المشرف"
+                    options={employees.filter((s) => s.level === 2).map((s) => ({ value: s.id, label: s.name }))}
                     value={form.employeeId}
                     onChange={(v) => setForm({ ...form, employeeId: v })}
                   />
@@ -640,6 +683,16 @@ export const Reports: React.FC = () => {
                     onChange={(e) => setForm({ ...form, workersCount: Number(e.target.value) })}
                     placeholder="0"
                   />
+                  {formLineWorkers.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handleViewWorkers(form.lineId, form.date)}
+                      className="text-xs text-primary font-bold hover:underline flex items-center gap-1"
+                    >
+                      <span className="material-icons-round text-xs">groups</span>
+                      تم جلب {formLineWorkers.length} عامل مسجل — اضغط للعرض
+                    </button>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">ساعات العمل *</label>
@@ -916,6 +969,56 @@ export const Reports: React.FC = () => {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ View Workers Modal ══ */}
+      {viewWorkersData && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setViewWorkersData(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="material-icons-round text-primary">groups</span>
+                <h3 className="font-bold">عمالة {getLineName(viewWorkersData.lineId)}</h3>
+                <span className="text-xs text-slate-400 font-medium">{viewWorkersData.date}</span>
+              </div>
+              <button onClick={() => setViewWorkersData(null)} className="text-slate-400 hover:text-slate-600">
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {viewWorkersLoading ? (
+                <div className="text-center py-8">
+                  <span className="material-icons-round text-3xl text-primary animate-spin block mb-2">refresh</span>
+                  <p className="text-sm text-slate-500">جاري التحميل...</p>
+                </div>
+              ) : viewWorkersData.workers.length === 0 ? (
+                <div className="text-center py-8">
+                  <span className="material-icons-round text-4xl text-slate-300 dark:text-slate-700 block mb-2">person_off</span>
+                  <p className="text-sm text-slate-500 font-medium">لا يوجد عمالة مسجلة على هذا الخط في هذا اليوم</p>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-3 px-3 py-2 bg-primary/5 rounded-xl text-center">
+                    <span className="text-sm font-bold text-primary">{viewWorkersData.workers.length} عامل</span>
+                  </div>
+                  <div className="divide-y divide-slate-50 dark:divide-slate-800">
+                    {viewWorkersData.workers.map((w, i) => (
+                      <div key={w.id || i} className="flex items-center gap-3 py-2.5">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <span className="material-icons-round text-primary text-sm">person</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{w.employeeName}</p>
+                          <p className="text-xs text-slate-400 font-mono">{w.employeeCode}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

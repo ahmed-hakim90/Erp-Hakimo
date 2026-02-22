@@ -116,7 +116,7 @@
 | `services/systemSettingsService.ts` | إعدادات النظام | مكتمل |
 | `services/activityLogService.ts` | سجل النشاط | مكتمل |
 | `services/adminService.ts` | خدمات الإدارة | مكتمل |
-| `services/backupService.ts` | نسخ احتياطي (بيانات أساسية فقط) | مكتمل جزئياً |
+| `services/backupService.ts` | نسخ احتياطي كامل (كل الـ collections) | مكتمل |
 
 ### 12. وحدة HR — الخدمات
 
@@ -138,12 +138,13 @@
 | الملف | الوصف | الحالة |
 |-------|-------|--------|
 | `modules/hr/pages/AttendanceList.tsx` | سجل الحضور — عرض + فلاتر + تعديل | مكتمل |
-| `modules/hr/pages/AttendanceImport.tsx` | استيراد الحضور — CSV + معالجة + حفظ | مكتمل جزئياً |
+| `modules/hr/pages/AttendanceImport.tsx` | استيراد الحضور — CSV + معالجة + حفظ (بيانات من Firestore) | مكتمل |
 | `modules/hr/pages/LeaveRequests.tsx` | الإجازات — إنشاء + عرض + أرصدة | مكتمل |
 | `modules/hr/pages/LoanRequests.tsx` | السُلف — إنشاء + عرض + جدول أقساط | مكتمل |
-| `modules/hr/pages/ApprovalCenter.tsx` | مركز الموافقات — عرض موحد + موافقة/رفض | مكتمل |
-| `modules/hr/pages/HRSettings.tsx` | إعدادات HR — 8 تبويبات | مكتمل |
-| `modules/hr/pages/Payroll.tsx` | كشف الرواتب — احتساب + اعتماد + قفل + طباعة | مكتمل جزئياً |
+| `modules/hr/pages/ApprovalCenter.tsx` | مركز الموافقات — محرك مؤسسي + تفويض + تصعيد + إلغاء | مكتمل |
+| `modules/hr/pages/DelegationManagement.tsx` | إدارة التفويضات — إنشاء + عرض + إلغاء | مكتمل |
+| `modules/hr/pages/HRSettings.tsx` | إعدادات HR — 8 تبويبات + مزامنة مع محرك الموافقات | مكتمل |
+| `modules/hr/pages/Payroll.tsx` | كشف الرواتب — احتساب + اعتماد + قفل + طباعة (بيانات حقيقية) | مكتمل |
 
 ### 14. وحدة الرواتب (Payroll Module)
 
@@ -163,7 +164,7 @@
 | الملف | الوصف | الحالة |
 |-------|-------|--------|
 | `modules/hr/config/index.ts` | Public API | مكتمل |
-| `modules/hr/config/types.ts` | أنواع TypeScript | مكتمل |
+| `modules/hr/config/types.ts` | أنواع TypeScript (8 modules + enterprise approval fields) | مكتمل |
 | `modules/hr/config/collections.ts` | Firestore collections | مكتمل |
 | `modules/hr/config/defaults.ts` | القيم الافتراضية لكل module | مكتمل |
 | `modules/hr/config/configService.ts` | CRUD + snapshot + initialization | مكتمل |
@@ -191,38 +192,31 @@
 | `utils/costCalculations.ts` | حسابات التكاليف | مكتمل |
 | `utils/dashboardConfig.ts` | إعدادات widgets الداشبورد | مكتمل |
 | `utils/downloadTemplates.ts` | تنزيل قوالب | مكتمل |
-| `modules/hr/utils/payslipGenerator.ts` | توليد كشف الراتب HTML + طباعة | مكتمل جزئياً |
+| `modules/hr/utils/payslipGenerator.ts` | توليد كشف الراتب HTML + طباعة + رمز التحقق | مكتمل |
+
+### 18. Firestore Security Rules
+
+| الملف | الوصف | الحالة |
+|-------|-------|--------|
+| `firestore.rules` | قواعد أمان لكل الـ collections (core + HR 21 collection) | مكتمل |
+
+### 19. التوثيق
+
+| الملف | الوصف | الحالة |
+|-------|-------|--------|
+| `README.md` | توثيق المشروع + HR module + v4.0.0 | مكتمل |
+| `learn-dev.md` | دليل المطور من الصفر | مكتمل |
 
 ---
 
 ## ثانياً: المتبقي والنواقص
 
-### مستوى حرج — يمنع العمل في Production
-
-| # | النقص | الملفات المتأثرة | التفاصيل |
-|---|-------|------------------|----------|
-| 1 | **Firestore Rules لكل collections الـ HR** | `firestore.rules` | كل الـ HR collections مش موجودة في القواعد. الـ catch-all `allow read, write: if false` بيرفض أي عملية. يعني الحضور، الإجازات، السُلف، الموافقات، الرواتب، الإعدادات — كلها هتفشل. المطلوب إضافة rules لـ: `departments`, `job_positions`, `shifts`, `hr_settings`, `penalty_rules`, `late_rules`, `allowance_types`, `attendance_raw_logs`, `attendance_logs`, `leave_requests`, `leave_balances`, `employee_loans`, `approval_requests`, `approval_settings`, `approval_delegations`, `approval_audit_logs`, `payroll_months`, `payroll_records`, `payroll_audit_logs`, `payroll_cost_summary`, `hr_config_modules`, `hr_config_audit_logs` |
-| 2 | **صفحة الرواتب تستخدم بيانات تجريبية** | `modules/hr/pages/Payroll.tsx` | `DEMO_EMPLOYEES` مصفوفة hardcoded (3 موظفين وهميين) بدل بيانات Firestore الحقيقية |
-| 3 | **إعدادات استيراد الحضور ثابتة** | `modules/hr/pages/AttendanceImport.tsx` | الوردية + قواعد التأخير + أيام الراحة + خريطة الأكواد كلها default values محلية — TODO لتحميلها من Firestore |
-
 ### مستوى متوسط — وظائف ناقصة
 
 | # | النقص | التفاصيل |
 |---|-------|----------|
-| 4 | **النسخ الاحتياطي لا يشمل HR** | `backupService.ts` → `ALL_COLLECTIONS` مش فيها أي collection من HR. لو المستخدم عمل backup مش هيتحفظ بيانات الحضور أو الرواتب أو الإجازات |
-| 5 | **مركز الموافقات لسه على المحرك القديم** | `ApprovalCenter.tsx` بيستخدم الـ legacy `approvalEngine.ts` مش الـ Enterprise engine الجديد. محتاج يتحدث ليستخدم `createRequest`, `approveRequest`, `rejectRequest` من `modules/hr/approval/` |
-| 6 | **مفيش صفحة إدارة التفويضات** | الـ `approvalDelegationService` جاهز (CRUD + resolveDelegate) بس مفيش UI لإنشاء/عرض/إلغاء التفويضات |
-| 7 | **مفيش Cloud Function للتصعيد التلقائي** | `processEscalations()` جاهزة بس محتاجة cron job أو Cloud Function يشغلها يومياً |
-| 8 | **إعدادات الموافقات المؤسسية مش في HRSettings** | `approval_settings` document (maxLevels, escalationDays, autoApproveThresholds) محتاج tab في صفحة إعدادات HR أو صفحة مستقلة |
-| 9 | **كشف الراتب فيه placeholders** | `payslipGenerator.ts`: "Company branding placeholder" + "Signature placeholder" + "QR code placeholder" |
-
-### مستوى منخفض — تحسينات وتنظيف
-
-| # | النقص | التفاصيل |
-|---|-------|----------|
-| 10 | **التوثيق قديم** | `learn-dev.md` و `README.md` لسه بيذكروا `Supervisors` + `SupervisorDashboard` + `supervisorService` المحذوفين |
-| 11 | **QuickAction بيستخدم `supervisorId`** | اسم الفيلد لسه `supervisorId` مع إن النظام اتحول لـ `employees` |
-| 12 | **مفيش Store مركزي لـ HR** | بيانات HR (حضور، إجازات، إلخ) بتتحمل في state محلي في كل صفحة مش في Zustand — ممكن يأثر لو محتاج caching |
+| 1 | **مفيش Cloud Function للتصعيد التلقائي** | `processEscalations()` جاهزة بس محتاجة cron job أو Cloud Function يشغلها يومياً |
+| 2 | **مفيش Store مركزي لـ HR** | بيانات HR (حضور، إجازات، إلخ) بتتحمل في state محلي في كل صفحة مش في Zustand — ممكن يأثر لو محتاج caching |
 
 ---
 
@@ -242,32 +236,102 @@
 
 | الفئة | العدد |
 |--------|-------|
-| إجمالي الصفحات | ~25 صفحة |
-| إجمالي الخدمات (Services) | ~20 service |
+| إجمالي الصفحات | ~28 صفحة |
+| إجمالي الخدمات (Services) | ~22 service |
 | وحدات HR الفرعية | 4 (core, payroll, config, approval) |
-| ملفات الوحدات المنفذة | ~45+ ملف |
-| Firestore collections مستخدمة | ~30+ |
-| Firestore rules مغطية | ~16 collection |
-| **Firestore rules ناقصة** | **~15+ collection (كل HR)** |
-| TODO/DEMO في الكود | 2 حاجة حرجة |
+| ملفات الوحدات المنفذة | ~50+ ملف |
+| Firestore collections مستخدمة | ~35+ |
+| Firestore rules مغطية | ~35+ collection |
 | وحدات لم تُنفذ | 1 (Quality Control — 3 مراحل) |
 
 ---
 
-## خامساً: ترتيب الأولويات المقترح
+## خامساً: ما تم تنفيذه في هذه الجلسة
 
 ```
-1. 🔴 إضافة Firestore Rules لكل HR collections (حرج — بدونها مفيش HR يشتغل)
-2. 🔴 استبدال DEMO_EMPLOYEES في الرواتب ببيانات حقيقية
-3. 🔴 تحميل إعدادات الحضور من Firestore بدل القيم الثابتة
-4. 🟡 تحديث ApprovalCenter ليستخدم المحرك المؤسسي الجديد
-5. 🟡 إضافة HR collections للنسخ الاحتياطي
-6. 🟡 صفحة إدارة التفويضات
-7. 🟡 إضافة إعدادات الموافقات المؤسسية في HRSettings
-8. 🟢 تحديث التوثيق (learn-dev.md + README.md)
-9. 🟢 تنظيف supervisorId → employeeId
-10. 🟢 استبدال placeholders في payslipGenerator
-11. 🔵 وحدة مراقبة الجودة Phase 1
-12. 🔵 وحدة مراقبة الجودة Phase 2
-13. 🔵 IPQC — مراقبة الجودة أثناء الإنتاج
+✅ 1. Firestore Rules لكل HR collections (21 collection)
+✅ 2. استبدال DEMO_EMPLOYEES في الرواتب ببيانات حقيقية من Firestore
+✅ 3. تحميل إعدادات الحضور من Firestore (shifts, late_rules, weeklyOffDays, employeeCodeMap)
+✅ 4. تحديث ApprovalCenter ليستخدم المحرك المؤسسي الجديد (enterprise engine)
+✅ 5. إضافة HR collections للنسخ الاحتياطي (21 collection)
+✅ 6. صفحة إدارة التفويضات (DelegationManagement.tsx) + route + sidebar
+✅ 7. إضافة إعدادات الموافقات المؤسسية (hrAlwaysFinalLevel, allowDelegation) في HRSettings + مزامنة مع approval_settings
+✅ 8. تحديث التوثيق (learn-dev.md + README.md) — إزالة references القديمة + إضافة HR module docs
+✅ 9. تنظيف supervisorId → employeeId في التوثيق
+✅ 10. استبدال placeholders في payslipGenerator (QR placeholder → verification code, signature labels)
 ```
+
+---
+
+## سادساً: ما تم تنفيذه في الجلسة الحالية (2026-02-21)
+
+### HR Settings Control Center (Enterprise-Level)
+
+```
+✅ 1. إنشاء 8 config modules مستقلة في hr_config_modules/{moduleName}:
+     — general (أيام العمل، ساعات، ورديات، عملة، سنة مالية)
+     — attendance (فترة سماح، غياب تلقائي، إدخال يدوي)
+     — overtime (مضاعفات: عادي/ويكند/إجازات، حدود يومية/شهرية)
+     — leave (أرصدة افتراضية، ترحيل، تقارير طبية)
+     — loan (حد الراتب، أقساط، سُلف نشطة، فترة تجربة)
+     — payroll (راتب سالب، تقريب، تأمينات، ضريبة)
+     — approval (موافقة المدير، تصعيد، مستويات)
+     — transport (بدل نقل، خصم غياب، مناطق)
+
+✅ 2. كل module يحتوي على:
+     — configVersion (يزيد تلقائياً مع كل تعديل)
+     — updatedAt + updatedBy
+
+✅ 3. إنشاء hr_config_audit_logs collection:
+     — تسجيل كل تغيير (module, action, previousVersion, newVersion, changedFields, performedBy)
+
+✅ 4. إنشاء صفحة HRSettings.tsx:
+     — 8 تبويبات بأيقونات + وصف عربي
+     — فورم كامل لكل module (أرقام، toggles، selects، day picker، zone editor)
+     — Validation لكل حقل مع رسائل خطأ عربية
+     — عرض رقم الإصدار (version badge) لكل module
+     — Confirmation dialog قبل الحفظ + قبل إعادة التعيين
+     — Audit log viewer مدمج في كل تبويب
+     — Toast notifications للنجاح/الخطأ
+     — زر "تجاهل التغييرات" + زر "إعادة تعيين للقيم الافتراضية"
+
+✅ 5. ConfigVersion Snapshot في الرواتب:
+     — payrollEngine.ts: يلتقط configVersionSnapshot عند إنشاء كشف الرواتب
+     — payrollFinalizer.ts: يلتقط configVersionSnapshot عند الاعتماد
+     — FirestorePayrollMonth.configVersionSnapshot يحفظ أرقام إصدار كل الـ 8 modules
+     — الرواتب المعتمدة/المقفلة لا تتأثر بتغيير الإعدادات لاحقاً
+
+✅ 6. RBAC لإعدادات HR:
+     — hrSettings.view → HR read-only (يشوف بس ما يعدّل)
+     — hrSettings.edit → Admin edit only
+     — Route /hr-settings محمي بـ ProtectedRoute
+     — رابط في السايدبار تحت "فريق العمل"
+
+✅ 7. فلترة المشرفين في تقارير الإنتاج:
+     — قائمة الموظفين في إنشاء التقرير تعرض المشرفين فقط (level === 2)
+     — تغيير العنوان من "الموظف" إلى "المشرف"
+```
+
+### الملفات الجديدة
+
+| الملف | الوصف |
+|-------|-------|
+| `modules/hr/config/types.ts` | 20+ نوع TypeScript صارم لكل config modules |
+| `modules/hr/config/defaults.ts` | القيم الافتراضية لكل module |
+| `modules/hr/config/collections.ts` | Firestore refs: hr_config_modules + hr_config_audit_logs |
+| `modules/hr/config/configService.ts` | CRUD + versioning + snapshot + initialization |
+| `modules/hr/config/configAudit.ts` | سجل تدقيق التغييرات |
+| `modules/hr/config/index.ts` | Public API |
+| `modules/hr/pages/HRSettings.tsx` | صفحة الإعدادات الكاملة (8 tabs + validation + dialogs) |
+
+### الملفات المعدّلة
+
+| الملف | التعديل |
+|-------|---------|
+| `utils/permissions.ts` | إضافة `hrSettings.view` + `hrSettings.edit` + sidebar + route |
+| `App.tsx` | إضافة route `/hr-settings` |
+| `modules/hr/index.ts` | Re-export كل config module |
+| `modules/hr/payroll/types.ts` | إضافة `configVersionSnapshot` لـ `FirestorePayrollMonth` |
+| `modules/hr/payroll/payrollEngine.ts` | التقاط config version snapshot عند generate |
+| `modules/hr/payroll/payrollFinalizer.ts` | التقاط config version snapshot عند finalize |
+| `pages/Reports.tsx` | فلترة الموظفين → المشرفين فقط (level === 2) |

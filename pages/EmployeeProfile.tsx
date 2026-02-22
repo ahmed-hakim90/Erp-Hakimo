@@ -9,29 +9,40 @@ import { employeeService } from '../modules/hr/employeeService';
 import { attendanceLogService } from '../modules/hr/attendanceService';
 import { leaveRequestService, leaveBalanceService } from '../modules/hr/leaveService';
 import { loanService } from '../modules/hr/loanService';
-import { reportService } from '../services/reportService';
+import {
+  employeeAllowanceService,
+  employeeDeductionService,
+  summarizeAllowances,
+  summarizeDeductions,
+} from '../modules/hr/employeeFinancialsService';
 import { JOB_LEVEL_LABELS, type JobLevel } from '../modules/hr/types';
 import { getDocs } from 'firebase/firestore';
-import { departmentsRef, jobPositionsRef, shiftsRef } from '../modules/hr/collections';
+import { departmentsRef, jobPositionsRef, shiftsRef, allowanceTypesRef } from '../modules/hr/collections';
 import type {
   FirestoreDepartment,
   FirestoreJobPosition,
   FirestoreShift,
+  FirestoreVehicle,
   FirestoreAttendanceLog,
   FirestoreLeaveRequest,
   FirestoreLeaveBalance,
   FirestoreEmployeeLoan,
+  FirestoreEmployeeAllowance,
+  FirestoreEmployeeDeduction,
+  FirestoreAllowanceType,
+  DeductionCategory,
 } from '../modules/hr/types';
+import { vehicleService } from '../modules/hr/vehicleService';
 import { LEAVE_TYPE_LABELS } from '../modules/hr/types';
 import { formatNumber } from '../utils/calculations';
-import type { ProductionReport } from '../types';
 
-type ProfileTab = 'overview' | 'hierarchy' | 'attendance' | 'payroll' | 'leaves' | 'loans';
+type ProfileTab = 'overview' | 'hierarchy' | 'attendance' | 'payroll' | 'financials' | 'leaves' | 'loans';
 
 const TABS: { id: ProfileTab; label: string; icon: string }[] = [
   { id: 'overview', label: 'نظرة عامة', icon: 'dashboard' },
   { id: 'hierarchy', label: 'التسلسل الوظيفي', icon: 'account_tree' },
   { id: 'attendance', label: 'الحضور', icon: 'fingerprint' },
+  { id: 'financials', label: 'البدلات والخصومات', icon: 'account_balance_wallet' },
   { id: 'payroll', label: 'الرواتب', icon: 'receipt_long' },
   { id: 'leaves', label: 'الإجازات', icon: 'beach_access' },
   { id: 'loans', label: 'السُلف', icon: 'payments' },
@@ -61,6 +72,497 @@ const LOAN_STATUS_LABELS: Record<string, string> = {
   closed: 'مغلقة',
 };
 
+// ─── Financials Tab Component ────────────────────────────────────────────────
+
+interface FinancialsTabProps {
+  employee: FirestoreEmployee;
+  empAllowances: FirestoreEmployeeAllowance[];
+  empDeductions: FirestoreEmployeeDeduction[];
+  allowanceTypes: FirestoreAllowanceType[];
+  loans: FirestoreEmployeeLoan[];
+  canEdit: boolean;
+  showAllowanceModal: boolean;
+  setShowAllowanceModal: (v: boolean) => void;
+  showDeductionModal: boolean;
+  setShowDeductionModal: (v: boolean) => void;
+  financialSaving: boolean;
+  setFinancialSaving: (v: boolean) => void;
+  onRefresh: () => Promise<void>;
+}
+
+const DEDUCTION_CATEGORIES: { value: DeductionCategory; label: string }[] = [
+  { value: 'manual', label: 'يدوي' },
+  { value: 'disciplinary', label: 'جزائي' },
+  { value: 'transport', label: 'نقل' },
+  { value: 'override', label: 'تجاوز افتراضي' },
+  { value: 'other', label: 'أخرى' },
+];
+
+const FinancialsTab: React.FC<FinancialsTabProps> = ({
+  employee,
+  empAllowances,
+  empDeductions,
+  allowanceTypes,
+  loans,
+  canEdit,
+  showAllowanceModal,
+  setShowAllowanceModal,
+  showDeductionModal,
+  setShowDeductionModal,
+  financialSaving,
+  setFinancialSaving,
+  onRefresh,
+}) => {
+  const uid = useAppStore((s) => s.uid);
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
+  // Allowance form state
+  const [alType, setAlType] = useState('');
+  const [alAmount, setAlAmount] = useState<number>(0);
+  const [alRecurring, setAlRecurring] = useState(true);
+  const [alMonth, setAlMonth] = useState(currentMonth);
+  const [alError, setAlError] = useState('');
+
+  // Deduction form state
+  const [dedName, setDedName] = useState('');
+  const [dedAmount, setDedAmount] = useState<number>(0);
+  const [dedRecurring, setDedRecurring] = useState(true);
+  const [dedMonth, setDedMonth] = useState(currentMonth);
+  const [dedReason, setDedReason] = useState('');
+  const [dedCategory, setDedCategory] = useState<DeductionCategory>('manual');
+  const [dedError, setDedError] = useState('');
+
+  const handleAddAllowance = async () => {
+    if (!alType || alAmount <= 0) {
+      setAlError('يرجى اختيار النوع وإدخال المبلغ');
+      return;
+    }
+    setAlError('');
+    setFinancialSaving(true);
+    try {
+      const typeObj = allowanceTypes.find((t) => t.id === alType);
+      await employeeAllowanceService.create({
+        employeeId: employee.id!,
+        allowanceTypeId: alType,
+        allowanceTypeName: typeObj?.name ?? alType,
+        amount: alAmount,
+        isRecurring: alRecurring,
+        startMonth: alRecurring ? currentMonth : alMonth,
+        endMonth: null,
+        status: 'active',
+        createdBy: uid,
+      });
+      setShowAllowanceModal(false);
+      setAlType('');
+      setAlAmount(0);
+      setAlRecurring(true);
+      setAlMonth(currentMonth);
+      await onRefresh();
+    } catch (err: any) {
+      setAlError(err.message || 'حدث خطأ');
+    } finally {
+      setFinancialSaving(false);
+    }
+  };
+
+  const handleAddDeduction = async () => {
+    if (!dedName || dedAmount <= 0) {
+      setDedError('يرجى إدخال اسم الخصم والمبلغ');
+      return;
+    }
+    setDedError('');
+    setFinancialSaving(true);
+    try {
+      await employeeDeductionService.create({
+        employeeId: employee.id!,
+        deductionTypeId: dedName.replace(/\s+/g, '_').toLowerCase(),
+        deductionTypeName: dedName,
+        amount: dedAmount,
+        isRecurring: dedRecurring,
+        startMonth: dedRecurring ? currentMonth : dedMonth,
+        endMonth: null,
+        reason: dedReason,
+        category: dedCategory,
+        status: 'active',
+        createdBy: uid,
+      });
+      setShowDeductionModal(false);
+      setDedName('');
+      setDedAmount(0);
+      setDedRecurring(true);
+      setDedMonth(currentMonth);
+      setDedReason('');
+      setDedCategory('manual');
+      await onRefresh();
+    } catch (err: any) {
+      setDedError(err.message || 'حدث خطأ');
+    } finally {
+      setFinancialSaving(false);
+    }
+  };
+
+  const handleStopAllowance = async (id: string) => {
+    setFinancialSaving(true);
+    try {
+      await employeeAllowanceService.stop(id);
+      await onRefresh();
+    } finally {
+      setFinancialSaving(false);
+    }
+  };
+
+  const handleDeleteAllowance = async (id: string) => {
+    setFinancialSaving(true);
+    try {
+      await employeeAllowanceService.delete(id);
+      await onRefresh();
+    } finally {
+      setFinancialSaving(false);
+    }
+  };
+
+  const handleStopDeduction = async (id: string) => {
+    setFinancialSaving(true);
+    try {
+      await employeeDeductionService.stop(id);
+      await onRefresh();
+    } finally {
+      setFinancialSaving(false);
+    }
+  };
+
+  const handleDeleteDeduction = async (id: string) => {
+    setFinancialSaving(true);
+    try {
+      await employeeDeductionService.delete(id);
+      await onRefresh();
+    } finally {
+      setFinancialSaving(false);
+    }
+  };
+
+  const inputCls = 'w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm';
+  const labelCls = 'block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1';
+
+  return (
+    <div className="space-y-6">
+      {/* Allowances Section */}
+      <Card
+        title={
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-2">
+              <span className="material-icons-round text-emerald-500">add_circle</span>
+              <span>البدلات المخصصة</span>
+            </div>
+            {canEdit && (
+              <Button onClick={() => setShowAllowanceModal(true)} disabled={financialSaving}>
+                <span className="material-icons-round text-lg">add</span>
+                إضافة بدل
+              </Button>
+            )}
+          </div>
+        }
+      >
+        <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+          <table className="w-full text-sm text-right">
+            <thead className="bg-slate-50 dark:bg-slate-800">
+              <tr>
+                <th className="p-3 font-bold">النوع</th>
+                <th className="p-3 font-bold">المبلغ</th>
+                <th className="p-3 font-bold">التكرار</th>
+                <th className="p-3 font-bold">شهر البدء</th>
+                <th className="p-3 font-bold">الحالة</th>
+                {canEdit && <th className="p-3 font-bold">إجراءات</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {empAllowances.map((a) => (
+                <tr key={a.id} className="border-t border-slate-100 dark:border-slate-800">
+                  <td className="p-3 font-medium">{a.allowanceTypeName}</td>
+                  <td className="p-3 font-bold text-emerald-600">{formatNumber(a.amount)} ج.م</td>
+                  <td className="p-3">
+                    <Badge variant={a.isRecurring ? 'info' : 'warning'}>
+                      {a.isRecurring ? 'متكرر' : 'لمرة واحدة'}
+                    </Badge>
+                  </td>
+                  <td className="p-3 font-mono text-xs" dir="ltr">{a.startMonth}</td>
+                  <td className="p-3">
+                    <Badge variant={a.status === 'active' ? 'success' : 'neutral'}>
+                      {a.status === 'active' ? 'نشط' : 'متوقف'}
+                    </Badge>
+                  </td>
+                  {canEdit && (
+                    <td className="p-3">
+                      <div className="flex items-center gap-1">
+                        {a.status === 'active' && a.isRecurring && (
+                          <button
+                            onClick={() => a.id && handleStopAllowance(a.id)}
+                            className="p-1.5 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg"
+                            title="إيقاف"
+                            disabled={financialSaving}
+                          >
+                            <span className="material-icons-round text-lg">pause_circle</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => a.id && handleDeleteAllowance(a.id)}
+                          className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg"
+                          title="حذف"
+                          disabled={financialSaving}
+                        >
+                          <span className="material-icons-round text-lg">delete</span>
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {empAllowances.length === 0 && (
+                <tr>
+                  <td colSpan={canEdit ? 6 : 5} className="p-6 text-center text-slate-500">
+                    لا توجد بدلات مخصصة
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* Deductions Section */}
+      <Card
+        title={
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-2">
+              <span className="material-icons-round text-rose-500">remove_circle</span>
+              <span>الخصومات المخصصة</span>
+            </div>
+            {canEdit && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDedCategory('disciplinary');
+                    setDedName('جزاء تأديبي');
+                    setDedRecurring(false);
+                    setShowDeductionModal(true);
+                  }}
+                  disabled={financialSaving}
+                >
+                  <span className="material-icons-round text-lg text-amber-500">gavel</span>
+                  جزاء تأديبي
+                </Button>
+                <Button onClick={() => setShowDeductionModal(true)} disabled={financialSaving}>
+                  <span className="material-icons-round text-lg">add</span>
+                  إضافة خصم
+                </Button>
+              </div>
+            )}
+          </div>
+        }
+      >
+        <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+          <table className="w-full text-sm text-right">
+            <thead className="bg-slate-50 dark:bg-slate-800">
+              <tr>
+                <th className="p-3 font-bold">النوع</th>
+                <th className="p-3 font-bold">المبلغ</th>
+                <th className="p-3 font-bold">التكرار</th>
+                <th className="p-3 font-bold">التصنيف</th>
+                <th className="p-3 font-bold">شهر البدء</th>
+                <th className="p-3 font-bold">الحالة</th>
+                <th className="p-3 font-bold">السبب</th>
+                {canEdit && <th className="p-3 font-bold">إجراءات</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {empDeductions.map((d) => (
+                <tr key={d.id} className="border-t border-slate-100 dark:border-slate-800">
+                  <td className="p-3 font-medium">{d.deductionTypeName}</td>
+                  <td className="p-3 font-bold text-rose-600">{formatNumber(d.amount)} ج.م</td>
+                  <td className="p-3">
+                    <Badge variant={d.isRecurring ? 'info' : 'warning'}>
+                      {d.isRecurring ? 'متكرر' : 'لمرة واحدة'}
+                    </Badge>
+                  </td>
+                  <td className="p-3">
+                    <Badge variant="neutral">
+                      {DEDUCTION_CATEGORIES.find((c) => c.value === d.category)?.label ?? d.category}
+                    </Badge>
+                  </td>
+                  <td className="p-3 font-mono text-xs" dir="ltr">{d.startMonth}</td>
+                  <td className="p-3">
+                    <Badge variant={d.status === 'active' ? 'success' : 'neutral'}>
+                      {d.status === 'active' ? 'نشط' : 'متوقف'}
+                    </Badge>
+                  </td>
+                  <td className="p-3 max-w-[150px] truncate text-slate-500">{d.reason || '—'}</td>
+                  {canEdit && (
+                    <td className="p-3">
+                      <div className="flex items-center gap-1">
+                        {d.status === 'active' && d.isRecurring && (
+                          <button
+                            onClick={() => d.id && handleStopDeduction(d.id)}
+                            className="p-1.5 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg"
+                            title="إيقاف"
+                            disabled={financialSaving}
+                          >
+                            <span className="material-icons-round text-lg">pause_circle</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => d.id && handleDeleteDeduction(d.id)}
+                          className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg"
+                          title="حذف"
+                          disabled={financialSaving}
+                        >
+                          <span className="material-icons-round text-lg">delete</span>
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {empDeductions.length === 0 && (
+                <tr>
+                  <td colSpan={canEdit ? 8 : 7} className="p-6 text-center text-slate-500">
+                    لا توجد خصومات مخصصة
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* Add Allowance Modal */}
+      {showAllowanceModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowAllowanceModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <span className="material-icons-round text-emerald-500">add_circle</span>
+                إضافة بدل للموظف
+              </h3>
+              <button onClick={() => setShowAllowanceModal(false)} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className={labelCls}>نوع البدل</label>
+                <select value={alType} onChange={(e) => setAlType(e.target.value)} className={inputCls}>
+                  <option value="">اختر النوع...</option>
+                  {allowanceTypes.filter((t) => t.isActive).map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>المبلغ (ج.م)</label>
+                <input type="number" min={1} value={alAmount || ''} onChange={(e) => setAlAmount(e.target.valueAsNumber || 0)} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>التكرار</label>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={alRecurring} onChange={() => setAlRecurring(true)} className="accent-primary" />
+                    <span className="text-sm font-medium">متكرر شهرياً</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={!alRecurring} onChange={() => setAlRecurring(false)} className="accent-primary" />
+                    <span className="text-sm font-medium">لمرة واحدة</span>
+                  </label>
+                </div>
+              </div>
+              {!alRecurring && (
+                <div>
+                  <label className={labelCls}>الشهر</label>
+                  <input type="month" value={alMonth} onChange={(e) => setAlMonth(e.target.value)} className={inputCls} />
+                </div>
+              )}
+              {alError && <p className="text-sm text-rose-600">{alError}</p>}
+              <div className="flex items-center gap-2 pt-2">
+                <Button onClick={handleAddAllowance} disabled={financialSaving}>
+                  {financialSaving ? 'جاري الحفظ...' : 'حفظ'}
+                </Button>
+                <Button variant="outline" onClick={() => setShowAllowanceModal(false)}>إلغاء</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Deduction Modal */}
+      {showDeductionModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowDeductionModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <span className="material-icons-round text-rose-500">remove_circle</span>
+                إضافة خصم للموظف
+              </h3>
+              <button onClick={() => setShowDeductionModal(false)} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className={labelCls}>اسم الخصم</label>
+                <input type="text" value={dedName} onChange={(e) => setDedName(e.target.value)} className={inputCls} placeholder="مثال: خصم سكن، جزاء تأديبي" />
+              </div>
+              <div>
+                <label className={labelCls}>المبلغ (ج.م)</label>
+                <input type="number" min={1} value={dedAmount || ''} onChange={(e) => setDedAmount(e.target.valueAsNumber || 0)} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>التصنيف</label>
+                <select value={dedCategory} onChange={(e) => setDedCategory(e.target.value as DeductionCategory)} className={inputCls}>
+                  {DEDUCTION_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>التكرار</label>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={dedRecurring} onChange={() => setDedRecurring(true)} className="accent-primary" />
+                    <span className="text-sm font-medium">متكرر شهرياً</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" checked={!dedRecurring} onChange={() => setDedRecurring(false)} className="accent-primary" />
+                    <span className="text-sm font-medium">لمرة واحدة</span>
+                  </label>
+                </div>
+              </div>
+              {!dedRecurring && (
+                <div>
+                  <label className={labelCls}>الشهر</label>
+                  <input type="month" value={dedMonth} onChange={(e) => setDedMonth(e.target.value)} className={inputCls} />
+                </div>
+              )}
+              <div>
+                <label className={labelCls}>السبب (اختياري)</label>
+                <textarea value={dedReason} onChange={(e) => setDedReason(e.target.value)} rows={2} className={`${inputCls} resize-none`} placeholder="سبب الخصم" />
+              </div>
+              {dedError && <p className="text-sm text-rose-600">{dedError}</p>}
+              <div className="flex items-center gap-2 pt-2">
+                <Button onClick={handleAddDeduction} disabled={financialSaving}>
+                  {financialSaving ? 'جاري الحفظ...' : 'حفظ'}
+                </Button>
+                <Button variant="outline" onClick={() => setShowDeductionModal(false)}>إلغاء</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Main EmployeeProfile ───────────────────────────────────────────────────
+
 export const EmployeeProfile: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -74,6 +576,7 @@ export const EmployeeProfile: React.FC = () => {
   const [departments, setDepartments] = useState<FirestoreDepartment[]>([]);
   const [jobPositions, setJobPositions] = useState<FirestoreJobPosition[]>([]);
   const [shifts, setShifts] = useState<FirestoreShift[]>([]);
+  const [vehicles, setVehicles] = useState<FirestoreVehicle[]>([]);
 
   const [managerChain, setManagerChain] = useState<FirestoreEmployee[]>([]);
   const [directReports, setDirectReports] = useState<FirestoreEmployee[]>([]);
@@ -81,7 +584,13 @@ export const EmployeeProfile: React.FC = () => {
   const [leaveRequests, setLeaveRequests] = useState<FirestoreLeaveRequest[]>([]);
   const [leaveBalance, setLeaveBalance] = useState<FirestoreLeaveBalance | null>(null);
   const [loans, setLoans] = useState<FirestoreEmployeeLoan[]>([]);
-  const [reports, setReports] = useState<ProductionReport[]>([]);
+
+  const [empAllowances, setEmpAllowances] = useState<FirestoreEmployeeAllowance[]>([]);
+  const [empDeductions, setEmpDeductions] = useState<FirestoreEmployeeDeduction[]>([]);
+  const [allowanceTypes, setAllowanceTypes] = useState<FirestoreAllowanceType[]>([]);
+  const [showAllowanceModal, setShowAllowanceModal] = useState(false);
+  const [showDeductionModal, setShowDeductionModal] = useState(false);
+  const [financialSaving, setFinancialSaving] = useState(false);
 
   const [tabLoading, setTabLoading] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -98,8 +607,15 @@ export const EmployeeProfile: React.FC = () => {
     (shiftId: string) => shifts.find((s) => s.id === shiftId)?.name ?? '—',
     [shifts]
   );
+  const getVehicleName = useCallback(
+    (vehicleId: string) => {
+      const v = vehicles.find((v) => v.id === vehicleId);
+      return v ? `${v.name} — ${v.plateNumber}` : '—';
+    },
+    [vehicles]
+  );
 
-  // Fetch employee + ref data on mount
+  // Fetch employee + ref data + financial data on mount
   useEffect(() => {
     if (!id) {
       setLoading(false);
@@ -109,17 +625,27 @@ export const EmployeeProfile: React.FC = () => {
     setLoading(true);
     (async () => {
       try {
-        const [emp, deptSnap, posSnap, shiftSnap] = await Promise.all([
+        const [emp, deptSnap, posSnap, shiftSnap, vehiclesList, allowances, deductions, loansList, alTypeSnap] = await Promise.all([
           employeeService.getById(id),
           getDocs(departmentsRef()),
           getDocs(jobPositionsRef()),
           getDocs(shiftsRef()),
+          vehicleService.getAll(),
+          employeeAllowanceService.getByEmployee(id),
+          employeeDeductionService.getByEmployee(id),
+          loanService.getByEmployee(id),
+          getDocs(allowanceTypesRef()),
         ]);
         if (cancelled) return;
         setEmployee(emp ?? null);
         setDepartments(deptSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreDepartment)));
         setJobPositions(posSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreJobPosition)));
         setShifts(shiftSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreShift)));
+        setVehicles(vehiclesList);
+        setEmpAllowances(allowances);
+        setEmpDeductions(deductions);
+        setLoans(loansList);
+        setAllowanceTypes(alTypeSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreAllowanceType)));
       } catch (e) {
         console.error('EmployeeProfile load error:', e);
         if (!cancelled) setEmployee(null);
@@ -140,7 +666,7 @@ export const EmployeeProfile: React.FC = () => {
     (async () => {
       try {
         const tasks: Promise<unknown>[] = [];
-        const results: { hierarchy?: FirestoreEmployee[]; directReports?: FirestoreEmployee[]; attendance?: FirestoreAttendanceLog[]; leaveReqs?: FirestoreLeaveRequest[]; balance?: FirestoreLeaveBalance | null; loansList?: FirestoreEmployeeLoan[]; reportsList?: ProductionReport[] } = {};
+        const results: { hierarchy?: FirestoreEmployee[]; directReports?: FirestoreEmployee[]; attendance?: FirestoreAttendanceLog[]; leaveReqs?: FirestoreLeaveRequest[]; balance?: FirestoreLeaveBalance | null; loansList?: FirestoreEmployeeLoan[] } = {};
 
         if (activeTab === 'hierarchy') {
           tasks.push(
@@ -157,12 +683,27 @@ export const EmployeeProfile: React.FC = () => {
               if (!cancelled) results.attendance = logs;
             })
           );
+        } else if (activeTab === 'financials') {
+          tasks.push(
+            employeeAllowanceService.getByEmployee(id).then((list) => {
+              if (!cancelled) setEmpAllowances(list);
+            }),
+            employeeDeductionService.getByEmployee(id).then((list) => {
+              if (!cancelled) setEmpDeductions(list);
+            }),
+            getDocs(allowanceTypesRef()).then((snap) => {
+              if (!cancelled) setAllowanceTypes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreAllowanceType)));
+            }),
+            loanService.getByEmployee(id).then((list) => {
+              if (!cancelled) results.loansList = list;
+            }),
+          );
         } else if (activeTab === 'leaves') {
           tasks.push(
             leaveRequestService.getByEmployee(id).then((reqs) => {
               if (!cancelled) results.leaveReqs = reqs;
             }),
-            leaveBalanceService.getByEmployee(id).then((bal) => {
+            leaveBalanceService.getOrCreate(id).then((bal) => {
               if (!cancelled) results.balance = bal;
             })
           );
@@ -177,11 +718,8 @@ export const EmployeeProfile: React.FC = () => {
             employeeService.getHierarchy(id).then((chain) => {
               if (!cancelled) results.hierarchy = chain;
             }),
-            employeeService.getByManager(id).then((reports) => {
-              if (!cancelled) results.directReports = reports;
-            }),
-            reportService.getByEmployee(id).then((list) => {
-              if (!cancelled) results.reportsList = list;
+            employeeService.getByManager(id).then((dr) => {
+              if (!cancelled) results.directReports = dr;
             })
           );
         }
@@ -194,7 +732,6 @@ export const EmployeeProfile: React.FC = () => {
         if (results.leaveReqs != null) setLeaveRequests(results.leaveReqs);
         if (results.balance !== undefined) setLeaveBalance(results.balance);
         if (results.loansList != null) setLoans(results.loansList);
-        if (results.reportsList != null) setReports(results.reportsList);
       } catch (e) {
         console.error('EmployeeProfile tab data error:', e);
       } finally {
@@ -226,19 +763,6 @@ export const EmployeeProfile: React.FC = () => {
     return immediate?.name ?? '—';
   }, [employee?.managerId, managerChain]);
 
-  const overviewKpis = useMemo(() => {
-    const totalProduced = reports.reduce((s, r) => s + (r.quantityProduced ?? 0), 0);
-    const totalWaste = reports.reduce((s, r) => s + (r.quantityWaste ?? 0), 0);
-    const total = totalProduced + totalWaste;
-    const wasteRatio = total ? (totalWaste / total) * 100 : 0;
-    return {
-      totalReports: reports.length,
-      totalProduced,
-      totalWaste,
-      wasteRatio: Number(wasteRatio.toFixed(1)),
-    };
-  }, [reports]);
-
   const attendanceSummary = useMemo(() => {
     let totalDays = attendanceLogs.length;
     let present = 0;
@@ -255,6 +779,43 @@ export const EmployeeProfile: React.FC = () => {
   }, [attendanceLogs]);
 
   const activeLoans = useMemo(() => loans.filter((l) => l.status === 'active'), [loans]);
+
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const salaryPreview = useMemo(() => {
+    if (!employee) return null;
+    const baseSalary = employee.baseSalary || 0;
+    const activeAllowances = empAllowances.filter((a) => a.status === 'active');
+    const activeDeductions = empDeductions.filter((d) => d.status === 'active');
+
+    const monthlyAllowances = activeAllowances.filter((a) => {
+      if (a.isRecurring) {
+        if (a.startMonth > currentMonth) return false;
+        if (a.endMonth && a.endMonth < currentMonth) return false;
+        return true;
+      }
+      return a.startMonth === currentMonth;
+    });
+    const totalAllowances = monthlyAllowances.reduce((s, a) => s + a.amount, 0);
+
+    const monthlyDeductions = activeDeductions.filter((d) => {
+      if (d.isRecurring) {
+        if (d.startMonth > currentMonth) return false;
+        if (d.endMonth && d.endMonth < currentMonth) return false;
+        return true;
+      }
+      return d.startMonth === currentMonth;
+    });
+    const totalCustomDeductions = monthlyDeductions.reduce((s, d) => s + d.amount, 0);
+
+    const activeLoansNow = loans.filter((l) => l.status === 'active');
+    const totalLoanInstallments = activeLoansNow.reduce((s, l) => s + l.installmentAmount, 0);
+
+    const grossSalary = baseSalary + totalAllowances;
+    const totalDeductions = totalCustomDeductions + totalLoanInstallments;
+    const estimatedNet = Math.max(0, grossSalary - totalDeductions);
+
+    return { baseSalary, totalAllowances, totalDeductions, totalCustomDeductions, totalLoanInstallments, estimatedNet };
+  }, [employee, empAllowances, empDeductions, loans, currentMonth]);
 
   if (loading) {
     return (
@@ -311,6 +872,11 @@ export const EmployeeProfile: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold">{employee.name}</h1>
+            {employee.code && (
+              <span className="font-mono text-sm bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                {employee.code}
+              </span>
+            )}
             <Badge variant="neutral">{getDepartmentName(employee.departmentId)}</Badge>
             <Badge variant="info">{getJobPositionTitle(employee.jobPositionId)}</Badge>
             <Badge variant={employee.isActive ? 'success' : 'danger'}>
@@ -341,6 +907,41 @@ export const EmployeeProfile: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Net Salary Preview */}
+      {salaryPreview && (
+        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-xl shadow-blue-600/20 mb-6">
+          <div className="flex items-center gap-3 mb-5">
+            <span className="material-icons-round text-2xl opacity-90">calculate</span>
+            <div>
+              <h3 className="text-lg font-bold">صافي الراتب التقديري — {currentMonth}</h3>
+              <p className="text-blue-200 text-xs">معاينة مباشرة (لا تُحفظ في قاعدة البيانات)</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+              <p className="text-blue-200 text-xs font-medium mb-1">الراتب الأساسي</p>
+              <p className="text-xl font-black">{formatNumber(salaryPreview.baseSalary)}</p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+              <p className="text-blue-200 text-xs font-medium mb-1">+ البدلات</p>
+              <p className="text-xl font-black text-emerald-300">+{formatNumber(salaryPreview.totalAllowances)}</p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+              <p className="text-blue-200 text-xs font-medium mb-1">– الخصومات</p>
+              <p className="text-xl font-black text-rose-300">–{formatNumber(salaryPreview.totalDeductions)}</p>
+            </div>
+            <div className="bg-white/20 rounded-xl p-3 backdrop-blur-sm border border-white/20">
+              <p className="text-blue-100 text-xs font-medium mb-1">صافي تقديري</p>
+              <p className="text-2xl font-black">{formatNumber(salaryPreview.estimatedNet)}</p>
+            </div>
+          </div>
+          <div className="text-xs text-blue-200 space-y-1">
+            <p>الإجمالي = {formatNumber(salaryPreview.baseSalary + salaryPreview.totalAllowances)} | الخصومات = خصومات مخصصة ({formatNumber(salaryPreview.totalCustomDeductions)}) + أقساط سلف ({formatNumber(salaryPreview.totalLoanInstallments)})</p>
+            <p className="opacity-70">* لا تشمل: خصم الغياب، التأخير، التأمين، الضريبة — تُحسب في كشف الرواتب الفعلي</p>
+          </div>
+        </div>
+      )}
 
       {/* Tab bar */}
       <div className="flex flex-wrap gap-1 mb-6">
@@ -380,10 +981,9 @@ export const EmployeeProfile: React.FC = () => {
               { label: 'الراتب الأساسي', value: formatNumber(employee.baseSalary) + ' ج.م' },
               { label: 'الأجر بالساعة', value: formatNumber(employee.hourlyRate) + ' ج.م' },
               { label: 'الوردية', value: employee.shiftId ? getShiftName(employee.shiftId) : '—' },
-              { label: 'المركبة', value: employee.vehicleId || '—' },
+              { label: 'المركبة', value: employee.vehicleId ? getVehicleName(employee.vehicleId) : '—' },
               { label: 'المدير', value: managerName },
               { label: 'الدخول للنظام', value: employee.hasSystemAccess ? 'نعم' : 'لا' },
-              { label: 'الكود', value: employee.code || '—' },
             ].map((item) => (
               <Card key={item.label} className="!p-4">
                 <p className="text-slate-500 text-xs font-medium mb-1">{item.label}</p>
@@ -391,56 +991,6 @@ export const EmployeeProfile: React.FC = () => {
               </Card>
             ))}
           </div>
-          <Card title="مؤشرات الإنتاج">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-              <div>
-                <p className="text-slate-500 text-sm">إجمالي التقارير</p>
-                <p className="text-xl font-bold">{formatNumber(overviewKpis.totalReports)}</p>
-              </div>
-              <div>
-                <p className="text-slate-500 text-sm">إجمالي المنتج</p>
-                <p className="text-xl font-bold">{formatNumber(overviewKpis.totalProduced)}</p>
-              </div>
-              <div>
-                <p className="text-slate-500 text-sm">إجمالي الهالك</p>
-                <p className="text-xl font-bold">{formatNumber(overviewKpis.totalWaste)}</p>
-              </div>
-              <div>
-                <p className="text-slate-500 text-sm">نسبة الهالك %</p>
-                <p className="text-xl font-bold">{overviewKpis.wasteRatio}%</p>
-              </div>
-            </div>
-            <p className="text-slate-500 text-sm font-medium mb-2">آخر 10 تقارير إنتاج</p>
-            <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
-              <table className="w-full text-sm text-right">
-                <thead className="bg-slate-50 dark:bg-slate-800">
-                  <tr>
-                    <th className="p-3 font-bold">التاريخ</th>
-                    <th className="p-3 font-bold">الكمية المنتجة</th>
-                    <th className="p-3 font-bold">الهالك</th>
-                    <th className="p-3 font-bold">ساعات العمل</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.slice(0, 10).map((r) => (
-                    <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="p-3">{formatDateAr(r.date)}</td>
-                      <td className="p-3">{formatNumber(r.quantityProduced)}</td>
-                      <td className="p-3">{formatNumber(r.quantityWaste)}</td>
-                      <td className="p-3">{formatNumber(r.workHours)}</td>
-                    </tr>
-                  ))}
-                  {reports.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="p-6 text-center text-slate-500">
-                        لا توجد تقارير
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
         </div>
       )}
 
@@ -544,6 +1094,32 @@ export const EmployeeProfile: React.FC = () => {
         </div>
       )}
 
+      {activeTab === 'financials' && (
+        <FinancialsTab
+          employee={employee}
+          empAllowances={empAllowances}
+          empDeductions={empDeductions}
+          allowanceTypes={allowanceTypes}
+          loans={loans}
+          canEdit={can('employees.edit')}
+          showAllowanceModal={showAllowanceModal}
+          setShowAllowanceModal={setShowAllowanceModal}
+          showDeductionModal={showDeductionModal}
+          setShowDeductionModal={setShowDeductionModal}
+          financialSaving={financialSaving}
+          onRefresh={async () => {
+            if (!id) return;
+            const [a, d] = await Promise.all([
+              employeeAllowanceService.getByEmployee(id),
+              employeeDeductionService.getByEmployee(id),
+            ]);
+            setEmpAllowances(a);
+            setEmpDeductions(d);
+          }}
+          setFinancialSaving={setFinancialSaving}
+        />
+      )}
+
       {activeTab === 'payroll' && (
         <Card title="الرواتب">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -636,44 +1212,75 @@ export const EmployeeProfile: React.FC = () => {
 
       {activeTab === 'loans' && (
         <div className="space-y-6">
-          <Card title="السُلف">
-            {activeLoans.length > 0 && (
-              <div className="mb-4 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
-                  عدد السُلف النشطة: {activeLoans.length}
+          {activeLoans.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+                <span className="material-icons-round text-blue-500 text-2xl mb-1 block">receipt_long</span>
+                <p className="text-xs text-slate-400 font-bold mb-1">إجمالي السلف</p>
+                <p className="text-xl font-black">{loans.length}</p>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+                <span className="material-icons-round text-emerald-500 text-2xl mb-1 block">trending_up</span>
+                <p className="text-xs text-slate-400 font-bold mb-1">نشطة</p>
+                <p className="text-xl font-black text-emerald-600">{activeLoans.length}</p>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+                <span className="material-icons-round text-amber-500 text-2xl mb-1 block">account_balance</span>
+                <p className="text-xs text-slate-400 font-bold mb-1">المتبقي</p>
+                <p className="text-xl font-black text-amber-600">
+                  {formatNumber(activeLoans.reduce((s, l) => s + l.installmentAmount * l.remainingInstallments, 0))} ج.م
                 </p>
               </div>
-            )}
+            </div>
+          )}
+          <Card title="السُلف">
             <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
               <table className="w-full text-sm text-right">
                 <thead className="bg-slate-50 dark:bg-slate-800">
                   <tr>
+                    <th className="p-3 font-bold">النوع</th>
                     <th className="p-3 font-bold">المبلغ</th>
                     <th className="p-3 font-bold">القسط</th>
-                    <th className="p-3 font-bold">الأقساط (متبقي/إجمالي)</th>
-                    <th className="p-3 font-bold">بدء الخصم</th>
+                    <th className="p-3 font-bold">الأقساط</th>
+                    <th className="p-3 font-bold">الشهر</th>
                     <th className="p-3 font-bold">الحالة</th>
+                    <th className="p-3 font-bold">الصرف</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loans.map((loan) => (
-                    <tr key={loan.id} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="p-3">{formatNumber(loan.loanAmount)} ج.م</td>
+                    <tr key={loan.id} className={`border-t border-slate-100 dark:border-slate-800 ${loan.disbursed ? 'bg-emerald-50/30 dark:bg-emerald-900/5' : ''}`}>
+                      <td className="p-3">
+                        <span className="inline-flex items-center gap-1 text-xs font-bold">
+                          <span className="material-icons-round text-sm text-primary">
+                            {(loan.loanType || 'installment') === 'monthly_advance' ? 'today' : 'calendar_month'}
+                          </span>
+                          {(loan.loanType || 'installment') === 'monthly_advance' ? 'شهرية' : 'مقسطة'}
+                        </span>
+                      </td>
+                      <td className="p-3 font-bold">{formatNumber(loan.loanAmount)} ج.م</td>
                       <td className="p-3">{formatNumber(loan.installmentAmount)} ج.م</td>
                       <td className="p-3">
                         {loan.remainingInstallments} / {loan.totalInstallments}
                       </td>
-                      <td className="p-3">{loan.startMonth}</td>
+                      <td className="p-3 font-mono text-xs" dir="ltr">{loan.month || loan.startMonth}</td>
                       <td className="p-3">
                         <Badge variant={loan.status === 'active' ? 'success' : loan.status === 'pending' ? 'warning' : 'neutral'}>
                           {LOAN_STATUS_LABELS[loan.status] ?? loan.status}
                         </Badge>
                       </td>
+                      <td className="p-3">
+                        {loan.disbursed ? (
+                          <Badge variant="success">تم الصرف</Badge>
+                        ) : (
+                          <Badge variant="warning">لم يُصرف</Badge>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {loans.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="p-6 text-center text-slate-500">
+                      <td colSpan={7} className="p-6 text-center text-slate-500">
                         لا توجد سُلف
                       </td>
                     </tr>

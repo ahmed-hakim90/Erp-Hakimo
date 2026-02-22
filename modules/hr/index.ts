@@ -15,6 +15,7 @@ export type {
   FirestoreJobPosition,
   FirestoreShift,
   FirestoreHRSettings,
+  FirestoreVehicle,
   FirestorePenaltyRule,
   FirestoreLateRule,
   FirestoreAllowanceType,
@@ -42,11 +43,18 @@ export type {
   FirestoreLeaveBalance,
   FirestoreApprovalRequest,
   LoanStatus,
+  LoanType,
   FirestoreEmployeeLoan,
   LoanInstallment,
+  EmployeeFinancialStatus,
+  FirestoreEmployeeAllowance,
+  FirestoreEmployeeDeduction,
+  DeductionCategory,
+  EmployeeAllowanceSummary,
+  EmployeeDeductionSummary,
 } from './types';
 
-export { JOB_LEVEL_LABELS, LEAVE_TYPE_LABELS, DEFAULT_LEAVE_BALANCE } from './types';
+export { JOB_LEVEL_LABELS, LEAVE_TYPE_LABELS, LOAN_TYPE_LABELS, DEFAULT_LEAVE_BALANCE } from './types';
 
 // Engine (pure functions)
 export {
@@ -165,6 +173,10 @@ export {
 export {
   getApprovedLeaves,
   getActiveLoanInstallments,
+  getEmployeeAllowancesForMonth,
+  getEmployeeDeductionsForMonth,
+  getEmployeeAllowanceSummary,
+  getEmployeeDeductionSummary,
 } from './payrollIntegration';
 
 // Payroll Engine (Phase 5)
@@ -244,6 +256,18 @@ export {
   hrConfigAuditService,
 } from './config';
 
+// Vehicle service
+export { vehicleService } from './vehicleService';
+
+// Employee Financials (per-employee allowances & deductions)
+export {
+  employeeAllowanceService,
+  employeeDeductionService,
+  summarizeAllowances,
+  summarizeDeductions,
+  syncVehicleDeduction,
+} from './employeeFinancialsService';
+
 // Collection references (approval-specific refs exported from ./approval above)
 export {
   HR_COLLECTIONS,
@@ -261,4 +285,7 @@ export {
   leaveBalancesRef,
   employeeLoansRef,
   approvalRequestsRef,
+  vehiclesRef,
+  employeeAllowancesRef,
+  employeeDeductionsRef,
 } from './collections';

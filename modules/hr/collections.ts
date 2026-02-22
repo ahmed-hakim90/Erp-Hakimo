@@ -34,6 +34,9 @@ export const HR_COLLECTIONS = {
   APPROVAL_SETTINGS: 'approval_settings',
   APPROVAL_DELEGATIONS: 'approval_delegations',
   APPROVAL_AUDIT_LOGS: 'approval_audit_logs',
+  VEHICLES: 'vehicles',
+  EMPLOYEE_ALLOWANCES: 'employee_allowances',
+  EMPLOYEE_DEDUCTIONS: 'employee_deductions',
 } as const;
 
 // ─── Single-Document Collection ─────────────────────────────────────────────
@@ -108,4 +111,16 @@ export function approvalDelegationsRef(): CollectionReference {
 
 export function approvalAuditLogsRef(): CollectionReference {
   return collection(db, HR_COLLECTIONS.APPROVAL_AUDIT_LOGS);
+}
+
+export function vehiclesRef(): CollectionReference {
+  return collection(db, HR_COLLECTIONS.VEHICLES);
+}
+
+export function employeeAllowancesRef(): CollectionReference {
+  return collection(db, HR_COLLECTIONS.EMPLOYEE_ALLOWANCES);
+}
+
+export function employeeDeductionsRef(): CollectionReference {
+  return collection(db, HR_COLLECTIONS.EMPLOYEE_DEDUCTIONS);
 }

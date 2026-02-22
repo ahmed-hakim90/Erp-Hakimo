@@ -154,7 +154,7 @@ export async function finalizePayroll(
     throw new Error('لا توجد سجلات رواتب في هذا الشهر.');
   }
 
-  // Freeze all records (mark with snapshot version)
+  // Freeze all records (mark with snapshot version + lock employee financials)
   const CHUNK = 500;
   for (let i = 0; i < records.length; i += CHUNK) {
     const batchChunk = records.slice(i, i + CHUNK);
@@ -163,6 +163,7 @@ export async function finalizePayroll(
       if (!rec.id) continue;
       batch.update(doc(db, PAYROLL_COLLECTIONS.PAYROLL_RECORDS, rec.id), {
         calculationSnapshotVersion: snapshot.version,
+        isLocked: true,
         updatedAt: serverTimestamp(),
       });
     }

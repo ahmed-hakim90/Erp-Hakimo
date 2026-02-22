@@ -77,6 +77,8 @@ export const DEFAULT_APPROVAL: WithoutMeta<ApprovalConfig> = {
   escalationAfterDays: 3,
   maxApprovalLevels: 3,
   notifyOnPending: true,
+  hrAlwaysFinalLevel: true,
+  allowDelegation: true,
 };
 
 export const DEFAULT_TRANSPORT: WithoutMeta<TransportConfig> = {

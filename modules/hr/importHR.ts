@@ -47,12 +47,16 @@ export interface ParsedEmployeeRow {
   shiftName: string;
   shiftId: string;
   errors: string[];
+  /** Set when employee already exists — holds Firestore doc id */
+  existingId?: string;
+  /** Which fields in the Excel row actually have a value (non-empty) */
+  providedFields: string[];
 }
 
 export interface HRImportResult {
   departments: { rows: ParsedDepartmentRow[]; valid: number; errors: number };
   positions: { rows: ParsedPositionRow[]; valid: number; errors: number };
-  employees: { rows: ParsedEmployeeRow[]; valid: number; errors: number };
+  employees: { rows: ParsedEmployeeRow[]; valid: number; errors: number; updates: number };
 }
 
 export interface HRLookups {
@@ -193,7 +197,7 @@ function parsePositionSheet(
     const title = String(getValue(row, rawHeaders, hMap, 'title') ?? '').trim();
     const departmentName = String(getValue(row, rawHeaders, hMap, 'departmentName') ?? '').trim();
     const levelRaw = String(getValue(row, rawHeaders, hMap, 'level') ?? '1').trim();
-    const level: JobLevel = LEVEL_LABEL_TO_KEY[levelRaw] ?? (Number(levelRaw) as JobLevel) || 1;
+    const level: JobLevel = LEVEL_LABEL_TO_KEY[levelRaw] ?? ((Number(levelRaw) as JobLevel) || 1);
 
     if (!title) errors.push('اسم المنصب مطلوب');
 
@@ -244,22 +248,45 @@ function parseEmployeeSheet(
     const code = String(getValue(row, rawHeaders, hMap, 'code') ?? '').trim();
     const departmentName = String(getValue(row, rawHeaders, hMap, 'departmentName') ?? '').trim();
     const positionTitle = String(getValue(row, rawHeaders, hMap, 'positionTitle') ?? '').trim();
-    const levelRaw = String(getValue(row, rawHeaders, hMap, 'level') ?? '1').trim();
-    const level: JobLevel = LEVEL_LABEL_TO_KEY[levelRaw] ?? (Number(levelRaw) as JobLevel) || 1;
+    const levelRaw = String(getValue(row, rawHeaders, hMap, 'level') ?? '').trim();
+    const level: JobLevel = levelRaw
+      ? (LEVEL_LABEL_TO_KEY[levelRaw] ?? ((Number(levelRaw) as JobLevel) || 1))
+      : 1;
 
     const empTypeRaw = String(getValue(row, rawHeaders, hMap, 'employmentType') ?? '').trim();
     const employmentType: EmploymentType =
       EMPLOYMENT_LABEL_TO_KEY[empTypeRaw] ??
       (Object.keys(EMPLOYMENT_TYPE_LABELS).includes(empTypeRaw) ? empTypeRaw as EmploymentType : 'full_time');
 
-    const baseSalary = Number(getValue(row, rawHeaders, hMap, 'baseSalary')) || 0;
-    const hourlyRate = Number(getValue(row, rawHeaders, hMap, 'hourlyRate')) || 0;
+    const baseSalaryRaw = getValue(row, rawHeaders, hMap, 'baseSalary');
+    const baseSalary = Number(baseSalaryRaw) || 0;
+    const hourlyRateRaw = getValue(row, rawHeaders, hMap, 'hourlyRate');
+    const hourlyRate = Number(hourlyRateRaw) || 0;
     const shiftName = String(getValue(row, rawHeaders, hMap, 'shiftName') ?? '').trim();
 
-    if (!name) errors.push('اسم الموظف مطلوب');
+    // Track which fields actually have non-empty values in the Excel row
+    const providedFields: string[] = [];
+    if (name) providedFields.push('name');
+    if (code) providedFields.push('code');
+    if (departmentName) providedFields.push('departmentName');
+    if (positionTitle) providedFields.push('positionTitle');
+    if (levelRaw) providedFields.push('level');
+    if (empTypeRaw) providedFields.push('employmentType');
+    if (baseSalaryRaw !== '' && baseSalaryRaw != null && !isNaN(Number(baseSalaryRaw))) providedFields.push('baseSalary');
+    if (hourlyRateRaw !== '' && hourlyRateRaw != null && !isNaN(Number(hourlyRateRaw))) providedFields.push('hourlyRate');
+    if (shiftName) providedFields.push('shiftName');
 
-    if (name && lookups.employees.some((e) => e.name.trim().toLowerCase() === name.toLowerCase()))
-      errors.push(`الموظف "${name}" موجود بالفعل`);
+    if (!name && !code) errors.push('اسم الموظف أو الكود مطلوب');
+
+    // Match existing employee by code first, then by name
+    let existingEmp: FirestoreEmployee | undefined;
+    if (code) {
+      existingEmp = lookups.employees.find((e) => (e.code ?? '').trim().toLowerCase() === code.toLowerCase());
+    }
+    if (!existingEmp && name) {
+      existingEmp = lookups.employees.find((e) => e.name.trim().toLowerCase() === name.toLowerCase());
+    }
+
     if (name && seen.has(name.toLowerCase()))
       errors.push(`الموظف "${name}" مكرر في الملف`);
     if (name) seen.add(name.toLowerCase());
@@ -288,6 +315,8 @@ function parseEmployeeSheet(
       shiftName,
       shiftId: (shift as FirestoreShift)?.id ?? '',
       errors,
+      existingId: existingEmp?.id,
+      providedFields,
     };
   });
 }
@@ -348,10 +377,13 @@ export function parseHRExcel(
           errors: rows.filter((r) => r.errors.length > 0).length,
         });
 
+        const empStats = stats(empRows);
+        const updateCount = empRows.filter((r) => r.errors.length === 0 && r.existingId).length;
+
         resolve({
           departments: { rows: deptRows, ...stats(deptRows) },
           positions: { rows: posRows, ...stats(posRows) },
-          employees: { rows: empRows, ...stats(empRows) },
+          employees: { rows: empRows, ...empStats, updates: updateCount },
         });
       } catch (err) {
         reject(err);

@@ -3,7 +3,7 @@
  * Reads config from VITE_ environment variables.
  * Supports Email/Password authentication.
  */
-import { initializeApp, FirebaseApp } from 'firebase/app';
+import { initializeApp, deleteApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
 import {
@@ -62,9 +62,53 @@ export const signInWithEmail = async (
 
 /**
  * Create a new user with email and password (admin action).
- * Returns the UserCredential.
+ * Uses a secondary Firebase App instance so the admin's session is NOT affected.
+ * Also writes the Firestore user document using the secondary auth context
+ * (so security rules allow it via request.auth.uid == userId).
  */
 export const createUserWithEmail = async (
+  email: string,
+  password: string,
+  userData?: { displayName: string; roleId: string; createdBy: string }
+): Promise<{ uid: string }> => {
+  if (!isConfigured) throw new Error('Firebase not configured');
+
+  const appName = `userCreation_${Date.now()}`;
+  const secondaryApp = initializeApp(firebaseConfig, appName);
+  const secondaryAuth = getAuth(secondaryApp);
+
+  try {
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const uid = cred.user.uid;
+
+    if (userData) {
+      const { getFirestore: getFs, doc: fsDoc, setDoc: fsSetDoc, serverTimestamp: fsTs } = await import('firebase/firestore');
+      const secondaryDb = getFs(secondaryApp);
+      await fsSetDoc(fsDoc(secondaryDb, 'users', uid), {
+        email,
+        displayName: userData.displayName,
+        roleId: userData.roleId,
+        isActive: true,
+        createdBy: userData.createdBy,
+        createdAt: fsTs(),
+      });
+    }
+
+    await firebaseSignOut(secondaryAuth);
+    await deleteApp(secondaryApp);
+    return { uid };
+  } catch (err) {
+    await firebaseSignOut(secondaryAuth).catch(() => {});
+    await deleteApp(secondaryApp).catch(() => {});
+    throw err;
+  }
+};
+
+/**
+ * Self-registration — creates an account AND signs in as that user.
+ * Used for the public registration flow (not admin user creation).
+ */
+export const registerWithEmail = async (
   email: string,
   password: string
 ): Promise<UserCredential> => {

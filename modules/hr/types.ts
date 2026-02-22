@@ -50,6 +50,21 @@ export interface FirestoreShift {
   isActive: boolean;
 }
 
+export interface FirestoreVehicle {
+  id?: string;
+  name: string;
+  plateNumber: string;
+  capacity: number;
+  dailyRate: number;
+  workingDaysPerMonth: number;
+  driverName: string;
+  driverPhone: string;
+  assignedEmployees: string[];
+  notes: string;
+  isActive: boolean;
+  createdAt?: any;
+}
+
 export interface FirestoreHRSettings {
   workingDaysPerWeek: number;
   workingHoursPerDay: number;
@@ -287,10 +302,19 @@ export const DEFAULT_LEAVE_BALANCE: Omit<FirestoreLeaveBalance, 'id' | 'employee
 // ─── Loan Management Types ──────────────────────────────────────────────────
 
 export type LoanStatus = 'pending' | 'active' | 'closed';
+export type LoanType = 'monthly_advance' | 'installment';
+
+export const LOAN_TYPE_LABELS: Record<LoanType, string> = {
+  monthly_advance: 'سلفة شهرية',
+  installment: 'سلفة مقسطة',
+};
 
 export interface FirestoreEmployeeLoan {
   id?: string;
   employeeId: string;
+  employeeName: string;
+  employeeCode: string;
+  loanType: LoanType;
   loanAmount: number;
   installmentAmount: number;
   totalInstallments: number;
@@ -300,6 +324,11 @@ export interface FirestoreEmployeeLoan {
   approvalChain: ApprovalChainItem[];
   finalStatus: ApprovalStatus;
   reason: string;
+  disbursed: boolean;
+  disbursedAt?: any;
+  disbursedBy?: string;
+  disbursedByName?: string;
+  month?: string;
   createdAt?: any;
   createdBy: string;
 }
@@ -309,4 +338,52 @@ export interface LoanInstallment {
   employeeId: string;
   installmentAmount: number;
   remainingInstallments: number;
+}
+
+// ─── Employee-Specific Allowances & Deductions ──────────────────────────────
+
+export type EmployeeFinancialStatus = 'active' | 'stopped';
+
+export interface FirestoreEmployeeAllowance {
+  id?: string;
+  employeeId: string;
+  allowanceTypeId: string;
+  allowanceTypeName: string;
+  amount: number;
+  isRecurring: boolean;
+  startMonth: string;
+  endMonth: string | null;
+  status: EmployeeFinancialStatus;
+  createdBy: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export type DeductionCategory = 'manual' | 'disciplinary' | 'transport' | 'override' | 'other';
+
+export interface FirestoreEmployeeDeduction {
+  id?: string;
+  employeeId: string;
+  deductionTypeId: string;
+  deductionTypeName: string;
+  amount: number;
+  isRecurring: boolean;
+  startMonth: string;
+  endMonth: string | null;
+  reason: string;
+  category: DeductionCategory;
+  status: EmployeeFinancialStatus;
+  createdBy: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface EmployeeAllowanceSummary {
+  items: { name: string; amount: number; isRecurring: boolean }[];
+  total: number;
+}
+
+export interface EmployeeDeductionSummary {
+  items: { name: string; amount: number; isRecurring: boolean; reason: string }[];
+  total: number;
 }

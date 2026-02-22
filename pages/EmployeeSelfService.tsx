@@ -185,13 +185,16 @@ export const EmployeeSelfService: React.FC = () => {
       setLeaveSubmitError('يرجى تعبئة تاريخ البداية والنهاية والسبب');
       return;
     }
+    if (!currentEmployee) {
+      setLeaveSubmitError('لم يتم العثور على بيانات الموظف — تأكد من ربط حسابك بموظف');
+      return;
+    }
     setLeaveSubmitError(null);
     setLeaveSubmitSuccess(false);
     setSubmitting(true);
     try {
-      const employee = currentEmployee;
       const allEmployees = rawEmployees.length ? rawEmployees : await (await import('../modules/hr/employeeService')).employeeService.getAll();
-      const hierarchy = toHierarchyInfo(employee);
+      const hierarchy = toHierarchyInfo(currentEmployee);
       const allHierarchy = allEmployees.map((e) => toHierarchyInfo(e as FirestoreEmployee));
       const { chain, errors } = await generateApprovalChain(hierarchy, allHierarchy, 'leave');
       if (errors.length > 0) {
@@ -219,9 +222,10 @@ export const EmployeeSelfService: React.FC = () => {
       setLeaveRequests(updated);
       const balance = await leaveBalanceService.getByEmployee(employeeId) ?? await leaveBalanceService.getOrCreate(employeeId);
       setLeaveBalance(balance);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Leave request create error:', err);
-      setLeaveSubmitError('حدث خطأ أثناء إرسال طلب الإجازة');
+      const msg = err?.message || 'حدث خطأ غير متوقع';
+      setLeaveSubmitError(`فشل إرسال طلب الإجازة: ${msg}`);
     } finally {
       setSubmitting(false);
     }
@@ -253,15 +257,20 @@ export const EmployeeSelfService: React.FC = () => {
       const startMonth = new Date().toISOString().slice(0, 7);
       await loanService.create({
         employeeId,
+        employeeName: employee?.name || '',
+        employeeCode: (employee as any)?.code || '',
+        loanType: finalInstallments > 1 ? 'installment' : 'monthly_advance',
         loanAmount,
         installmentAmount,
         totalInstallments: finalInstallments,
         remainingInstallments: finalInstallments,
         startMonth,
+        month: finalInstallments <= 1 ? startMonth : undefined,
         status: 'pending',
         approvalChain: chain,
         finalStatus: 'pending',
         reason: loanReason.trim() || '—',
+        disbursed: false,
         createdBy: uid,
       });
       setLoanSubmitSuccess(true);
@@ -476,18 +485,48 @@ export const EmployeeSelfService: React.FC = () => {
 
       {!loading && activeTab === 'loan' && (
         <div className="space-y-6">
-          {loans.filter((l) => l.status === 'active' || l.finalStatus === 'pending').length > 0 && (
-            <Card title="السُلف النشطة أو قيد المراجعة">
-              <ul className="space-y-2">
-                {loans.filter((l) => l.status === 'active' || l.finalStatus === 'pending').map((loan) => (
-                  <li key={loan.id} className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
-                    <span>{formatNumber(loan.loanAmount)} ج.م — {loan.remainingInstallments} / {loan.totalInstallments} قسط</span>
-                    <Badge variant={loan.finalStatus === 'pending' ? 'warning' : 'success'}>
-                      {loan.finalStatus === 'pending' ? 'قيد المراجعة' : loan.status === 'active' ? 'نشطة' : 'مغلقة'}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
+          {loans.length > 0 && (
+            <Card title="السُلف">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-right">
+                  <thead className="bg-slate-50 dark:bg-slate-800">
+                    <tr>
+                      <th className="p-3 font-bold text-xs text-slate-400">النوع</th>
+                      <th className="p-3 font-bold text-xs text-slate-400">المبلغ</th>
+                      <th className="p-3 font-bold text-xs text-slate-400">القسط</th>
+                      <th className="p-3 font-bold text-xs text-slate-400">الأقساط</th>
+                      <th className="p-3 font-bold text-xs text-slate-400">الشهر</th>
+                      <th className="p-3 font-bold text-xs text-slate-400">الحالة</th>
+                      <th className="p-3 font-bold text-xs text-slate-400">الصرف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loans.map((loan) => (
+                      <tr key={loan.id} className={`border-t border-slate-100 dark:border-slate-800 ${loan.disbursed ? 'bg-emerald-50/30 dark:bg-emerald-900/5' : ''}`}>
+                        <td className="p-3 text-xs font-bold">
+                          {(loan.loanType || 'installment') === 'monthly_advance' ? 'شهرية' : 'مقسطة'}
+                        </td>
+                        <td className="p-3 font-bold">{formatNumber(loan.loanAmount)} ج.م</td>
+                        <td className="p-3">{formatNumber(loan.installmentAmount)} ج.م</td>
+                        <td className="p-3">{loan.remainingInstallments} / {loan.totalInstallments}</td>
+                        <td className="p-3 font-mono text-xs" dir="ltr">{loan.month || loan.startMonth}</td>
+                        <td className="p-3">
+                          <Badge variant={loan.status === 'active' ? 'success' : loan.status === 'pending' ? 'warning' : 'neutral'}>
+                            {loan.status === 'active' ? 'نشطة' : loan.status === 'pending' ? 'قيد المراجعة' : 'مغلقة'}
+                          </Badge>
+                        </td>
+                        <td className="p-3">
+                          {loan.disbursed ? (
+                            <Badge variant="success">تم الصرف</Badge>
+                          ) : (
+                            <Badge variant="warning">لم يُصرف</Badge>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
           )}
           <Card title="طلب سلفة جديدة">

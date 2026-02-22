@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, Button, Badge } from '@/components/UI';
 import { attendanceLogService } from '../attendanceService';
+import { employeeService } from '../employeeService';
+import { exportHRData } from '@/utils/exportExcel';
+import type { FirestoreEmployee } from '@/types';
 import type { FirestoreAttendanceLog } from '../types';
 import { Timestamp } from 'firebase/firestore';
 
@@ -24,6 +27,7 @@ function getMonthStart(): string {
 
 export const AttendanceList: React.FC = () => {
   const [logs, setLogs] = useState<FirestoreAttendanceLog[]>([]);
+  const [allEmployees, setAllEmployees] = useState<FirestoreEmployee[]>([]);
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState(getMonthStart);
   const [endDate, setEndDate] = useState(getToday);
@@ -36,11 +40,27 @@ export const AttendanceList: React.FC = () => {
   const [editValues, setEditValues] = useState<Partial<FirestoreAttendanceLog>>({});
   const [savingEdit, setSavingEdit] = useState(false);
 
+  const empNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    allEmployees.forEach((e) => {
+      if (e.id) m.set(e.id, e.name);
+      if (e.userId) m.set(e.userId, e.name);
+      if (e.code) m.set(e.code, e.name);
+    });
+    return m;
+  }, [allEmployees]);
+
+  const getEmpName = useCallback((id: string) => empNameMap.get(id) || id, [empNameMap]);
+
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await attendanceLogService.getByDateRange(startDate, endDate);
+      const [data, emps] = await Promise.all([
+        attendanceLogService.getByDateRange(startDate, endDate),
+        allEmployees.length > 0 ? Promise.resolve(allEmployees) : employeeService.getAll(),
+      ]);
       setLogs(data);
+      if (allEmployees.length === 0) setAllEmployees(emps);
     } catch (err) {
       console.error('Failed to fetch attendance logs:', err);
     } finally {
@@ -74,7 +94,10 @@ export const AttendanceList: React.FC = () => {
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
-      result = result.filter((log) => log.employeeId.toLowerCase().includes(q));
+      result = result.filter((log) => {
+        const name = getEmpName(log.employeeId).toLowerCase();
+        return log.employeeId.toLowerCase().includes(q) || name.includes(q) || (log.employeeCode || '').toLowerCase().includes(q);
+      });
     }
 
     return result;
@@ -143,6 +166,25 @@ export const AttendanceList: React.FC = () => {
             عرض ومراجعة وتصحيح سجلات الحضور اليومية.
           </p>
         </div>
+        {filteredLogs.length > 0 && (
+          <Button variant="outline" onClick={() => {
+            const rows = filteredLogs.map((l) => ({
+              'الموظف': getEmpName(l.employeeId),
+              'كود الموظف': l.employeeCode || '—',
+              'التاريخ': l.date,
+              'الحضور': l.checkIn ? formatTimestamp(l.checkIn) : '—',
+              'الانصراف': l.checkOut ? formatTimestamp(l.checkOut) : '—',
+              'الساعات': l.totalHours?.toFixed(1) ?? '0',
+              'تأخير (دقيقة)': l.lateMinutes || 0,
+              'انصراف مبكر (دقيقة)': l.earlyLeaveMinutes || 0,
+              'الحالة': l.isAbsent ? 'غائب' : l.isWeeklyOff ? 'إجازة أسبوعية' : l.isIncomplete ? 'ناقص' : 'حاضر',
+            }));
+            exportHRData(rows, 'سجل الحضور', `حضور-${startDate}-${endDate}`);
+          }}>
+            <span className="material-icons-round text-sm">download</span>
+            تصدير Excel
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
@@ -267,7 +309,7 @@ export const AttendanceList: React.FC = () => {
                   const isEditing = editingId === log.id;
                   return (
                     <tr key={log.id} className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                      <td className="py-2.5 px-2 font-bold text-xs">{log.employeeId}</td>
+                      <td className="py-2.5 px-2 font-bold text-xs">{getEmpName(log.employeeId)}</td>
                       <td className="py-2.5 px-2 font-mono text-xs" dir="ltr">{log.date}</td>
                       <td className="py-2.5 px-2 font-mono text-xs" dir="ltr">{formatTimestamp(log.checkIn)}</td>
                       <td className="py-2.5 px-2 font-mono text-xs" dir="ltr">{formatTimestamp(log.checkOut)}</td>

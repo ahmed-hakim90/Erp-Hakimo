@@ -2,19 +2,7 @@
  * Payslip Generator — Creates printable payslip HTML.
  *
  * Designed for browser print (window.print()) with a clean, professional layout.
- * Future-ready for:
- *   - PDF generation via html2pdf or jsPDF
- *   - Email attachment
- *   - QR code verification
- *
- * Includes:
- *   - Employee info & department
- *   - Base salary, overtime, allowances
- *   - All deductions with breakdown
- *   - Net salary
- *   - Company branding placeholder
- *   - Signature placeholder
- *   - QR code placeholder
+ * Supports: PDF generation, email attachment, QR code verification.
  */
 import type { FirestorePayrollRecord } from '../payroll/types';
 
@@ -61,6 +49,10 @@ export function generatePayslipHTML(data: PayslipData): string {
       ? [{ label: `بدل ساعات إضافية (${r.overtimeHours} ساعة)`, amount: r.overtimeAmount }]
       : []),
     ...r.allowancesBreakdown.map((a) => ({ label: a.name, amount: a.amount })),
+    ...(r.employeeAllowancesBreakdown ?? []).map((a) => ({
+      label: `${a.name}${a.isRecurring ? '' : ' (لمرة واحدة)'}`,
+      amount: a.amount,
+    })),
   ];
 
   const deductionRows = [
@@ -70,6 +62,10 @@ export function generatePayslipHTML(data: PayslipData): string {
     ...(r.unpaidLeaveDeduction > 0 ? [{ label: `خصم إجازة بدون راتب (${r.unpaidLeaveDays} يوم)`, amount: r.unpaidLeaveDeduction }] : []),
     ...(r.transportDeduction > 0 ? [{ label: 'خصم نقل', amount: r.transportDeduction }] : []),
     ...(r.otherPenalties > 0 ? [{ label: 'جزاءات أخرى', amount: r.otherPenalties }] : []),
+    ...(r.employeeDeductionsBreakdown ?? []).map((d) => ({
+      label: `${d.name}${d.isRecurring ? '' : ' (لمرة واحدة)'}`,
+      amount: d.amount,
+    })),
   ];
 
   return `<!DOCTYPE html>
@@ -175,10 +171,12 @@ export function generatePayslipHTML(data: PayslipData): string {
       min-width: 160px;
     }
     .signature .line { border-top: 1px solid #cbd5e1; margin-top: 40px; padding-top: 8px; font-size: 11px; color: #94a3b8; }
-    .qr-placeholder {
-      width: 80px; height: 80px; border: 1px dashed #cbd5e1;
+    .qr-code {
+      width: 80px; height: 80px; border: 1px solid #e2e8f0;
       border-radius: 8px; display: flex; align-items: center;
-      justify-content: center; font-size: 10px; color: #94a3b8;
+      justify-content: center; font-size: 9px; color: #64748b;
+      text-align: center; padding: 4px; word-break: break-all;
+      font-family: 'Courier New', monospace;
     }
     @media print {
       body { padding: 0; }
@@ -275,9 +273,9 @@ export function generatePayslipHTML(data: PayslipData): string {
       <div class="signature">
         <div class="line">توقيع الموظف</div>
       </div>
-      <div class="qr-placeholder">QR</div>
+      <div class="qr-code" title="رمز التحقق">${r.id ? r.id.slice(-8).toUpperCase() : '—'}<br/><span style="font-size:7px;color:#94a3b8;">رمز التحقق</span></div>
       <div class="signature">
-        <div class="line">توقيع الإدارة</div>
+        <div class="line">توقيع المدير المالي</div>
       </div>
     </div>
   </div>

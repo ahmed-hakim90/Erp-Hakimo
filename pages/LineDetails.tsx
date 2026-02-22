@@ -5,6 +5,8 @@ import { Card, KPIBox, Badge, Button, LoadingSkeleton } from '../components/UI';
 import { useAppStore } from '../store/useAppStore';
 import { usePermission } from '../utils/permissions';
 import { reportService } from '../services/reportService';
+import { lineAssignmentService } from '../services/lineAssignmentService';
+import type { LineWorkerAssignment } from '../types';
 import {
   formatNumber,
   calculateAvgAssemblyTime,
@@ -92,6 +94,22 @@ export const LineDetails: React.FC = () => {
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [chartTab, setChartTab] = useState<ChartTab>('production');
+  const [viewWorkersData, setViewWorkersData] = useState<{ date: string; workers: LineWorkerAssignment[] } | null>(null);
+  const [viewWorkersLoading, setViewWorkersLoading] = useState(false);
+
+  const handleViewWorkers = async (date: string) => {
+    if (!id) return;
+    setViewWorkersLoading(true);
+    setViewWorkersData({ date, workers: [] });
+    try {
+      const workers = await lineAssignmentService.getByLineAndDate(id, date);
+      setViewWorkersData({ date, workers });
+    } catch {
+      setViewWorkersData(null);
+    } finally {
+      setViewWorkersLoading(false);
+    }
+  };
 
   const line = productionLines.find((l) => l.id === id);
   const rawLine = _rawLines.find((l) => l.id === id);
@@ -874,7 +892,16 @@ export const LineDetails: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-5 py-3 text-center text-rose-500 font-bold text-sm">{formatNumber(r.quantityWaste)}</td>
-                    <td className="px-5 py-3 text-center text-sm font-bold">{r.workersCount}</td>
+                    <td className="px-5 py-3 text-center text-sm font-bold">
+                      <button
+                        onClick={() => handleViewWorkers(r.date)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg hover:bg-primary/10 text-primary transition-colors"
+                        title="عرض العمالة"
+                      >
+                        {r.workersCount}
+                        <span className="material-icons-round text-xs">groups</span>
+                      </button>
+                    </td>
                     <td className="px-5 py-3 text-center text-sm font-bold">{r.workHours}</td>
                   </tr>
                 );
@@ -890,6 +917,56 @@ export const LineDetails: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {/* View Workers Modal */}
+      {viewWorkersData && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setViewWorkersData(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="material-icons-round text-primary">groups</span>
+                <h3 className="font-bold">عمالة {line?.name ?? ''}</h3>
+                <span className="text-xs text-slate-400 font-medium">{viewWorkersData.date}</span>
+              </div>
+              <button onClick={() => setViewWorkersData(null)} className="text-slate-400 hover:text-slate-600">
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {viewWorkersLoading ? (
+                <div className="text-center py-8">
+                  <span className="material-icons-round text-3xl text-primary animate-spin block mb-2">refresh</span>
+                  <p className="text-sm text-slate-500">جاري التحميل...</p>
+                </div>
+              ) : viewWorkersData.workers.length === 0 ? (
+                <div className="text-center py-8">
+                  <span className="material-icons-round text-4xl text-slate-300 dark:text-slate-700 block mb-2">person_off</span>
+                  <p className="text-sm text-slate-500 font-medium">لا يوجد عمالة مسجلة على هذا الخط في هذا اليوم</p>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-3 px-3 py-2 bg-primary/5 rounded-xl text-center">
+                    <span className="text-sm font-bold text-primary">{viewWorkersData.workers.length} عامل</span>
+                  </div>
+                  <div className="divide-y divide-slate-50 dark:divide-slate-800">
+                    {viewWorkersData.workers.map((w, i) => (
+                      <div key={w.id || i} className="flex items-center gap-3 py-2.5">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <span className="material-icons-round text-primary text-sm">person</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{w.employeeName}</p>
+                          <p className="text-xs text-slate-400 font-mono">{w.employeeCode}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

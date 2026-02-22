@@ -38,7 +38,12 @@ import {
   allowanceTypesRef,
   hrSettingsDocRef,
 } from '../collections';
-import { getApprovedLeaves, getActiveLoanInstallments } from '../payrollIntegration';
+import {
+  getApprovedLeaves,
+  getActiveLoanInstallments,
+  getEmployeeAllowanceSummary,
+  getEmployeeDeductionSummary,
+} from '../payrollIntegration';
 import { applyAllowances, calculatePenalty } from '../hrEngine';
 import { getStrategy } from './salaryStrategies';
 import { payrollAuditService } from './payrollAudit';
@@ -234,20 +239,26 @@ async function calculateEmployeePayroll(
     otherPenalties += result.amount;
   }
 
-  // 7. Allowances
+  // 7. Global allowances (from allowance_types collection)
   const allowanceSummary = applyAllowances(employee.baseSalary, allowanceTypes);
 
-  // 8. Transport deduction
-  const transportDeduction = employee.transportDeduction || 0;
+  // 8. Employee-specific allowances & deductions
+  const [empAllowanceSummary, empDeductionSummary] = await Promise.all([
+    getEmployeeAllowanceSummary(employee.employeeId, month),
+    getEmployeeDeductionSummary(employee.employeeId, month),
+  ]);
+
+  // 9. Transport is tracked on vehicles page but NOT deducted from employee salary
+  const transportDeduction = 0;
 
   // Calculate totals
   const grossSalary = Math.round(
-    (baseSalary + overtimeAmount + allowanceSummary.total) * 100,
+    (baseSalary + overtimeAmount + allowanceSummary.total + empAllowanceSummary.total) * 100,
   ) / 100;
 
   const totalDeductions = Math.round(
     (absenceDeduction + latePenalty + loanInstallment + otherPenalties +
-      transportDeduction + unpaidLeaveDeduction) * 100,
+      unpaidLeaveDeduction + empDeductionSummary.total) * 100,
   ) / 100;
 
   const netSalary = hrSettings.allowNegativeSalary
@@ -260,6 +271,8 @@ async function calculateEmployeePayroll(
     overtimeAmount,
     allowancesTotal: allowanceSummary.total,
     allowancesBreakdown: allowanceSummary.items,
+    employeeAllowancesTotal: empAllowanceSummary.total,
+    employeeAllowancesBreakdown: empAllowanceSummary.items,
     workingDays: attendance.workingDays,
     presentDays: attendance.presentDays,
     absentDays: attendance.absentDays,
@@ -271,6 +284,8 @@ async function calculateEmployeePayroll(
     transportDeduction,
     unpaidLeaveDays,
     unpaidLeaveDeduction,
+    employeeDeductionsTotal: empDeductionSummary.total,
+    employeeDeductionsBreakdown: empDeductionSummary.items,
     grossSalary,
     totalDeductions,
     netSalary,

@@ -33,6 +33,7 @@ import {
   signInWithEmail,
   signOut,
   createUserWithEmail,
+  registerWithEmail,
   resetPassword,
   auth,
 } from '../services/firebase';
@@ -224,6 +225,9 @@ interface AppState {
   setLoading: (loading: boolean) => void;
 }
 
+// Flag to prevent onAuthStateChanged from running initializeApp during admin user creation
+let _creatingUser = false;
+
 // ─── Store ──────────────────────────────────────────────────────────────────
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -296,7 +300,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   register: async (email: string, password: string, displayName: string) => {
     set({ loading: true, authError: null, error: null });
     try {
-      const cred = await createUserWithEmail(email, password);
+      const cred = await registerWithEmail(email, password);
       const uid = cred.user.uid;
 
       const roles = await roleService.seedIfEmpty();
@@ -444,35 +448,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Admin: Create User ───────────────────────────────────────────────────
 
   createUser: async (email, password, displayName, roleId) => {
-    try {
-      const cred = await createUserWithEmail(email, password);
-      const newUid = cred.user.uid;
+    const { uid: newUid } = await createUserWithEmail(email, password, {
+      displayName,
+      roleId,
+      createdBy: get().uid ?? '',
+    });
 
-      await userService.set(newUid, {
-        email,
-        displayName,
-        roleId,
-        isActive: true,
-        createdBy: get().uid ?? '',
-      });
+    get()._logActivity('CREATE_USER', `إنشاء مستخدم: ${displayName} (${email})`, { newUid, roleId });
 
-      // If creating a user logs us out of the current session (Firebase limitation),
-      // we need to handle re-auth. For now, the admin should stay logged in via
-      // the Firebase Auth Admin SDK approach. In client-side, creating a user with
-      // createUserWithEmailAndPassword signs in as that user, so we sign back in.
-      // This is handled by the caller re-authenticating if needed.
-
-      get()._logActivity('CREATE_USER', `إنشاء مستخدم: ${displayName} (${email})`, { newUid, roleId });
-
-      return newUid;
-    } catch (error: any) {
-      let msg = 'فشل إنشاء المستخدم';
-      if (error?.code === 'auth/email-already-in-use') {
-        msg = 'البريد الإلكتروني مستخدم بالفعل';
-      }
-      set({ error: msg });
-      return null;
-    }
+    return newUid;
   },
 
   // ── Admin: Reset Password ────────────────────────────────────────────────
@@ -488,7 +472,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── App Bootstrap (called after login) ─────────────────────────────────
 
   initializeApp: async () => {
-    // Check if user is already signed in (e.g. page refresh with persistent session)
+    // Skip during admin user creation to avoid race condition
+    if (_creatingUser) return;
+
     if (!auth) return;
     const currentUser = auth.currentUser;
     if (!currentUser) {

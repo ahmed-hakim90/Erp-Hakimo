@@ -1,6 +1,8 @@
 /**
  * Loan Service — Firestore CRUD for employee loans and installment tracking.
- * Handles loan creation, approval activation, and installment deduction.
+ * Supports two loan types:
+ *   - monthly_advance: one-time monthly advance with disbursement tracking
+ *   - installment: loan repaid over multiple months
  */
 import {
   getDocs,
@@ -23,6 +25,7 @@ import type {
   ApprovalChainItem,
   ApprovalStatus,
   LoanInstallment,
+  LoanType,
 } from './types';
 
 export const loanService = {
@@ -30,6 +33,7 @@ export const loanService = {
     if (!isConfigured) return '';
     const docRef = await addDoc(employeeLoansRef(), {
       ...data,
+      disbursed: data.disbursed ?? false,
       createdAt: serverTimestamp(),
     });
     return docRef.id;
@@ -37,20 +41,42 @@ export const loanService = {
 
   async getAll(): Promise<FirestoreEmployeeLoan[]> {
     if (!isConfigured) return [];
-    const q = query(employeeLoansRef(), orderBy('createdAt', 'desc'));
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+    try {
+      const q = query(employeeLoansRef(), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+    } catch {
+      const snap = await getDocs(employeeLoansRef());
+      const results = snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+      results.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      return results;
+    }
   },
 
   async getByEmployee(employeeId: string): Promise<FirestoreEmployeeLoan[]> {
     if (!isConfigured) return [];
-    const q = query(
-      employeeLoansRef(),
-      where('employeeId', '==', employeeId),
-      orderBy('createdAt', 'desc'),
-    );
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+    try {
+      const q = query(
+        employeeLoansRef(),
+        where('employeeId', '==', employeeId),
+        orderBy('createdAt', 'desc'),
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+    } catch {
+      const q = query(
+        employeeLoansRef(),
+        where('employeeId', '==', employeeId),
+      );
+      const snap = await getDocs(q);
+      const results = snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+      results.sort((a, b) => {
+        const ta = a.createdAt?.seconds ?? 0;
+        const tb = b.createdAt?.seconds ?? 0;
+        return tb - ta;
+      });
+      return results;
+    }
   },
 
   async getById(id: string): Promise<FirestoreEmployeeLoan | null> {
@@ -60,15 +86,52 @@ export const loanService = {
     return { id: snap.id, ...snap.data() } as FirestoreEmployeeLoan;
   },
 
-  async getPending(): Promise<FirestoreEmployeeLoan[]> {
+  async getByType(loanType: LoanType): Promise<FirestoreEmployeeLoan[]> {
+    if (!isConfigured) return [];
+    try {
+      const q = query(
+        employeeLoansRef(),
+        where('loanType', '==', loanType),
+        orderBy('createdAt', 'desc'),
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+    } catch {
+      const q = query(employeeLoansRef(), where('loanType', '==', loanType));
+      const snap = await getDocs(q);
+      const results = snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+      results.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      return results;
+    }
+  },
+
+  async getByMonth(month: string): Promise<FirestoreEmployeeLoan[]> {
     if (!isConfigured) return [];
     const q = query(
       employeeLoansRef(),
-      where('finalStatus', '==', 'pending'),
-      orderBy('createdAt', 'desc'),
+      where('month', '==', month),
     );
     const snap = await getDocs(q);
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+  },
+
+  async getPending(): Promise<FirestoreEmployeeLoan[]> {
+    if (!isConfigured) return [];
+    try {
+      const q = query(
+        employeeLoansRef(),
+        where('finalStatus', '==', 'pending'),
+        orderBy('createdAt', 'desc'),
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+    } catch {
+      const q = query(employeeLoansRef(), where('finalStatus', '==', 'pending'));
+      const snap = await getDocs(q);
+      const results = snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreEmployeeLoan));
+      results.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      return results;
+    }
   },
 
   async getActive(): Promise<FirestoreEmployeeLoan[]> {
@@ -98,10 +161,30 @@ export const loanService = {
     await updateDoc(doc(db, HR_COLLECTIONS.EMPLOYEE_LOANS, id), updates);
   },
 
-  /**
-   * Process a monthly installment deduction for an active loan.
-   * Decreases remainingInstallments and closes the loan when done.
-   */
+  async disburse(
+    id: string,
+    disbursedBy: string,
+    disbursedByName: string,
+  ): Promise<void> {
+    if (!isConfigured) return;
+    await updateDoc(doc(db, HR_COLLECTIONS.EMPLOYEE_LOANS, id), {
+      disbursed: true,
+      disbursedAt: serverTimestamp(),
+      disbursedBy,
+      disbursedByName,
+    });
+  },
+
+  async undoDisburse(id: string): Promise<void> {
+    if (!isConfigured) return;
+    await updateDoc(doc(db, HR_COLLECTIONS.EMPLOYEE_LOANS, id), {
+      disbursed: false,
+      disbursedAt: null,
+      disbursedBy: null,
+      disbursedByName: null,
+    });
+  },
+
   async processInstallment(loanId: string): Promise<{ closed: boolean }> {
     if (!isConfigured) return { closed: false };
 
@@ -119,9 +202,17 @@ export const loanService = {
     return { closed };
   },
 
-  /**
-   * Get all active loan installments for a given employee (for payroll deduction).
-   */
+  async update(id: string, data: Partial<FirestoreEmployeeLoan>): Promise<void> {
+    if (!isConfigured) return;
+    await updateDoc(doc(db, HR_COLLECTIONS.EMPLOYEE_LOANS, id), data as any);
+  },
+
+  async delete(id: string): Promise<void> {
+    if (!isConfigured) return;
+    const { deleteDoc: delDoc } = await import('firebase/firestore');
+    await delDoc(doc(db, HR_COLLECTIONS.EMPLOYEE_LOANS, id));
+  },
+
   async getActiveInstallments(employeeId: string): Promise<LoanInstallment[]> {
     if (!isConfigured) return [];
     const q = query(

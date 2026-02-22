@@ -149,3 +149,15 @@ export const exportReportsByDateRange = (
   const label = startDate === endDate ? startDate : `${startDate}_${endDate}`;
   downloadExcel(rows, 'تقارير الإنتاج', `تقارير-الإنتاج-${label}`);
 };
+
+/**
+ * Generic HR data export — accepts any array of Arabic-labeled rows.
+ */
+export const exportHRData = (
+  rows: Record<string, any>[],
+  sheetName: string,
+  fileName: string,
+) => {
+  if (rows.length === 0) return;
+  downloadExcel(rows, sheetName, fileName);
+};

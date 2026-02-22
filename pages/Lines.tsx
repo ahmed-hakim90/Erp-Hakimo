@@ -1,11 +1,13 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, Badge } from '../components/UI';
-import { formatNumber } from '../utils/calculations';
+import { formatNumber, getTodayDateString } from '../utils/calculations';
 import { ProductionLineStatus, FirestoreProductionLine } from '../types';
+import type { LineWorkerAssignment } from '../types';
 import { usePermission } from '../utils/permissions';
+import { lineAssignmentService } from '../services/lineAssignmentService';
 
 
 const statusOptions: { value: ProductionLineStatus; label: string }[] = [
@@ -35,6 +37,15 @@ export const Lines: React.FC = () => {
 
   const { can } = usePermission();
   const navigate = useNavigate();
+
+  const [todayAssignments, setTodayAssignments] = useState<LineWorkerAssignment[]>([]);
+
+  useEffect(() => {
+    lineAssignmentService.getByDate(getTodayDateString()).then(setTodayAssignments).catch(() => {});
+  }, []);
+
+  const getTodayWorkersCount = (lineId: string) =>
+    todayAssignments.filter((a) => a.lineId === lineId).length;
 
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -186,8 +197,15 @@ export const Lines: React.FC = () => {
                     <p className="text-lg font-black text-primary">{raw?.dailyWorkingHours ?? 0}</p>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
-                    <p className="text-xs text-slate-400 mb-1">أقصى عمال</p>
-                    <p className="text-lg font-black text-primary">{raw?.maxWorkers ?? 0}</p>
+                    <p className="text-xs text-slate-400 mb-1">عمالة اليوم</p>
+                    {(() => {
+                      const count = getTodayWorkersCount(line.id);
+                      return (
+                        <p className={`text-lg font-black ${count > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                          {count > 0 ? count : '—'}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
 

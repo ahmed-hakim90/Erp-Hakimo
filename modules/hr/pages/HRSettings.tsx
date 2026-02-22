@@ -15,6 +15,7 @@ import {
   type TransportZone,
 } from '../config';
 import type { DayOfWeek } from '../types';
+import { updateApprovalSettings } from '../approval';
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -506,6 +507,14 @@ const ApprovalForm: React.FC<TabFormProps<'approval'>> = ({ config, onChange, er
       <span className="text-sm font-bold text-slate-700 dark:text-slate-300">إشعار عند الانتظار</span>
       <Toggle checked={config.notifyOnPending} onChange={(v) => onChange({ ...config, notifyOnPending: v })} disabled={readOnly} />
     </div>
+    <div className="flex items-center justify-between p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+      <span className="text-sm font-bold text-slate-700 dark:text-slate-300">HR المستوى الأخير دائماً</span>
+      <Toggle checked={config.hrAlwaysFinalLevel ?? true} onChange={(v) => onChange({ ...config, hrAlwaysFinalLevel: v })} disabled={readOnly} />
+    </div>
+    <div className="flex items-center justify-between p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+      <span className="text-sm font-bold text-slate-700 dark:text-slate-300">السماح بالتفويض</span>
+      <Toggle checked={config.allowDelegation ?? true} onChange={(v) => onChange({ ...config, allowDelegation: v })} disabled={readOnly} />
+    </div>
   </div>
 );
 
@@ -720,6 +729,15 @@ export const HRSettings: React.FC = () => {
     try {
       const { configVersion, updatedAt, updatedBy, ...data } = draft[activeTab] as any;
       const { newVersion } = await updateConfigModule(activeTab, data, performedBy);
+
+      if (activeTab === 'approval') {
+        await updateApprovalSettings({
+          maxApprovalLevels: data.maxApprovalLevels,
+          hrAlwaysFinalLevel: data.hrAlwaysFinalLevel ?? true,
+          escalationDays: data.escalationAfterDays,
+          allowDelegation: data.allowDelegation ?? true,
+        });
+      }
       setToast({ message: `تم حفظ الإعدادات بنجاح — الإصدار ${newVersion}`, type: 'success' });
       await loadConfigs();
     } catch (err) {

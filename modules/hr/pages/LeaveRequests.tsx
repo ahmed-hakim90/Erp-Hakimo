@@ -3,6 +3,9 @@ import { Card, Button, Badge, SearchableSelect } from '@/components/UI';
 import { usePermission } from '@/utils/permissions';
 import { useAppStore } from '@/store/useAppStore';
 import { leaveRequestService, leaveBalanceService } from '../leaveService';
+import { employeeService } from '../employeeService';
+import { exportHRData } from '@/utils/exportExcel';
+import type { FirestoreEmployee } from '@/types';
 import type {
   FirestoreLeaveRequest,
   FirestoreLeaveBalance,
@@ -34,6 +37,7 @@ export const LeaveRequests: React.FC = () => {
   const currentEmployee = useAppStore((s) => s.currentEmployee);
 
   const [requests, setRequests] = useState<FirestoreLeaveRequest[]>([]);
+  const [allEmployees, setAllEmployees] = useState<FirestoreEmployee[]>([]);
   const [balance, setBalance] = useState<FirestoreLeaveBalance | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -47,19 +51,35 @@ export const LeaveRequests: React.FC = () => {
   const [formReason, setFormReason] = useState('');
   const [formAffects, setFormAffects] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const isHR = can('leave.manage');
+  const canDelete = can('leave.manage') || can('hrSettings.edit');
   const employeeId = currentEmployee?.id || uid || '';
+
+  const empNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    allEmployees.forEach((e) => {
+      if (e.id) m.set(e.id, e.name);
+      if (e.userId) m.set(e.userId, e.name);
+    });
+    return m;
+  }, [allEmployees]);
+
+  const getEmpName = useCallback((id: string) => empNameMap.get(id) || id, [empNameMap]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [allRequests, bal] = await Promise.all([
+      const [allRequests, bal, emps] = await Promise.all([
         isHR ? leaveRequestService.getAll() : leaveRequestService.getByEmployee(employeeId),
         leaveBalanceService.getOrCreate(employeeId),
+        isHR ? employeeService.getAll() : Promise.resolve([]),
       ]);
       setRequests(allRequests);
       setBalance(bal);
+      setAllEmployees(emps);
     } catch (err) {
       console.error('Error loading leave data:', err);
     } finally {
@@ -103,6 +123,19 @@ export const LeaveRequests: React.FC = () => {
     }
   }, [employeeId, uid, formLeaveType, formStartDate, formEndDate, formDays, formAffects, formReason, fetchData]);
 
+  const handleDelete = useCallback(async (id: string) => {
+    setDeleting(true);
+    try {
+      await leaveRequestService.delete(id);
+      setDeleteConfirm(null);
+      await fetchData();
+    } catch (err) {
+      console.error('Error deleting leave request:', err);
+    } finally {
+      setDeleting(false);
+    }
+  }, [fetchData]);
+
   const filtered = useMemo(() => {
     let result = requests;
     if (filterEmployee) {
@@ -116,8 +149,8 @@ export const LeaveRequests: React.FC = () => {
 
   const uniqueEmployees = useMemo(() => {
     const ids = [...new Set(requests.map((r) => r.employeeId))];
-    return ids.map((id) => ({ value: id, label: id }));
-  }, [requests]);
+    return ids.map((id) => ({ value: id, label: getEmpName(id) }));
+  }, [requests, getEmpName]);
 
   if (loading) {
     return (
@@ -146,10 +179,30 @@ export const LeaveRequests: React.FC = () => {
             طلب إجازة ومتابعة الأرصدة وحالات الموافقة
           </p>
         </div>
-        <Button variant="primary" onClick={() => setShowForm(!showForm)}>
-          <span className="material-icons-round text-sm">{showForm ? 'close' : 'add'}</span>
-          {showForm ? 'إغلاق' : 'طلب إجازة'}
-        </Button>
+        <div className="flex gap-2">
+          {requests.length > 0 && (
+            <Button variant="outline" onClick={() => {
+              const rows = requests.map((r) => ({
+                'الموظف': getEmpName(r.employeeId),
+                'النوع': LEAVE_TYPE_LABELS[r.leaveType],
+                'من': r.startDate,
+                'إلى': r.endDate,
+                'الأيام': r.totalDays,
+                'تؤثر على الراتب': r.affectsSalary ? 'نعم' : 'لا',
+                'الحالة': STATUS_CONFIG[r.finalStatus]?.label ?? r.finalStatus,
+                'السبب': r.reason || '',
+              }));
+              exportHRData(rows, 'الإجازات', 'إجازات');
+            }}>
+              <span className="material-icons-round text-sm">download</span>
+              تصدير Excel
+            </Button>
+          )}
+          <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+            <span className="material-icons-round text-sm">{showForm ? 'close' : 'add'}</span>
+            {showForm ? 'إغلاق' : 'طلب إجازة'}
+          </Button>
+        </div>
       </div>
 
       {/* Balance Cards */}
@@ -323,6 +376,7 @@ export const LeaveRequests: React.FC = () => {
                   <th className="text-right py-3 px-3">تؤثر على الراتب</th>
                   <th className="text-right py-3 px-3">الحالة</th>
                   <th className="text-right py-3 px-3">مراحل الموافقة</th>
+                  {canDelete && <th className="text-center py-3 px-3">حذف</th>}
                 </tr>
               </thead>
               <tbody>
@@ -330,7 +384,7 @@ export const LeaveRequests: React.FC = () => {
                   const statusCfg = STATUS_CONFIG[req.finalStatus];
                   return (
                     <tr key={req.id} className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                      {isHR && <td className="py-3 px-3 font-bold">{req.employeeId}</td>}
+                      {isHR && <td className="py-3 px-3 font-bold">{getEmpName(req.employeeId)}</td>}
                       <td className="py-3 px-3">
                         <Badge variant="info">{LEAVE_TYPE_LABELS[req.leaveType]}</Badge>
                       </td>
@@ -368,6 +422,17 @@ export const LeaveRequests: React.FC = () => {
                           )}
                         </div>
                       </td>
+                      {canDelete && (
+                        <td className="py-3 px-3 text-center">
+                          <button
+                            onClick={() => setDeleteConfirm(req.id!)}
+                            className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/30 text-rose-400 hover:text-rose-600 transition-colors"
+                            title="حذف الطلب"
+                          >
+                            <span className="material-icons-round text-lg">delete</span>
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -376,6 +441,26 @@ export const LeaveRequests: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="text-center">
+              <span className="material-icons-round text-5xl text-rose-500 mb-2">warning</span>
+              <h3 className="text-lg font-black text-slate-800 dark:text-white mb-2">تأكيد الحذف</h3>
+              <p className="text-sm text-slate-500 mb-4">هل تريد حذف طلب الإجازة نهائياً؟</p>
+            </div>
+            <div className="flex justify-center gap-3">
+              <Button variant="outline" onClick={() => setDeleteConfirm(null)} disabled={deleting}>تراجع</Button>
+              <Button onClick={() => handleDelete(deleteConfirm)} disabled={deleting} className="!bg-rose-600 hover:!bg-rose-700">
+                {deleting ? <span className="material-icons-round animate-spin text-sm">refresh</span> : <span className="material-icons-round text-sm">delete</span>}
+                حذف نهائي
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
