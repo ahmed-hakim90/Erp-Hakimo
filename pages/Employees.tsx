@@ -75,6 +75,8 @@ export const Employees: React.FC = () => {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [toggleConfirmId, setToggleConfirmId] = useState<string | null>(null);
   const [permanentDeleteId, setPermanentDeleteId] = useState<string | null>(null);
+  const [formTab, setFormTab] = useState<'job' | 'salary' | 'access'>('job');
+  const [recreateAccount, setRecreateAccount] = useState(false);
 
   // Quick-add states
   const [quickAddType, setQuickAddType] = useState<'department' | 'position' | 'shift' | null>(null);
@@ -170,6 +172,8 @@ export const Employees: React.FC = () => {
     setFormPassword('');
     setFormRoleId(roles[0]?.id ?? '');
     setSaveMsg(null);
+    setFormTab('job');
+    setRecreateAccount(false);
     setShowModal(true);
   };
 
@@ -196,6 +200,8 @@ export const Employees: React.FC = () => {
     setFormPassword('');
     setFormRoleId(roles.find((r) => r.id === usersMap[raw.userId!]?.roleId)?.id ?? roles[0]?.id ?? '');
     setSaveMsg(null);
+    setFormTab('job');
+    setRecreateAccount(false);
     setShowModal(true);
   };
 
@@ -249,7 +255,11 @@ export const Employees: React.FC = () => {
 
         await updateEmployee(editId, payload);
         const editingRaw = _rawEmployees.find((e) => e.id === editId);
-        if (needsUserCreation && !editingRaw?.userId) {
+        const shouldCreateUser = needsUserCreation && (!editingRaw?.userId || recreateAccount);
+        if (shouldCreateUser) {
+          if (recreateAccount && editingRaw?.userId) {
+            try { await userService.delete(editingRaw.userId); } catch { /* old doc cleanup */ }
+          }
           try {
             const newUid = await createUser(
               formEmail.trim(),
@@ -259,14 +269,16 @@ export const Employees: React.FC = () => {
             );
             if (newUid) {
               await updateEmployee(editId, { userId: newUid, email: formEmail.trim() });
-              setSaveMsg({ type: 'success', text: `تم حفظ البيانات وإنشاء حساب دخول بنجاح (${formEmail.trim()})` });
+              setSaveMsg({ type: 'success', text: recreateAccount ? `تم إعادة إنشاء حساب الدخول بنجاح (${formEmail.trim()})` : `تم حفظ البيانات وإنشاء حساب دخول بنجاح (${formEmail.trim()})` });
+              setRecreateAccount(false);
+              await loadUsers();
               setTimeout(() => setShowModal(false), 1500);
             }
           } catch (authErr: any) {
             console.error('Create user error:', authErr);
             setSaveMsg({ type: 'error', text: `تم حفظ بيانات الموظف، لكن فشل إنشاء الحساب: ${getAuthErrorMsg(authErr)}` });
           }
-        } else if (editingRaw?.userId) {
+        } else if (editingRaw?.userId && !recreateAccount) {
           const updates: string[] = [];
           const newEmail = formEmail.trim();
           if (newEmail && newEmail !== (editingRaw.email ?? '')) {
@@ -411,13 +423,17 @@ export const Employees: React.FC = () => {
       try { await userService.delete(raw.userId); } catch { /* ignore */ }
     }
     await deleteEmployee(id);
-    setDeleteConfirmId(null);
+    setPermanentDeleteId(null);
   };
 
   const handleToggleActive = async (id: string) => {
     const raw = _rawEmployees.find((e) => e.id === id);
     if (!raw) return;
-    await updateEmployee(id, { isActive: !raw.isActive });
+    const newActive = !raw.isActive;
+    await updateEmployee(id, { isActive: newActive });
+    if (raw.userId) {
+      try { await userService.toggleActive(raw.userId, newActive); } catch { /* ignore */ }
+    }
     setToggleConfirmId(null);
   };
 
@@ -892,6 +908,28 @@ export const Employees: React.FC = () => {
               </button>
             </div>
 
+            {/* Tab Navigation */}
+            <div className="flex border-b border-slate-100 dark:border-slate-800 px-6 shrink-0 sticky top-0 bg-white dark:bg-slate-900 z-10">
+              {([
+                { id: 'job' as const, label: 'البيانات الوظيفية', icon: 'account_tree' },
+                { id: 'salary' as const, label: 'التوظيف والراتب', icon: 'payments' },
+                { id: 'access' as const, label: 'الوصول للنظام', icon: 'security' },
+              ]).map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setFormTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-4 py-3 text-sm font-bold border-b-2 transition-all ${
+                    formTab === tab.id
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                  }`}
+                >
+                  <span className="material-icons-round text-base">{tab.icon}</span>
+                  <span className="hidden sm:inline">{tab.label}</span>
+                </button>
+              ))}
+            </div>
+
             <div className="p-6 overflow-y-auto space-y-6">
               {/* Validation errors */}
               {validationErrors.length > 0 && (
@@ -905,283 +943,381 @@ export const Employees: React.FC = () => {
                 </div>
               )}
 
-              {/* ═══ Section 1: Job Structure ═══ */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
-                  <span className="material-icons-round text-primary text-lg">account_tree</span>
-                  <h4 className="text-sm font-black text-slate-700 dark:text-slate-300">الهيكل الوظيفي</h4>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">الاسم *</label>
-                    <input
-                      className={`w-full border rounded-xl text-sm p-3 outline-none font-medium transition-colors ${!form.name.trim() ? 'border-rose-300 dark:border-rose-700 bg-rose-50/50 dark:bg-rose-900/10' : 'border-slate-200 dark:border-slate-700 dark:bg-slate-800'} focus:border-primary focus:ring-1 focus:ring-primary/20`}
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      placeholder="اسم الموظف"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">رمز الموظف</label>
-                    <input
-                      className={`w-full border rounded-xl text-sm p-3 outline-none font-medium font-mono transition-colors ${validationErrors.some((e) => e.includes('رمز')) ? 'border-rose-300 dark:border-rose-700 bg-rose-50/50 dark:bg-rose-900/10' : 'border-slate-200 dark:border-slate-700 dark:bg-slate-800'}`}
-                      value={form.code}
-                      onChange={(e) => setForm({ ...form, code: e.target.value })}
-                      placeholder="اختياري — فريد"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">القسم *</label>
-                    <div className="flex gap-2">
-                      <select
-                        className={`flex-1 border rounded-xl text-sm p-3 outline-none font-medium ${!form.departmentId ? 'border-rose-300 dark:border-rose-700' : 'border-slate-200 dark:border-slate-700'} dark:bg-slate-800`}
-                        value={form.departmentId}
-                        onChange={(e) => setForm({ ...form, departmentId: e.target.value, jobPositionId: '' })}
-                      >
-                        <option value="">اختر القسم...</option>
-                        {departments.map((d) => (
-                          <option key={d.id} value={d.id}>{d.name}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => { setQuickAddType('department'); setQuickAddName(''); setQuickAddCode(''); }}
-                        className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
-                        title="إضافة قسم جديد"
-                      >
-                        <span className="material-icons-round text-lg">add</span>
-                      </button>
+              {/* ═══ Tab 1: Job Info ═══ */}
+              {formTab === 'job' && (
+                <div className="space-y-5 min-h-[360px]">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">الاسم *</label>
+                      <input
+                        className={`w-full border rounded-xl text-sm p-3 outline-none font-medium transition-colors ${!form.name.trim() ? 'border-rose-300 dark:border-rose-700 bg-rose-50/50 dark:bg-rose-900/10' : 'border-slate-200 dark:border-slate-700 dark:bg-slate-800'} focus:border-primary focus:ring-1 focus:ring-primary/20`}
+                        value={form.name}
+                        onChange={(e) => setForm({ ...form, name: e.target.value })}
+                        placeholder="اسم الموظف"
+                      />
                     </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">المنصب</label>
-                    <div className="flex gap-2">
-                      <select
-                        className="flex-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                        value={form.jobPositionId}
-                        onChange={(e) => setForm({ ...form, jobPositionId: e.target.value })}
-                      >
-                        <option value="">اختر المنصب...</option>
-                        {positionOptions.map((j) => (
-                          <option key={j.id} value={j.id}>{j.title}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => { setQuickAddType('position'); setQuickAddName(''); }}
-                        className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
-                        title="إضافة منصب جديد"
-                      >
-                        <span className="material-icons-round text-lg">add</span>
-                      </button>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">رمز الموظف</label>
+                      <input
+                        className={`w-full border rounded-xl text-sm p-3 outline-none font-medium font-mono transition-colors ${validationErrors.some((e) => e.includes('رمز')) ? 'border-rose-300 dark:border-rose-700 bg-rose-50/50 dark:bg-rose-900/10' : 'border-slate-200 dark:border-slate-700 dark:bg-slate-800'}`}
+                        value={form.code}
+                        onChange={(e) => setForm({ ...form, code: e.target.value })}
+                        placeholder="اختياري — فريد"
+                      />
                     </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">
-                      المستوى
-                      {selectedPosition && <span className="text-primary mr-1">(تلقائي من المنصب)</span>}
-                    </label>
-                    <div className={`w-full border rounded-xl text-sm p-3 font-bold ${selectedPosition ? 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-primary' : 'border-slate-200 dark:border-slate-700 dark:bg-slate-800'}`}>
-                      {selectedPosition ? (
-                        <div className="flex items-center gap-2">
-                          <span className="material-icons-round text-sm text-primary/50">lock</span>
-                          {JOB_LEVEL_LABELS[form.level as 1 | 2 | 3 | 4] ?? form.level}
-                        </div>
-                      ) : (
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">القسم *</label>
+                      <div className="flex gap-2">
                         <select
-                          className="w-full bg-transparent outline-none font-medium"
-                          value={form.level}
-                          onChange={(e) => setForm({ ...form, level: Number(e.target.value) as 1 | 2 | 3 | 4 })}
+                          className={`flex-1 border rounded-xl text-sm p-3 outline-none font-medium ${!form.departmentId ? 'border-rose-300 dark:border-rose-700' : 'border-slate-200 dark:border-slate-700'} dark:bg-slate-800`}
+                          value={form.departmentId}
+                          onChange={(e) => setForm({ ...form, departmentId: e.target.value, jobPositionId: '' })}
                         >
-                          {(Object.entries(JOB_LEVEL_LABELS) as [string, string][]).map(([k, v]) => (
-                            <option key={k} value={k}>{v}</option>
+                          <option value="">اختر القسم...</option>
+                          {departments.map((d) => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
                           ))}
                         </select>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => { setQuickAddType('department'); setQuickAddName(''); setQuickAddCode(''); }}
+                          className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
+                          title="إضافة قسم جديد"
+                        >
+                          <span className="material-icons-round text-lg">add</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">المدير المباشر</label>
-                    <select
-                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                      value={form.managerId}
-                      onChange={(e) => setForm({ ...form, managerId: e.target.value })}
-                    >
-                      <option value="">لا يوجد</option>
-                      {managerOptions.map((e) => (
-                        <option key={e.id} value={e.id}>{e.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* ═══ Section 2: Employment & Salary ═══ */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
-                  <span className="material-icons-round text-emerald-600 text-lg">payments</span>
-                  <h4 className="text-sm font-black text-slate-700 dark:text-slate-300">التوظيف والراتب</h4>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">نوع التوظيف</label>
-                    <select
-                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                      value={form.employmentType}
-                      onChange={(e) => setForm({ ...form, employmentType: e.target.value as EmploymentType })}
-                    >
-                      {(Object.entries(EMPLOYMENT_TYPE_LABELS) as [EmploymentType, string][]).map(([k, v]) => (
-                        <option key={k} value={k}>{v}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">الوردية</label>
-                    <div className="flex gap-2">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">المنصب</label>
+                      <div className="flex gap-2">
+                        <select
+                          className="flex-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                          value={form.jobPositionId}
+                          onChange={(e) => setForm({ ...form, jobPositionId: e.target.value })}
+                        >
+                          <option value="">اختر المنصب...</option>
+                          {positionOptions.map((j) => (
+                            <option key={j.id} value={j.id}>{j.title}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => { setQuickAddType('position'); setQuickAddName(''); }}
+                          className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
+                          title="إضافة منصب جديد"
+                        >
+                          <span className="material-icons-round text-lg">add</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">
+                        المستوى
+                        {selectedPosition && <span className="text-primary mr-1">(تلقائي من المنصب)</span>}
+                      </label>
+                      <div className={`w-full border rounded-xl text-sm p-3 font-bold ${selectedPosition ? 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-primary' : 'border-slate-200 dark:border-slate-700 dark:bg-slate-800'}`}>
+                        {selectedPosition ? (
+                          <div className="flex items-center gap-2">
+                            <span className="material-icons-round text-sm text-primary/50">lock</span>
+                            {JOB_LEVEL_LABELS[form.level as 1 | 2 | 3 | 4] ?? form.level}
+                          </div>
+                        ) : (
+                          <select
+                            className="w-full bg-transparent outline-none font-medium"
+                            value={form.level}
+                            onChange={(e) => setForm({ ...form, level: Number(e.target.value) as 1 | 2 | 3 | 4 })}
+                          >
+                            {(Object.entries(JOB_LEVEL_LABELS) as [string, string][]).map(([k, v]) => (
+                              <option key={k} value={k}>{v}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">المدير المباشر</label>
                       <select
-                        className="flex-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                        value={form.shiftId}
-                        onChange={(e) => setForm({ ...form, shiftId: e.target.value })}
+                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                        value={form.managerId}
+                        onChange={(e) => setForm({ ...form, managerId: e.target.value })}
                       >
                         <option value="">لا يوجد</option>
-                        {shifts.map((s) => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
+                        {managerOptions.map((e) => (
+                          <option key={e.id} value={e.id}>{e.name}</option>
                         ))}
                       </select>
-                      <button
-                        type="button"
-                        onClick={() => { setQuickAddType('shift'); setQuickAddName(''); }}
-                        className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
-                        title="إضافة وردية جديدة"
-                      >
-                        <span className="material-icons-round text-lg">add</span>
-                      </button>
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">الراتب الأساسي *</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      className={`w-full border rounded-xl text-sm p-3 outline-none font-medium transition-colors ${form.baseSalary <= 0 && form.employmentType !== 'daily' ? 'border-rose-300 dark:border-rose-700' : 'border-slate-200 dark:border-slate-700'} dark:bg-slate-800`}
-                      value={form.baseSalary || ''}
-                      onChange={(e) => setForm({ ...form, baseSalary: Number(e.target.value) })}
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">أجر الساعة</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                      value={form.hourlyRate || ''}
-                      onChange={(e) => setForm({ ...form, hourlyRate: Number(e.target.value) })}
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">المركبة</label>
-                    <select
-                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                      value={form.vehicleId}
-                      onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
-                    >
-                      <option value="">بدون مركبة</option>
-                      {vehicles.map((v) => (
-                        <option key={v.id} value={v.id}>{v.name} — {v.plateNumber}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
 
-                {/* Salary change indicator */}
-                {salaryChanged && (
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                    <span className="material-icons-round text-amber-500">trending_up</span>
-                    <div className="flex-1">
-                      <p className="text-xs font-bold text-amber-700 dark:text-amber-400">تغيير في الراتب</p>
-                      <p className="text-sm text-amber-600 dark:text-amber-400">
-                        <span className="line-through opacity-60">{originalSalary?.toLocaleString()}</span>
-                        <span className="mx-2">←</span>
-                        <span className="font-black">{Number(form.baseSalary).toLocaleString()}</span>
-                        <span className="text-xs mr-1">ج.م</span>
-                      </p>
-                    </div>
-                    <span className="material-icons-round text-xs text-amber-500">history</span>
-                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold">سيتم تسجيل التغيير</span>
-                  </div>
-                )}
-
-                {/* Live Net Salary Preview */}
-                {form.baseSalary > 0 && (
-                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-gradient-to-l from-emerald-50 to-white dark:from-emerald-900/20 dark:to-slate-900 p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="material-icons-round text-emerald-600 text-lg">account_balance_wallet</span>
-                        <span className="text-xs font-black text-emerald-700 dark:text-emerald-400">صافي الراتب التقديري</span>
-                      </div>
-                      <div className="text-left">
-                        <p className="text-2xl font-black text-emerald-700 dark:text-emerald-400">
-                          {Number(form.baseSalary).toLocaleString()}
-                          <span className="text-xs font-bold mr-1">ج.م</span>
-                        </p>
-                        <p className="text-[10px] text-emerald-600/60 dark:text-emerald-400/60">الراتب الأساسي قبل البدلات والخصومات</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* ═══ Section 3: System Access ═══ */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
-                  <span className="material-icons-round text-blue-600 text-lg">security</span>
-                  <h4 className="text-sm font-black text-slate-700 dark:text-slate-300">الوصول للنظام</h4>
-                </div>
-                <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={form.hasSystemAccess}
-                    onChange={(e) => setForm({ ...form, hasSystemAccess: e.target.checked })}
-                    className="rounded border-slate-300 text-primary focus:ring-primary w-5 h-5"
-                  />
-                  <div>
-                    <span className="text-sm font-bold block">لديه دخول للنظام</span>
-                    <span className="text-xs text-slate-500">تفعيل حساب دخول إلكتروني لهذا الموظف</span>
-                  </div>
-                </label>
-                {form.hasSystemAccess && (() => {
-                  const editingRaw = editId ? _rawEmployees.find((e) => e.id === editId) : null;
-                  const alreadyHasAccount = editingRaw?.userId;
-                  if (alreadyHasAccount) {
-                    return (
-                      <div className="border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 space-y-3 bg-emerald-50 dark:bg-emerald-900/20">
-                        <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
-                          <span className="material-icons-round text-lg">check_circle</span>
-                          <span className="text-sm font-bold">لديه حساب دخول</span>
+                  {/* Employee Status */}
+                  <div className="space-y-3 pt-2">
+                    <h4 className="text-xs font-black text-slate-500 dark:text-slate-400">حالة الموظف</h4>
+                    <div className="flex gap-3">
+                      <label className={`flex-1 flex items-center gap-3 cursor-pointer p-3 rounded-xl border transition-all ${form.isActive ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-200 dark:ring-emerald-800' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
+                        <input
+                          type="radio"
+                          name="isActive"
+                          checked={form.isActive === true}
+                          onChange={() => setForm({ ...form, isActive: true })}
+                          className="text-emerald-500 focus:ring-emerald-500"
+                        />
+                        <div>
+                          <span className="text-sm font-bold block">نشط</span>
+                          <span className="text-xs text-slate-500">الموظف يعمل حالياً</span>
                         </div>
-                        <div className="space-y-2">
-                          <label className="block text-xs font-bold text-emerald-600 dark:text-emerald-400">البريد الإلكتروني</label>
+                      </label>
+                      <label className={`flex-1 flex items-center gap-3 cursor-pointer p-3 rounded-xl border transition-all ${!form.isActive ? 'border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20 ring-1 ring-rose-200 dark:ring-rose-800' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
+                        <input
+                          type="radio"
+                          name="isActive"
+                          checked={form.isActive === false}
+                          onChange={() => setForm({ ...form, isActive: false })}
+                          className="text-rose-500 focus:ring-rose-500"
+                        />
+                        <div>
+                          <span className="text-sm font-bold block">غير نشط</span>
+                          <span className="text-xs text-slate-500">موقوف أو منتهي</span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ═══ Tab 2: Employment & Salary ═══ */}
+              {formTab === 'salary' && (
+                <div className="space-y-5 min-h-[360px]">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">نوع التوظيف</label>
+                      <select
+                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                        value={form.employmentType}
+                        onChange={(e) => setForm({ ...form, employmentType: e.target.value as EmploymentType })}
+                      >
+                        {(Object.entries(EMPLOYMENT_TYPE_LABELS) as [EmploymentType, string][]).map(([k, v]) => (
+                          <option key={k} value={k}>{v}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">الوردية</label>
+                      <div className="flex gap-2">
+                        <select
+                          className="flex-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                          value={form.shiftId}
+                          onChange={(e) => setForm({ ...form, shiftId: e.target.value })}
+                        >
+                          <option value="">لا يوجد</option>
+                          {shifts.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => { setQuickAddType('shift'); setQuickAddName(''); }}
+                          className="px-3 py-2 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0"
+                          title="إضافة وردية جديدة"
+                        >
+                          <span className="material-icons-round text-lg">add</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">الراتب الأساسي *</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        className={`w-full border rounded-xl text-sm p-3 outline-none font-medium transition-colors ${form.baseSalary <= 0 && form.employmentType !== 'daily' ? 'border-rose-300 dark:border-rose-700' : 'border-slate-200 dark:border-slate-700'} dark:bg-slate-800`}
+                        value={form.baseSalary || ''}
+                        onChange={(e) => setForm({ ...form, baseSalary: Number(e.target.value) })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">أجر الساعة</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                        value={form.hourlyRate || ''}
+                        onChange={(e) => setForm({ ...form, hourlyRate: Number(e.target.value) })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">المركبة</label>
+                      <select
+                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                        value={form.vehicleId}
+                        onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
+                      >
+                        <option value="">بدون مركبة</option>
+                        {vehicles.map((v) => (
+                          <option key={v.id} value={v.id}>{v.name} — {v.plateNumber}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Salary change indicator */}
+                  {salaryChanged && (
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                      <span className="material-icons-round text-amber-500">trending_up</span>
+                      <div className="flex-1">
+                        <p className="text-xs font-bold text-amber-700 dark:text-amber-400">تغيير في الراتب</p>
+                        <p className="text-sm text-amber-600 dark:text-amber-400">
+                          <span className="line-through opacity-60">{originalSalary?.toLocaleString()}</span>
+                          <span className="mx-2">←</span>
+                          <span className="font-black">{Number(form.baseSalary).toLocaleString()}</span>
+                          <span className="text-xs mr-1">ج.م</span>
+                        </p>
+                      </div>
+                      <span className="material-icons-round text-xs text-amber-500">history</span>
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold">سيتم تسجيل التغيير</span>
+                    </div>
+                  )}
+
+                  {/* Live Net Salary Preview */}
+                  {form.baseSalary > 0 && (
+                    <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-gradient-to-l from-emerald-50 to-white dark:from-emerald-900/20 dark:to-slate-900 p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="material-icons-round text-emerald-600 text-lg">account_balance_wallet</span>
+                          <span className="text-xs font-black text-emerald-700 dark:text-emerald-400">صافي الراتب التقديري</span>
+                        </div>
+                        <div className="text-left">
+                          <p className="text-2xl font-black text-emerald-700 dark:text-emerald-400">
+                            {Number(form.baseSalary).toLocaleString()}
+                            <span className="text-xs font-bold mr-1">ج.م</span>
+                          </p>
+                          <p className="text-[10px] text-emerald-600/60 dark:text-emerald-400/60">الراتب الأساسي قبل البدلات والخصومات</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ═══ Tab 3: System Access ═══ */}
+              {formTab === 'access' && (
+                <div className="space-y-5 min-h-[360px]">
+                  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={form.hasSystemAccess}
+                      onChange={(e) => setForm({ ...form, hasSystemAccess: e.target.checked })}
+                      className="rounded border-slate-300 text-primary focus:ring-primary w-5 h-5"
+                    />
+                    <div>
+                      <span className="text-sm font-bold block">لديه دخول للنظام</span>
+                      <span className="text-xs text-slate-500">تفعيل حساب دخول إلكتروني لهذا الموظف</span>
+                    </div>
+                  </label>
+                  {form.hasSystemAccess && (() => {
+                    const editingRaw = editId ? _rawEmployees.find((e) => e.id === editId) : null;
+                    const alreadyHasAccount = editingRaw?.userId && !recreateAccount;
+                    if (alreadyHasAccount) {
+                      return (
+                        <div className="space-y-4">
+                          <div className="border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 space-y-4 bg-emerald-50 dark:bg-emerald-900/20">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+                                <span className="material-icons-round text-lg">check_circle</span>
+                                <span className="text-sm font-bold">لديه حساب دخول</span>
+                              </div>
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-emerald-600 dark:text-emerald-400">البريد الإلكتروني</label>
+                              <input
+                                type="email"
+                                className="w-full border border-emerald-200 dark:border-emerald-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                                value={formEmail}
+                                onChange={(e) => setFormEmail(e.target.value)}
+                              />
+                              {formEmail.trim() !== (editingRaw?.email ?? '') && (
+                                <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                                  <span className="material-icons-round text-xs">info</span>
+                                  سيتم تحديث البريد في بيانات الموظف. لتغيير بريد تسجيل الدخول يجب إعادة تعيين من Firebase.
+                                </p>
+                              )}
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-emerald-600 dark:text-emerald-400">الدور</label>
+                              <select
+                                className="w-full border border-emerald-200 dark:border-emerald-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                                value={formRoleId}
+                                onChange={(e) => setFormRoleId(e.target.value)}
+                              >
+                                {roles.map((r) => (
+                                  <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => { setRecreateAccount(true); setFormPassword(''); }}
+                            className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/10 transition-colors text-sm font-bold"
+                          >
+                            <span className="material-icons-round text-base">refresh</span>
+                            إعادة إنشاء حساب الدخول (لو تم حذفه من Firebase)
+                          </button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="border border-blue-200 dark:border-blue-800 rounded-xl p-4 space-y-4 bg-blue-50/50 dark:bg-blue-900/10">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold text-blue-700 dark:text-blue-400">
+                            {recreateAccount ? 'إعادة إنشاء حساب الدخول' : editId ? 'ربط حساب دخول للموظف' : 'إنشاء حساب دخول'}
+                          </p>
+                          {recreateAccount && (
+                            <button
+                              type="button"
+                              onClick={() => setRecreateAccount(false)}
+                              className="text-xs text-slate-400 hover:text-slate-600 font-bold flex items-center gap-1"
+                            >
+                              <span className="material-icons-round text-sm">arrow_back</span>
+                              رجوع
+                            </button>
+                          )}
+                        </div>
+                        {recreateAccount && (
+                          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                            <span className="material-icons-round text-amber-500 text-sm mt-0.5">warning</span>
+                            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                              تأكد أنك حذفت الحساب القديم من Firebase Auth أولاً. سيتم إنشاء حساب جديد وربطه بالموظف.
+                            </p>
+                          </div>
+                        )}
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">البريد الإلكتروني</label>
                           <input
                             type="email"
-                            className="w-full border border-emerald-200 dark:border-emerald-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                            className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                            placeholder="البريد الإلكتروني"
                             value={formEmail}
                             onChange={(e) => setFormEmail(e.target.value)}
                           />
-                          {formEmail.trim() !== (editingRaw?.email ?? '') && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                              <span className="material-icons-round text-xs">info</span>
-                              سيتم تحديث البريد في بيانات الموظف. لتغيير بريد تسجيل الدخول يجب إعادة تعيين من Firebase.
-                            </p>
-                          )}
                         </div>
-                        <div className="space-y-2">
-                          <label className="block text-xs font-bold text-emerald-600 dark:text-emerald-400">الدور</label>
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">كلمة المرور</label>
+                          <input
+                            type="password"
+                            className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                            placeholder="كلمة المرور (6 أحرف على الأقل)"
+                            value={formPassword}
+                            onChange={(e) => setFormPassword(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400">الدور</label>
                           <select
-                            className="w-full border border-emerald-200 dark:border-emerald-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                            className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
                             value={formRoleId}
                             onChange={(e) => setFormRoleId(e.target.value)}
                           >
@@ -1192,75 +1328,9 @@ export const Employees: React.FC = () => {
                         </div>
                       </div>
                     );
-                  }
-                  return (
-                    <div className="border border-blue-200 dark:border-blue-800 rounded-xl p-4 space-y-3 bg-blue-50/50 dark:bg-blue-900/10">
-                      <p className="text-xs font-bold text-blue-700 dark:text-blue-400">
-                        {editId ? 'ربط حساب دخول للموظف' : 'إنشاء حساب دخول'}
-                      </p>
-                      <input
-                        type="email"
-                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                        placeholder="البريد الإلكتروني"
-                        value={formEmail}
-                        onChange={(e) => setFormEmail(e.target.value)}
-                      />
-                      <input
-                        type="password"
-                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                        placeholder="كلمة المرور (6 أحرف على الأقل)"
-                        value={formPassword}
-                        onChange={(e) => setFormPassword(e.target.value)}
-                      />
-                      <select
-                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
-                        value={formRoleId}
-                        onChange={(e) => setFormRoleId(e.target.value)}
-                      >
-                        {roles.map((r) => (
-                          <option key={r.id} value={r.id}>{r.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* ═══ Section 4: Employee Status ═══ */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
-                  <span className="material-icons-round text-amber-600 text-lg">toggle_on</span>
-                  <h4 className="text-sm font-black text-slate-700 dark:text-slate-300">حالة الموظف</h4>
+                  })()}
                 </div>
-                <div className="flex gap-3">
-                  <label className={`flex-1 flex items-center gap-3 cursor-pointer p-3 rounded-xl border transition-all ${form.isActive ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-200 dark:ring-emerald-800' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
-                    <input
-                      type="radio"
-                      name="isActive"
-                      checked={form.isActive === true}
-                      onChange={() => setForm({ ...form, isActive: true })}
-                      className="text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <div>
-                      <span className="text-sm font-bold block">نشط</span>
-                      <span className="text-xs text-slate-500">الموظف يعمل حالياً</span>
-                    </div>
-                  </label>
-                  <label className={`flex-1 flex items-center gap-3 cursor-pointer p-3 rounded-xl border transition-all ${!form.isActive ? 'border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20 ring-1 ring-rose-200 dark:ring-rose-800' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
-                    <input
-                      type="radio"
-                      name="isActive"
-                      checked={form.isActive === false}
-                      onChange={() => setForm({ ...form, isActive: false })}
-                      className="text-rose-500 focus:ring-rose-500"
-                    />
-                    <div>
-                      <span className="text-sm font-bold block">غير نشط</span>
-                      <span className="text-xs text-slate-500">موقوف أو منتهي</span>
-                    </div>
-                  </label>
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Footer messages & actions */}

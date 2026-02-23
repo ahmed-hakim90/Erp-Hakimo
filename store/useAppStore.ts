@@ -27,6 +27,8 @@ import {
   FirestoreEmployee,
   FirestoreRole,
   FirestoreUser,
+  WorkOrder,
+  AppNotification,
 } from '../types';
 
 import {
@@ -44,6 +46,8 @@ import { reportService } from '../services/reportService';
 import { lineStatusService } from '../services/lineStatusService';
 import { lineProductConfigService } from '../services/lineProductConfigService';
 import { productionPlanService } from '../services/productionPlanService';
+import { workOrderService } from '../services/workOrderService';
+import { notificationService } from '../services/notificationService';
 import { costCenterService } from '../services/costCenterService';
 import { costCenterValueService } from '../services/costCenterValueService';
 import { costAllocationService } from '../services/costAllocationService';
@@ -98,6 +102,10 @@ interface AppState {
   lineProductConfigs: LineProductConfig[];
   productionPlans: ProductionPlan[];
   planReports: Record<string, ProductionReport[]>;
+
+  // Work Orders & Notifications
+  workOrders: WorkOrder[];
+  notifications: AppNotification[];
 
   // Cost management
   costCenters: CostCenter[];
@@ -194,6 +202,18 @@ interface AppState {
   updateProductionPlan: (id: string, data: Partial<ProductionPlan>) => Promise<void>;
   deleteProductionPlan: (id: string) => Promise<void>;
 
+  // Mutations — Work Orders
+  fetchWorkOrders: () => Promise<void>;
+  createWorkOrder: (data: Omit<WorkOrder, 'id' | 'createdAt'>) => Promise<string | null>;
+  updateWorkOrder: (id: string, data: Partial<WorkOrder>) => Promise<void>;
+  deleteWorkOrder: (id: string) => Promise<void>;
+
+  // Notifications
+  fetchNotifications: () => Promise<void>;
+  markNotificationRead: (id: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
+  subscribeToNotifications: () => () => void;
+
   // System Settings
   fetchSystemSettings: () => Promise<void>;
   updateSystemSettings: (data: SystemSettings) => Promise<void>;
@@ -247,6 +267,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   lineProductConfigs: [],
   productionPlans: [],
   planReports: {},
+
+  workOrders: [],
+  notifications: [],
 
   costCenters: [],
   costCenterValues: [],
@@ -434,6 +457,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       lineProductConfigs: [],
       productionPlans: [],
       planReports: {},
+      workOrders: [],
+      notifications: [],
       costCenters: [],
       costCenterValues: [],
       costAllocations: [],
@@ -946,6 +971,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteEmployee: async (id) => {
     try {
+      const employees = get()._rawEmployees;
+      const emp = employees.find((e) => e.id === id);
+      if (emp?.userId) {
+        try { await userService.delete(emp.userId); } catch { /* best effort */ }
+      }
       await employeeService.delete(id);
       await get().fetchEmployees();
     } catch (error) {

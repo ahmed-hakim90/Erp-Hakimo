@@ -162,6 +162,7 @@ export interface ProductionReport {
   quantityWaste: number;
   workersCount: number;
   workHours: number;
+  workOrderId?: string;
   createdAt?: any;
 }
 
@@ -204,6 +205,48 @@ export interface ProductionPlan {
   actualCost: number;
   status: PlanStatus;
   createdBy: string;
+  createdAt?: any;
+}
+
+// ─── Work Orders ─────────────────────────────────────────────────────────────
+
+export type WorkOrderStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface WorkOrder {
+  id?: string;
+  workOrderNumber: string;
+  planId?: string;
+  productId: string;
+  lineId: string;
+  supervisorId: string;
+  quantity: number;
+  producedQuantity: number;
+  maxWorkers: number;
+  targetDate: string;
+  estimatedCost: number;
+  actualCost: number;
+  status: WorkOrderStatus;
+  notes?: string;
+  createdBy: string;
+  createdAt?: any;
+  completedAt?: any;
+}
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+
+export type NotificationType =
+  | 'work_order_assigned'
+  | 'work_order_updated'
+  | 'work_order_completed';
+
+export interface AppNotification {
+  id?: string;
+  recipientId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  referenceId: string;
+  isRead: boolean;
   createdAt?: any;
 }
 

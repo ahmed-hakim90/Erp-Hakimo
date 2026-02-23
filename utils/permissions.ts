@@ -30,6 +30,7 @@ export type Permission =
   | 'quickAction.view'
   | 'costs.view' | 'costs.manage'
   | 'plans.view' | 'plans.create' | 'plans.edit'
+  | 'workOrders.view' | 'workOrders.create' | 'workOrders.edit' | 'workOrders.delete' | 'workOrders.viewCost'
   | 'employeeDashboard.view'
   | 'selfService.view'
   | 'factoryDashboard.view'
@@ -193,6 +194,17 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    key: 'workOrders',
+    label: 'أوامر الشغل',
+    permissions: [
+      { key: 'workOrders.view', label: 'عرض أوامر الشغل' },
+      { key: 'workOrders.create', label: 'إنشاء أمر شغل' },
+      { key: 'workOrders.edit', label: 'تعديل أمر شغل' },
+      { key: 'workOrders.delete', label: 'حذف أمر شغل' },
+      { key: 'workOrders.viewCost', label: 'عرض تكاليف أوامر الشغل' },
+    ],
+  },
+  {
     key: 'attendance',
     label: 'الحضور والانصراف',
     permissions: [
@@ -339,6 +351,7 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
       { path: '/lines', icon: 'precision_manufacturing', label: 'خطوط الإنتاج', permission: 'lines.view' },
       { path: '/products', icon: 'inventory_2', label: 'المنتجات', permission: 'products.view' },
       { path: '/production-plans', icon: 'event_note', label: 'خطط الإنتاج', permission: 'plans.view' },
+      { path: '/work-orders', icon: 'assignment', label: 'أوامر الشغل', permission: 'workOrders.view' },
       { path: '/supervisors', icon: 'engineering', label: 'المشرفين', permission: 'supervisors.view' },
       { path: '/production-workers', icon: 'construction', label: 'عمال الإنتاج', permission: 'productionWorkers.view' },
       { path: '/reports', icon: 'bar_chart', label: 'التقارير', permission: 'reports.view' },
@@ -411,6 +424,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/users': 'users.view',
   '/activity-log': 'activityLog.view',
   '/production-plans': 'plans.view',
+  '/work-orders': 'workOrders.view',
   '/factory-dashboard': 'factoryDashboard.view',
   '/admin-dashboard': 'adminDashboard.view',
   '/cost-centers': 'costs.view',

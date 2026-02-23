@@ -992,30 +992,30 @@ export const Reports: React.FC = () => {
                 </div>
               ) : importResult ? (
                 <div className="space-y-4">
-                  {/* Summary */}
-                  <div className="flex flex-wrap gap-3">
-                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm font-bold text-blue-600 dark:text-blue-400">
+                  {/* Summary Badges */}
+                  <div className="flex flex-wrap gap-2">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs font-bold text-blue-600 dark:text-blue-400">
                       <span className="material-icons-round text-sm">description</span>
                       {importResult.totalRows} صف
                     </div>
-                    <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-xs font-bold text-emerald-600 dark:text-emerald-400">
                       <span className="material-icons-round text-sm">check_circle</span>
-                      {importResult.validCount} صالح للحفظ
+                      {importResult.validCount} صالح
                     </div>
                     {importResult.errorCount > 0 && (
-                      <div className="flex items-center gap-2 px-3 py-2 bg-rose-50 dark:bg-rose-900/20 rounded-lg text-sm font-bold text-rose-500">
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-50 dark:bg-rose-900/20 rounded-lg text-xs font-bold text-rose-500">
                         <span className="material-icons-round text-sm">error</span>
                         {importResult.errorCount} خطأ
                       </div>
                     )}
                     {importResult.warningCount > 0 && (
-                      <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-sm font-bold text-amber-600 dark:text-amber-400">
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-xs font-bold text-amber-600 dark:text-amber-400">
                         <span className="material-icons-round text-sm">warning</span>
                         {importResult.warningCount} تحذير
                       </div>
                     )}
                     {importResult.duplicateCount > 0 && (
-                      <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-sm font-bold text-orange-600 dark:text-orange-400">
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-xs font-bold text-orange-600 dark:text-orange-400">
                         <span className="material-icons-round text-sm">content_copy</span>
                         {importResult.duplicateCount} مكرر
                       </div>
@@ -1055,17 +1055,15 @@ export const Reports: React.FC = () => {
                             <tr key={row.rowIndex} className={rowBg}>
                               <td className="px-3 py-2 text-slate-400 font-mono text-xs">{row.rowIndex}</td>
                               <td className="px-3 py-2">
-                                <div className="flex items-center gap-1">
-                                  {!isValid ? (
-                                    <span className="material-icons-round text-rose-500 text-sm" title={row.errors.join('\n')}>error</span>
-                                  ) : row.isDuplicate ? (
-                                    <span className="material-icons-round text-orange-500 text-sm" title="تقرير مكرر">content_copy</span>
-                                  ) : hasWarnings ? (
-                                    <span className="material-icons-round text-amber-500 text-sm" title={row.warnings.join('\n')}>warning</span>
-                                  ) : (
-                                    <span className="material-icons-round text-emerald-500 text-sm">check_circle</span>
-                                  )}
-                                </div>
+                                {!isValid ? (
+                                  <span className="material-icons-round text-rose-500 text-sm" title={row.errors.join('\n')}>error</span>
+                                ) : row.isDuplicate ? (
+                                  <span className="material-icons-round text-orange-500 text-sm" title="تقرير مكرر">content_copy</span>
+                                ) : hasWarnings ? (
+                                  <span className="material-icons-round text-amber-500 text-sm" title={row.warnings.join('\n')}>warning</span>
+                                ) : (
+                                  <span className="material-icons-round text-emerald-500 text-sm">check_circle</span>
+                                )}
                               </td>
                               <td className="px-3 py-2 font-medium">{row.date}</td>
                               <td className={`px-3 py-2 ${row.lineId ? '' : 'text-rose-500'}`}>{row.lineName || '—'}</td>

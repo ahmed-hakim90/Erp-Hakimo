@@ -1,0 +1,91 @@
+import {
+  collection,
+  doc,
+  getDocs,
+  addDoc,
+  updateDoc,
+  query,
+  where,
+  orderBy,
+  serverTimestamp,
+  onSnapshot,
+  writeBatch,
+  Unsubscribe,
+} from 'firebase/firestore';
+import { db, isConfigured } from './firebase';
+import type { AppNotification } from '../types';
+
+const COLLECTION = 'notifications';
+
+export const notificationService = {
+  async getByUser(userId: string): Promise<AppNotification[]> {
+    if (!isConfigured) return [];
+    try {
+      const q = query(
+        collection(db, COLLECTION),
+        where('recipientId', '==', userId),
+        orderBy('createdAt', 'desc'),
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppNotification));
+    } catch (error) {
+      console.error('notificationService.getByUser error:', error);
+      throw error;
+    }
+  },
+
+  async create(data: Omit<AppNotification, 'id' | 'createdAt'>): Promise<string | null> {
+    if (!isConfigured) return null;
+    try {
+      const ref = await addDoc(collection(db, COLLECTION), {
+        ...data,
+        createdAt: serverTimestamp(),
+      });
+      return ref.id;
+    } catch (error) {
+      console.error('notificationService.create error:', error);
+      throw error;
+    }
+  },
+
+  async markAsRead(id: string): Promise<void> {
+    if (!isConfigured) return;
+    try {
+      await updateDoc(doc(db, COLLECTION, id), { isRead: true });
+    } catch (error) {
+      console.error('notificationService.markAsRead error:', error);
+      throw error;
+    }
+  },
+
+  async markAllAsRead(userId: string): Promise<void> {
+    if (!isConfigured) return;
+    try {
+      const q = query(
+        collection(db, COLLECTION),
+        where('recipientId', '==', userId),
+        where('isRead', '==', false),
+      );
+      const snap = await getDocs(q);
+      if (snap.empty) return;
+      const batch = writeBatch(db);
+      snap.docs.forEach((d) => batch.update(d.ref, { isRead: true }));
+      await batch.commit();
+    } catch (error) {
+      console.error('notificationService.markAllAsRead error:', error);
+      throw error;
+    }
+  },
+
+  subscribeToUser(userId: string, callback: (notifications: AppNotification[]) => void): Unsubscribe {
+    if (!isConfigured) return () => {};
+    const q = query(
+      collection(db, COLLECTION),
+      where('recipientId', '==', userId),
+      orderBy('createdAt', 'desc'),
+    );
+    return onSnapshot(q, (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppNotification)));
+    });
+  },
+};
