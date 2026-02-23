@@ -51,6 +51,23 @@ export const monthlyProductionCostService = {
     }
   },
 
+  async getByMonth(month: string): Promise<MonthlyProductionCost[]> {
+    if (!isConfigured) return [];
+    try {
+      const q = query(
+        collection(db, COLLECTION),
+        where('month', '==', month)
+      );
+      const snap = await getDocs(q);
+      return snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as MonthlyProductionCost))
+        .sort((a, b) => a.productId.localeCompare(b.productId));
+    } catch (error) {
+      console.error('monthlyProductionCostService.getByMonth error:', error);
+      throw error;
+    }
+  },
+
   async getByProductAndMonth(
     productId: string,
     month: string

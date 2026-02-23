@@ -21,6 +21,7 @@ import { ActivityLogPage } from './pages/ActivityLog';
 import { CostCenters } from './pages/CostCenters';
 import { CostCenterDistribution } from './pages/CostCenterDistribution';
 import { CostSettings } from './pages/CostSettings';
+import { MonthlyProductionCosts } from './pages/MonthlyProductionCosts';
 import { ProductionPlans } from './pages/ProductionPlans';
 import { WorkOrders } from './pages/WorkOrders';
 import { EmployeeDashboard } from './pages/EmployeeDashboard';
@@ -168,6 +169,7 @@ const App: React.FC = () => {
                 <Route path="/cost-centers" element={<ProtectedRoute permission="costs.view"><CostCenters /></ProtectedRoute>} />
                 <Route path="/cost-centers/:id" element={<ProtectedRoute permission="costs.view"><CostCenterDistribution /></ProtectedRoute>} />
                 <Route path="/cost-settings" element={<ProtectedRoute permission="costs.manage"><CostSettings /></ProtectedRoute>} />
+                <Route path="/monthly-costs" element={<ProtectedRoute permission="costs.view"><MonthlyProductionCosts /></ProtectedRoute>} />
                 <Route path="/roles" element={<ProtectedRoute permission="roles.manage"><RolesManagement /></ProtectedRoute>} />
                 <Route path="/settings" element={<ProtectedRoute permission="settings.view"><Settings /></ProtectedRoute>} />
                 <Route path="/attendance" element={<ProtectedRoute permission="attendance.view"><AttendanceList /></ProtectedRoute>} />

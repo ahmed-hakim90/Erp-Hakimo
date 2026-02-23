@@ -47,7 +47,7 @@ function formatRequestSummary(req: FirestoreApprovalRequest): string {
     return `إجازة ${typeLabel}`;
   }
   if (req.requestType === 'loan') {
-    return `سلفة ${(data.loanAmount || 0).toLocaleString('ar-EG')}`;
+    return `سلفة ${(data.loanAmount || 0).toLocaleString('en-US')}`;
   }
   return 'عمل إضافي';
 }
@@ -58,7 +58,7 @@ function formatRequestDetail(req: FirestoreApprovalRequest): string {
     return `${data.startDate || '—'} → ${data.endDate || '—'} (${data.totalDays || 0} يوم)`;
   }
   if (req.requestType === 'loan') {
-    return `${data.totalInstallments || 0} قسط × ${(data.installmentAmount || 0).toLocaleString('ar-EG')} — بدء: ${data.startMonth || '—'}`;
+    return `${data.totalInstallments || 0} قسط × ${(data.installmentAmount || 0).toLocaleString('en-US')} — بدء: ${data.startMonth || '—'}`;
   }
   return data.description || '';
 }

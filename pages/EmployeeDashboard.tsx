@@ -1,5 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { Card, Badge, LoadingSkeleton } from '../components/UI';
+import { WorkOrderPrint } from '../components/ProductionReportPrint';
+import type { WorkOrderPrintData } from '../components/ProductionReportPrint';
 import { useAppStore, useShallowStore } from '../store/useAppStore';
 import {
   formatNumber,
@@ -11,7 +14,7 @@ import {
 } from '../utils/calculations';
 import { reportService } from '../services/reportService';
 import { usePermission } from '../utils/permissions';
-import type { ProductionReport } from '../types';
+import type { ProductionReport, WorkOrder } from '../types';
 
 type Period = 'daily' | 'weekly' | 'monthly';
 
@@ -96,10 +99,42 @@ export const EmployeeDashboard: React.FC = () => {
   }));
 
   const { can } = usePermission();
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
 
   const [period, setPeriod] = useState<Period>('daily');
   const [periodReports, setPeriodReports] = useState<ProductionReport[]>([]);
   const [periodLoading, setPeriodLoading] = useState(false);
+
+  const [woPrintData, setWoPrintData] = useState<WorkOrderPrintData | null>(null);
+  const woPrintRef = useRef<HTMLDivElement>(null);
+  const handleWoPrint = useReactToPrint({ contentRef: woPrintRef });
+
+  const STATUS_LABELS: Record<string, string> = { pending: 'قيد الانتظار', in_progress: 'قيد التنفيذ', completed: 'مكتمل', cancelled: 'ملغي' };
+
+  const triggerWOPrint = useCallback(async (wo: WorkOrder) => {
+    const product = _rawProducts.find((p) => p.id === wo.productId);
+    const line = _rawLines.find((l) => l.id === wo.lineId);
+    const supervisor = _rawEmployees.find((e) => e.id === wo.supervisorId);
+    setWoPrintData({
+      workOrderNumber: wo.workOrderNumber,
+      productName: product?.name ?? '—',
+      lineName: line?.name ?? '—',
+      supervisorName: supervisor?.name ?? '—',
+      quantity: wo.quantity,
+      producedQuantity: wo.producedQuantity,
+      maxWorkers: wo.maxWorkers,
+      targetDate: wo.targetDate,
+      status: wo.status,
+      statusLabel: STATUS_LABELS[wo.status] || wo.status,
+      estimatedCost: wo.estimatedCost,
+      actualCost: wo.actualCost,
+      notes: wo.notes,
+      showCosts: can('workOrders.viewCost'),
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    handleWoPrint();
+    setTimeout(() => setWoPrintData(null), 1000);
+  }, [_rawProducts, _rawLines, _rawEmployees, can, handleWoPrint]);
 
   const employee = useMemo(
     () => _rawEmployees.find((s) => s.userId === uid),
@@ -610,6 +645,15 @@ export const EmployeeDashboard: React.FC = () => {
                       </div>
                     )}
                     <div className="flex items-center gap-2 shrink-0">
+                      {can('print') && (
+                        <button
+                          onClick={() => triggerWOPrint(wo)}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold transition-colors"
+                          title="طباعة"
+                        >
+                          <span className="material-icons-round text-base">print</span>
+                        </button>
+                      )}
                       {can('workOrders.edit') && wo.status === 'pending' && (
                         <button
                           onClick={() => updateWorkOrder(wo.id!, { status: 'in_progress' })}
@@ -638,6 +682,11 @@ export const EmployeeDashboard: React.FC = () => {
           </Card>
         );
       })()}
+
+      {/* Hidden print component */}
+      <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+        <WorkOrderPrint ref={woPrintRef} data={woPrintData} printSettings={printTemplate} />
+      </div>
     </div>
   );
 };

@@ -79,7 +79,7 @@ async function loadPayrollEmployees(): Promise<PayrollEmployeeData[]> {
 }
 
 function formatCurrency(val: number): string {
-  return val.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function getCurrentMonth(): string {

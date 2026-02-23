@@ -81,7 +81,7 @@ export const CostSettings: React.FC = () => {
           <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-5 text-center">
             <span className="material-icons-round text-blue-500 text-3xl mb-2 block">schedule</span>
             <p className="text-xs text-slate-400 font-bold mb-1">إجمالي ساعات العمل</p>
-            <p className="text-2xl font-black text-slate-800 dark:text-white">{todayLaborHours.toLocaleString('ar-EG')}</p>
+            <p className="text-2xl font-black text-slate-800 dark:text-white">{todayLaborHours.toLocaleString('en-US')}</p>
             <span className="text-[10px] font-medium text-slate-400">عامل × ساعة</span>
           </div>
           <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-5 text-center">

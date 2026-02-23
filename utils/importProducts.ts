@@ -1,13 +1,18 @@
 /**
  * Excel Import Utility for Products — parse .xlsx/.xls into FirestoreProduct data.
+ * Supports both creating new products and updating existing ones (matched by code).
  */
 import * as XLSX from 'xlsx';
 import type { FirestoreProduct } from '../types';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+export type ImportAction = 'create' | 'update';
+
 export interface ParsedProductRow {
   rowIndex: number;
+  action: ImportAction;
+  matchedId?: string;
   name: string;
   code: string;
   model: string;
@@ -16,7 +21,9 @@ export interface ParsedProductRow {
   innerBoxCost: number;
   outerCartonCost: number;
   unitsPerCarton: number;
+  sellingPrice: number;
   errors: string[];
+  changes?: string[];
 }
 
 export interface ProductImportResult {
@@ -24,6 +31,8 @@ export interface ProductImportResult {
   totalRows: number;
   validCount: number;
   errorCount: number;
+  newCount: number;
+  updateCount: number;
 }
 
 // ─── Header mapping (Arabic → field) ────────────────────────────────────────
@@ -59,24 +68,43 @@ const HEADER_MAP: Record<string, string> = {
   'عدد الوحدات في الكرتونة': 'unitsPerCarton',
   'وحدات/كرتونة': 'unitsPerCarton',
   'وحدات الكرتونة': 'unitsPerCarton',
+  'سعر البيع': 'sellingPrice',
+  'سعر بيع': 'sellingPrice',
+  'سعر': 'sellingPrice',
 };
 
 function normalizeHeader(h: string): string {
   return h.trim().replace(/\s+/g, ' ');
 }
 
-// ─── Existing product duplicate check ───────────────────────────────────────
+// ─── Lookup helpers ─────────────────────────────────────────────────────────
 
-interface ExistingProducts {
-  existingNames: Set<string>;
-  existingCodes: Set<string>;
+interface ProductLookup {
+  byCode: Map<string, FirestoreProduct>;
+  byName: Map<string, FirestoreProduct>;
 }
 
-function buildExistingLookup(products: FirestoreProduct[]): ExistingProducts {
-  return {
-    existingNames: new Set(products.map((p) => p.name.trim().toLowerCase())),
-    existingCodes: new Set(products.map((p) => p.code.trim().toLowerCase())),
-  };
+function buildLookup(products: FirestoreProduct[]): ProductLookup {
+  const byCode = new Map<string, FirestoreProduct>();
+  const byName = new Map<string, FirestoreProduct>();
+  for (const p of products) {
+    byCode.set(p.code.trim().toLowerCase(), p);
+    byName.set(p.name.trim().toLowerCase(), p);
+  }
+  return { byCode, byName };
+}
+
+function describeChanges(existing: FirestoreProduct, row: ParsedProductRow): string[] {
+  const changes: string[] = [];
+  if (existing.name !== row.name) changes.push(`الاسم: ${existing.name} ← ${row.name}`);
+  if ((existing.model || '') !== row.model) changes.push(`الفئة`);
+  if ((existing.openingBalance || 0) !== row.openingBalance) changes.push(`الرصيد: ${existing.openingBalance || 0} ← ${row.openingBalance}`);
+  if ((existing.chineseUnitCost || 0) !== row.chineseUnitCost) changes.push(`تكلفة صينية`);
+  if ((existing.innerBoxCost || 0) !== row.innerBoxCost) changes.push(`علبة داخلية`);
+  if ((existing.outerCartonCost || 0) !== row.outerCartonCost) changes.push(`كرتونة خارجية`);
+  if ((existing.unitsPerCarton || 0) !== row.unitsPerCarton) changes.push(`وحدات/كرتونة`);
+  if ((existing.sellingPrice || 0) !== row.sellingPrice) changes.push(`سعر البيع`);
+  return changes;
 }
 
 // ─── Main parse function ────────────────────────────────────────────────────
@@ -98,7 +126,7 @@ export function parseProductsExcel(
         const jsonRows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
 
         if (jsonRows.length === 0) {
-          resolve({ rows: [], totalRows: 0, validCount: 0, errorCount: 0 });
+          resolve({ rows: [], totalRows: 0, validCount: 0, errorCount: 0, newCount: 0, updateCount: 0 });
           return;
         }
 
@@ -110,7 +138,7 @@ export function parseProductsExcel(
           if (mapped) headerMapping[rawH] = mapped;
         }
 
-        const existing = buildExistingLookup(existingProducts);
+        const lookup = buildLookup(existingProducts);
         const seenCodes = new Set<string>();
 
         const rows: ParsedProductRow[] = jsonRows.map((row, idx) => {
@@ -123,15 +151,10 @@ export function parseProductsExcel(
 
           const name = String(getValue('name') ?? '').trim();
           if (!name) errors.push('اسم المنتج مفقود');
-          else if (existing.existingNames.has(name.toLowerCase())) {
-            errors.push(`المنتج "${name}" موجود بالفعل`);
-          }
 
           const code = String(getValue('code') ?? '').trim();
           if (!code) errors.push('الكود مفقود');
-          else if (existing.existingCodes.has(code.toLowerCase())) {
-            errors.push(`الكود "${code}" موجود بالفعل`);
-          } else if (seenCodes.has(code.toLowerCase())) {
+          else if (seenCodes.has(code.toLowerCase())) {
             errors.push(`الكود "${code}" مكرر في الملف`);
           }
           if (code) seenCodes.add(code.toLowerCase());
@@ -142,9 +165,16 @@ export function parseProductsExcel(
           const innerBoxCost = Number(getValue('innerBoxCost')) || 0;
           const outerCartonCost = Number(getValue('outerCartonCost')) || 0;
           const unitsPerCarton = Number(getValue('unitsPerCarton')) || 0;
+          const sellingPrice = Number(getValue('sellingPrice')) || 0;
 
-          return {
+          const existingByCode = code ? lookup.byCode.get(code.toLowerCase()) : undefined;
+          const action: ImportAction = existingByCode ? 'update' : 'create';
+          const matchedId = existingByCode?.id;
+
+          const parsed: ParsedProductRow = {
             rowIndex: idx + 2,
+            action,
+            matchedId,
             name,
             code,
             model,
@@ -153,17 +183,28 @@ export function parseProductsExcel(
             innerBoxCost,
             outerCartonCost,
             unitsPerCarton,
+            sellingPrice,
             errors,
           };
+
+          if (action === 'update' && existingByCode && errors.length === 0) {
+            parsed.changes = describeChanges(existingByCode, parsed);
+          }
+
+          return parsed;
         });
 
-        const validCount = rows.filter((r) => r.errors.length === 0).length;
+        const validRows = rows.filter((r) => r.errors.length === 0);
+        const newCount = validRows.filter((r) => r.action === 'create').length;
+        const updateCount = validRows.filter((r) => r.action === 'update').length;
 
         resolve({
           rows,
           totalRows: rows.length,
-          validCount,
-          errorCount: rows.length - validCount,
+          validCount: validRows.length,
+          errorCount: rows.length - validRows.length,
+          newCount,
+          updateCount,
         });
       } catch (err) {
         reject(err);
@@ -185,5 +226,6 @@ export function toProductData(row: ParsedProductRow): Omit<FirestoreProduct, 'id
     innerBoxCost: row.innerBoxCost,
     outerCartonCost: row.outerCartonCost,
     unitsPerCarton: row.unitsPerCarton,
+    sellingPrice: row.sellingPrice,
   };
 }

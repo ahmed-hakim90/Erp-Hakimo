@@ -103,6 +103,9 @@ export const DEFAULT_PRINT_TEMPLATE: PrintTemplateSettings = {
   showWaste: true,
   showEmployee: true,
   showQRCode: false,
+  showCosts: true,
+  showWorkOrder: true,
+  showSellingPrice: true,
 };
 
 export const DEFAULT_PLAN_SETTINGS: PlanSettings = {

@@ -4,6 +4,7 @@
  * Accepts data via props so it contains ZERO business logic.
  */
 import React from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import type { ProductionReport, PrintTemplateSettings } from '../types';
 import { DEFAULT_PRINT_TEMPLATE } from '../utils/dashboardConfig';
 
@@ -16,6 +17,8 @@ export interface ReportPrintRow {
   quantityWaste: number;
   workersCount: number;
   workHours: number;
+  costPerUnit?: number;
+  workOrderNumber?: string;
 }
 
 export interface ReportPrintProps {
@@ -44,18 +47,25 @@ export const mapReportsToPrintRows = (
     getLineName: (id: string) => string;
     getProductName: (id: string) => string;
     getEmployeeName: (id: string) => string;
-  }
+    getWorkOrder?: (id: string) => { workOrderNumber: string } | undefined;
+  },
+  costMap?: Map<string, number>,
 ): ReportPrintRow[] =>
-  reports.map((r) => ({
-    date: r.date,
-    lineName: lookups.getLineName(r.lineId),
-    productName: lookups.getProductName(r.productId),
-    employeeName: lookups.getEmployeeName(r.employeeId),
-    quantityProduced: r.quantityProduced || 0,
-    quantityWaste: r.quantityWaste || 0,
-    workersCount: r.workersCount || 0,
-    workHours: r.workHours || 0,
-  }));
+  reports.map((r) => {
+    const wo = r.workOrderId && lookups.getWorkOrder ? lookups.getWorkOrder(r.workOrderId) : undefined;
+    return {
+      date: r.date,
+      lineName: lookups.getLineName(r.lineId),
+      productName: lookups.getProductName(r.productId),
+      employeeName: lookups.getEmployeeName(r.employeeId),
+      quantityProduced: r.quantityProduced || 0,
+      quantityWaste: r.quantityWaste || 0,
+      workersCount: r.workersCount || 0,
+      workHours: r.workHours || 0,
+      costPerUnit: r.id && costMap ? costMap.get(r.id) : undefined,
+      workOrderNumber: wo?.workOrderNumber,
+    };
+  });
 
 /**
  * Compute totals from rows.
@@ -77,10 +87,16 @@ const PAPER_DIMENSIONS: Record<string, { width: string; minHeight: string }> = {
 };
 
 function fmtNum(value: number, decimalPlaces: number): string {
-  return value.toLocaleString('ar-EG', {
+  return value.toLocaleString('en-US', {
     minimumFractionDigits: decimalPlaces,
     maximumFractionDigits: decimalPlaces,
   });
+}
+
+function shortProductName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length <= 2) return name;
+  return `${parts[0]} ${parts[1]}`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -95,6 +111,8 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
 
     const showWaste = ps.showWaste;
     const showEmployee = ps.showEmployee;
+    const showCosts = ps.showCosts && rows.some((r) => r.costPerUnit != null && r.costPerUnit > 0);
+    const showWO = ps.showWorkOrder && rows.some((r) => !!r.workOrderNumber);
 
     return (
       <div
@@ -165,10 +183,12 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
               <Th>خط الإنتاج</Th>
               <Th>المنتج</Th>
               {showEmployee && <Th>الموظف</Th>}
+              {showWO && <Th>أمر شغل</Th>}
               <Th align="center">الكمية المنتجة</Th>
               {showWaste && <Th align="center">الهالك</Th>}
               <Th align="center">عدد العمال</Th>
               <Th align="center">ساعات العمل</Th>
+              {showCosts && <Th align="center">تكلفة الوحدة</Th>}
             </tr>
           </thead>
           <tbody>
@@ -177,21 +197,28 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
                 <Td>{i + 1}</Td>
                 <Td>{row.date}</Td>
                 <Td>{row.lineName}</Td>
-                <Td>{row.productName}</Td>
+                <Td>{shortProductName(row.productName)}</Td>
                 {showEmployee && <Td>{row.employeeName}</Td>}
+                {showWO && <Td>{row.workOrderNumber || '—'}</Td>}
                 <Td align="center" bold color="#059669">{fmtNum(row.quantityProduced, dp)}</Td>
                 {showWaste && <Td align="center" bold>{fmtNum(row.quantityWaste, dp)}</Td>}
                 <Td align="center">{row.workersCount}</Td>
                 <Td align="center">{fmtNum(row.workHours, dp)}</Td>
+                {showCosts && <Td align="center" bold color={ps.primaryColor}>{row.costPerUnit != null && row.costPerUnit > 0 ? `${fmtNum(row.costPerUnit, 2)}` : '—'}</Td>}
               </tr>
             ))}
             {/* Totals Row */}
             <tr style={{ background: '#e2e8f0', fontWeight: 800 }}>
-              <Td colSpan={showEmployee ? 5 : 4}>الإجمالي</Td>
+              <Td colSpan={(showEmployee ? 5 : 4) + (showWO ? 1 : 0)}>الإجمالي</Td>
               <Td align="center" bold color="#059669">{fmtNum(t.totalProduced, dp)}</Td>
               {showWaste && <Td align="center" bold color="#f43f5e">{fmtNum(t.totalWaste, dp)}</Td>}
               <Td align="center">{fmtNum(t.totalWorkers, dp)}</Td>
               <Td align="center">{fmtNum(t.totalHours, dp)}</Td>
+              {showCosts && (() => {
+                const costsArr = rows.filter((r) => r.costPerUnit != null && r.costPerUnit > 0).map((r) => r.costPerUnit!);
+                const avg = costsArr.length > 0 ? costsArr.reduce((s, v) => s + v, 0) / costsArr.length : 0;
+                return <Td align="center" bold color={ps.primaryColor}>{avg > 0 ? fmtNum(avg, 2) : '—'}</Td>;
+              })()}
             </tr>
           </tbody>
         </table>
@@ -207,6 +234,16 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
 
         {/* ── Footer ── */}
         <div style={{ marginTop: ps.paperSize === 'thermal' ? '3mm' : '10mm', borderTop: '1px solid #e2e8f0', paddingTop: '3mm', textAlign: 'center' }}>
+          {ps.showQRCode && (
+            <div style={{ marginBottom: '3mm' }}>
+              <QRCodeSVG
+                value={`report-batch|${now}|count:${rows.length}|produced:${t.totalProduced}`}
+                size={ps.paperSize === 'thermal' ? 40 : 64}
+                level="L"
+              />
+              <p style={{ margin: '1mm 0 0', fontSize: '6pt', color: '#94a3b8' }}>رمز QR للتحقق من صحة التقرير</p>
+            </div>
+          )}
           <p style={{ margin: 0, fontSize: ps.paperSize === 'thermal' ? '6pt' : '8pt', color: '#94a3b8' }}>
             {ps.footerText} — {now}
           </p>
@@ -298,15 +335,19 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
             <DetailRow label="خط الإنتاج" value={report.lineName} even />
             <DetailRow label="المنتج" value={report.productName} />
             {ps.showEmployee && <DetailRow label="الموظف" value={report.employeeName} even />}
-            <DetailRow label="الكمية المنتجة" value={`${fmtNum(report.quantityProduced, dp)} وحدة`} highlight="#059669" />
+            {ps.showWorkOrder && report.workOrderNumber && <DetailRow label="أمر الشغل" value={report.workOrderNumber} />}
+            <DetailRow label="الكمية المنتجة" value={`${fmtNum(report.quantityProduced, dp)} وحدة`} highlight="#059669" even />
             {ps.showWaste && (
               <>
-                <DetailRow label="الهالك" value={`${fmtNum(report.quantityWaste, dp)} وحدة`} highlight="#f43f5e" even />
-                <DetailRow label="نسبة الهالك" value={`${wasteRatio}%`} />
+                <DetailRow label="الهالك" value={`${fmtNum(report.quantityWaste, dp)} وحدة`} highlight="#f43f5e" />
+                <DetailRow label="نسبة الهالك" value={`${wasteRatio}%`} even />
               </>
             )}
-            <DetailRow label="عدد العمال" value={String(report.workersCount)} even />
-            <DetailRow label="ساعات العمل" value={fmtNum(report.workHours, dp)} />
+            <DetailRow label="عدد العمال" value={String(report.workersCount)} />
+            <DetailRow label="ساعات العمل" value={fmtNum(report.workHours, dp)} even />
+            {ps.showCosts && report.costPerUnit != null && report.costPerUnit > 0 && (
+              <DetailRow label="تكلفة الوحدة" value={`${fmtNum(report.costPerUnit, 2)} ج.م`} highlight={ps.primaryColor} />
+            )}
           </tbody>
         </table>
 
@@ -321,6 +362,16 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
 
         {/* Footer */}
         <div style={{ marginTop: ps.paperSize === 'thermal' ? '3mm' : '10mm', borderTop: '1px solid #e2e8f0', paddingTop: '3mm', textAlign: 'center' }}>
+          {ps.showQRCode && (
+            <div style={{ marginBottom: '3mm' }}>
+              <QRCodeSVG
+                value={`report|${report.date}|${report.lineName}|${report.productName}|qty:${report.quantityProduced}`}
+                size={ps.paperSize === 'thermal' ? 40 : 64}
+                level="L"
+              />
+              <p style={{ margin: '1mm 0 0', fontSize: '6pt', color: '#94a3b8' }}>رمز QR للتحقق من صحة التقرير</p>
+            </div>
+          )}
           <p style={{ margin: 0, fontSize: ps.paperSize === 'thermal' ? '6pt' : '8pt', color: '#94a3b8' }}>
             {ps.footerText} — {now}
           </p>
@@ -331,6 +382,148 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
 );
 
 SingleReportPrint.displayName = 'SingleReportPrint';
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/*  WorkOrderPrint — Printable layout for a single work order                */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+export interface WorkOrderPrintData {
+  workOrderNumber: string;
+  productName: string;
+  lineName: string;
+  supervisorName: string;
+  quantity: number;
+  producedQuantity: number;
+  maxWorkers: number;
+  targetDate: string;
+  status: string;
+  statusLabel: string;
+  estimatedCost?: number;
+  actualCost?: number;
+  notes?: string;
+  showCosts?: boolean;
+}
+
+export interface WorkOrderPrintProps {
+  data: WorkOrderPrintData | null;
+  printSettings?: PrintTemplateSettings;
+}
+
+export const WorkOrderPrint = React.forwardRef<HTMLDivElement, WorkOrderPrintProps>(
+  ({ data, printSettings }, ref) => {
+    if (!data) return <div ref={ref} />;
+
+    const ps = { ...DEFAULT_PRINT_TEMPLATE, ...printSettings };
+    const dp = ps.decimalPlaces;
+    const now = new Date().toLocaleString('ar-EG');
+    const paper = PAPER_DIMENSIONS[ps.paperSize] || PAPER_DIMENSIONS.a4;
+    const progress = data.quantity > 0 ? Math.min((data.producedQuantity / data.quantity) * 100, 100) : 0;
+
+    return (
+      <div
+        ref={ref}
+        dir="rtl"
+        style={{
+          fontFamily: 'Calibri, Segoe UI, Tahoma, sans-serif',
+          width: paper.width,
+          minHeight: ps.paperSize === 'a4' ? '148mm' : paper.minHeight,
+          padding: ps.paperSize === 'thermal' ? '4mm 3mm' : '12mm 15mm',
+          background: '#fff',
+          color: '#1e293b',
+          fontSize: ps.paperSize === 'thermal' ? '8pt' : '11pt',
+          lineHeight: 1.6,
+          boxSizing: 'border-box',
+        }}
+      >
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: ps.paperSize === 'thermal' ? '3mm' : '8mm', borderBottom: `3px solid ${ps.primaryColor}`, paddingBottom: ps.paperSize === 'thermal' ? '2mm' : '6mm' }}>
+          {ps.logoUrl && (
+            <img src={ps.logoUrl} alt="logo" style={{ maxHeight: ps.paperSize === 'thermal' ? '12mm' : '20mm', marginBottom: '2mm', objectFit: 'contain' }} />
+          )}
+          <h1 style={{ margin: 0, fontSize: ps.paperSize === 'thermal' ? '12pt' : '20pt', fontWeight: 900, color: ps.primaryColor }}>
+            {ps.headerText}
+          </h1>
+          <p style={{ margin: '2mm 0 0', fontSize: ps.paperSize === 'thermal' ? '7pt' : '10pt', color: '#64748b', fontWeight: 600 }}>
+          أمر شغل رقم: {data.workOrderNumber}   
+                 </p>
+        </div>
+
+        {/* Title Row */}
+        <div style={{ marginBottom: ps.paperSize === 'thermal' ? '3mm' : '8mm', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+          </div>
+         
+        </div>
+
+        {/* Summary Cards */}
+        {/* <div style={{ display: 'flex', gap: ps.paperSize === 'thermal' ? '2mm' : '4mm', marginBottom: ps.paperSize === 'thermal' ? '3mm' : '6mm', flexWrap: 'wrap' }}>
+          <SummaryBox label="الكمية المطلوبة" value={fmtNum(data.quantity, dp)} unit="وحدة" color={ps.primaryColor} small={ps.paperSize === 'thermal'} />
+          <SummaryBox label="الكمية المنتجة" value={fmtNum(data.producedQuantity, dp)} unit="وحدة" color="#059669" small={ps.paperSize === 'thermal'} />
+          <SummaryBox label="نسبة الإنجاز" value={`${progress.toFixed(0)}%`} color={progress >= 100 ? '#059669' : progress >= 50 ? '#f59e0b' : '#f43f5e'} small={ps.paperSize === 'thermal'} />
+          <SummaryBox label="الحد الأقصى للعمالة" value={String(data.maxWorkers)} unit="عامل" color="#8b5cf6" small={ps.paperSize === 'thermal'} />
+        </div> */}
+
+        {/* Progress Bar */}
+        <div style={{ marginBottom: ps.paperSize === 'thermal' ? '3mm' : '8mm' }}>
+          <div style={{ width: '100%', height: ps.paperSize === 'thermal' ? '3mm' : '5mm', background: '#e2e8f0', borderRadius: '3mm', overflow: 'hidden' }}>
+            <div style={{ width: `${Math.min(progress, 100)}%`, height: '100%', background: progress >= 100 ? '#059669' : ps.primaryColor, borderRadius: '3mm', transition: 'width 0.3s' }} />
+          </div>
+        </div>
+
+        {/* Details Table */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: ps.paperSize === 'thermal' ? '7.5pt' : '10.5pt', marginBottom: ps.paperSize === 'thermal' ? '3mm' : '8mm' }}>
+          <tbody>
+            <DetailRow label="رقم أمر الشغل" value={data.workOrderNumber} />
+            <DetailRow label="المنتج" value={data.productName} even />
+            <DetailRow label="خط الإنتاج" value={data.lineName} />
+            <DetailRow label="المشرف" value={data.supervisorName} even />
+            <DetailRow label="الكمية المطلوبة" value={`${fmtNum(data.quantity, dp)} وحدة`} highlight={ps.primaryColor} />
+            <DetailRow label="الكمية المنتجة" value={`${fmtNum(data.producedQuantity, dp)} وحدة`} highlight="#059669" even />
+            <DetailRow label="نسبة الإنجاز" value={`${progress.toFixed(dp)}%`} highlight={progress >= 100 ? '#059669' : progress >= 50 ? '#f59e0b' : '#f43f5e'} />
+            <DetailRow label="الحد الأقصى للعمالة" value={`${data.maxWorkers} عامل`} even />
+            <DetailRow label="تاريخ التسليم المستهدف" value={data.targetDate} />
+            <DetailRow label="الحالة" value={data.statusLabel} even />
+            {data.showCosts && data.estimatedCost != null && (
+              <DetailRow label="التكلفة المقدرة" value={`${fmtNum(data.estimatedCost, 2)} ج.م`} highlight={ps.primaryColor} />
+            )}
+            {data.showCosts && data.actualCost != null && data.actualCost > 0 && (
+              <DetailRow label="التكلفة الفعلية" value={`${fmtNum(data.actualCost, 2)} ج.م`} highlight="#059669" even />
+            )}
+            {data.notes && <DetailRow label="ملاحظات" value={data.notes} />}
+          </tbody>
+        </table>
+
+        {/* Signature Section */}
+        {ps.paperSize !== 'thermal' && (
+          <div style={{ marginTop: '20mm', display: 'flex', justifyContent: 'space-between', gap: '20mm' }}>
+            <SignatureBlock label="مدير الإنتاج" />
+            <SignatureBlock label="المشرف" />
+            <SignatureBlock label="مراقب الجودة" />
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{ marginTop: ps.paperSize === 'thermal' ? '3mm' : '10mm', borderTop: '1px solid #e2e8f0', paddingTop: '3mm', textAlign: 'center' }}>
+          {ps.showQRCode && (
+            <div style={{ marginBottom: '3mm' }}>
+              <QRCodeSVG
+                value={`work-order|${data.workOrderNumber}|${data.productName}|qty:${data.quantity}|produced:${data.producedQuantity}`}
+                size={ps.paperSize === 'thermal' ? 40 : 64}
+                level="L"
+              />
+              <p style={{ margin: '1mm 0 0', fontSize: '6pt', color: '#94a3b8' }}>رمز QR للتحقق من صحة أمر الشغل</p>
+            </div>
+          )}
+          <p style={{ margin: 0, fontSize: ps.paperSize === 'thermal' ? '6pt' : '8pt', color: '#94a3b8' }}>
+            {ps.footerText} — {now}
+          </p>
+        </div>
+      </div>
+    );
+  }
+);
+
+WorkOrderPrint.displayName = 'WorkOrderPrint';
 
 /* ─── Helper sub-components (inline styled for print isolation) ───────── */
 

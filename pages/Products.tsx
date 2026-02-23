@@ -4,12 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, Badge } from '../components/UI';
 import { formatNumber } from '../utils/calculations';
-import { buildProductCosts, buildProductAvgCost, formatCost } from '../utils/costCalculations';
+import { buildProductCosts, buildProductAvgCost, formatCost, type ProductCostData } from '../utils/costCalculations';
 import { FirestoreProduct } from '../types';
 import { usePermission } from '../utils/permissions';
 import { parseProductsExcel, toProductData, ProductImportResult } from '../utils/importProducts';
 import { downloadProductsTemplate } from '../utils/downloadTemplates';
-import { exportAllProducts } from '../utils/exportExcel';
+import { exportAllProducts, PRODUCT_EXPORT_DEFAULTS } from '../utils/exportExcel';
+import type { ProductExportOptions } from '../utils/exportExcel';
 import { calculateProductCostBreakdown } from '../utils/productCostBreakdown';
 
 const emptyForm: Omit<FirestoreProduct, 'id'> = {
@@ -21,6 +22,7 @@ const emptyForm: Omit<FirestoreProduct, 'id'> = {
   innerBoxCost: 0,
   outerCartonCost: 0,
   unitsPerCarton: 0,
+  sellingPrice: 0,
 };
 
 export const Products: React.FC = () => {
@@ -39,6 +41,7 @@ export const Products: React.FC = () => {
 
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
+  const canCreateRawMaterial = can('products.createRawMaterial');
   const navigate = useNavigate();
 
   const [showModal, setShowModal] = useState(false);
@@ -46,6 +49,10 @@ export const Products: React.FC = () => {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // Export customization
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportOptions, setExportOptions] = useState<ProductExportOptions>({ ...PRODUCT_EXPORT_DEFAULTS });
 
   // Import from Excel
   const [showImportModal, setShowImportModal] = useState(false);
@@ -73,13 +80,12 @@ export const Products: React.FC = () => {
   }, [products, search, categoryFilter, stockFilter]);
 
   const productCosts = useMemo(() => {
-    if (!canViewCosts) return {};
+    if (!canViewCosts) return {} as Record<string, ProductCostData>;
     const hourlyRate = laborSettings?.hourlyRate ?? 0;
     const allReports = monthlyReports.length > 0 ? monthlyReports : todayReports;
-    const result: Record<string, { costPerUnit: number }> = {};
+    const result: Record<string, ProductCostData> = {};
     for (const p of products) {
-      const avg = buildProductAvgCost(p.id, allReports, hourlyRate, costCenters, costCenterValues, costAllocations);
-      result[p.id] = { costPerUnit: avg.costPerUnit };
+      result[p.id] = buildProductAvgCost(p.id, allReports, hourlyRate, costCenters, costCenterValues, costAllocations);
     }
     return result;
   }, [canViewCosts, products, monthlyReports, todayReports, laborSettings, costCenters, costCenterValues, costAllocations]);
@@ -104,12 +110,14 @@ export const Products: React.FC = () => {
       innerBoxCost: raw?.innerBoxCost ?? 0,
       outerCartonCost: raw?.outerCartonCost ?? 0,
       unitsPerCarton: raw?.unitsPerCarton ?? 0,
+      sellingPrice: raw?.sellingPrice ?? 0,
     });
     setShowModal(true);
   };
 
   const handleSave = async () => {
     if (!form.name || !form.code) return;
+    if (form.model === 'المواد الخام' && !canCreateRawMaterial) return;
     setSaving(true);
     if (editId) {
       await updateProduct(editId, form);
@@ -140,7 +148,7 @@ export const Products: React.FC = () => {
       const result = await parseProductsExcel(file, _rawProducts);
       setImportResult(result);
     } catch {
-      setImportResult({ rows: [], totalRows: 0, validCount: 0, errorCount: 0 });
+      setImportResult({ rows: [], totalRows: 0, validCount: 0, errorCount: 0, newCount: 0, updateCount: 0 });
     } finally {
       setImportParsing(false);
     }
@@ -157,7 +165,11 @@ export const Products: React.FC = () => {
     let done = 0;
     for (const row of validRows) {
       try {
-        await createProduct(toProductData(row));
+        if (row.action === 'update' && row.matchedId) {
+          await updateProduct(row.matchedId, toProductData(row));
+        } else {
+          await createProduct(toProductData(row));
+        }
       } catch { /* skip failed */ }
       done++;
       setImportProgress({ done, total: validRows.length });
@@ -168,13 +180,13 @@ export const Products: React.FC = () => {
     setImportResult(null);
   };
 
-  const handleExportProducts = () => {
+  const doExportProducts = (opts: ProductExportOptions) => {
     const data = products.map((p) => {
       const raw = _rawProducts.find((r) => r.id === p.id);
       const breakdown = raw ? calculateProductCostBreakdown(raw, [], productCosts[p.id]?.costPerUnit ?? 0) : null;
       return { product: p, raw: raw || { name: p.name, model: p.category, code: p.code, openingBalance: p.openingStock }, costBreakdown: breakdown };
     });
-    exportAllProducts(data, canViewCosts);
+    exportAllProducts(data, canViewCosts, opts);
   };
 
   return (
@@ -189,13 +201,17 @@ export const Products: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           {products.length > 0 && (
-            <Button variant="secondary" onClick={handleExportProducts} className="shrink-0">
+            <Button variant="secondary" onClick={() => { setExportOptions({ ...PRODUCT_EXPORT_DEFAULTS }); setShowExportModal(true); }} className="shrink-0">
               <span className="material-icons-round text-sm">download</span>
               <span className="hidden sm:inline">تصدير Excel</span>
             </Button>
           )}
           {can("products.create") && (
             <>
+            <Button variant="outline" onClick={downloadProductsTemplate} className="shrink-0">
+              <span className="material-icons-round text-sm">file_download</span>
+              <span className="hidden sm:inline">تحميل قالب</span>
+            </Button>
             <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="shrink-0">
               <span className="material-icons-round text-sm">upload_file</span>
               <span className="hidden sm:inline">رفع Excel</span>
@@ -257,22 +273,25 @@ export const Products: React.FC = () => {
           <table className="w-full text-right border-collapse">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
-                <th className="px-6 py-4 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em]">اسم المنتج</th>
-                <th className="px-6 py-4 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em]">الكود</th>
-                <th className="px-6 py-4 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] text-center">الرصيد الافتتاحي</th>
-                <th className="px-6 py-4 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] text-center">إجمالي الإنتاج</th>
-                <th className="px-6 py-4 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] text-center">إجمالي الهالك</th>
-                <th className="px-6 py-4 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] text-center">متوسط وقت التجميع</th>
+                <th className="px-5 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400">المنتج</th>
+                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الرصيد الافتتاحي</th>
+                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الإنتاج</th>
+                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الهالك</th>
+                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الرصيد الحالي</th>
                 {canViewCosts && (
-                  <th className="px-6 py-4 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] text-center">تكلفة الوحدة</th>
+                  <>
+                    <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">إجمالي التكلفة</th>
+                    <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">مباشر / غير مباشر</th>
+                    <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">تكلفة الوحدة</th>
+                  </>
                 )}
-                <th className="px-6 py-4 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] text-left">الإجراءات</th>
+                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center w-28">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={canViewCosts ? 8 : 7} className="px-6 py-16 text-center text-slate-400">
+                  <td colSpan={canViewCosts ? 9 : 6} className="px-6 py-16 text-center text-slate-400">
                     <span className="material-icons-round text-5xl mb-3 block opacity-30">inventory_2</span>
                     <p className="font-bold text-lg">لا توجد منتجات{search || categoryFilter || stockFilter ? ' مطابقة للبحث' : ' بعد'}</p>
                     <p className="text-sm mt-1">
@@ -285,57 +304,87 @@ export const Products: React.FC = () => {
               )}
               {filtered.map((product) => (
                 <tr key={product.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors group">
-                  <td className="px-6 py-5">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 overflow-hidden border border-slate-200/50 flex items-center justify-center">
-                        <span className="material-icons-round text-slate-300 text-2xl">inventory_2</span>
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/10 to-primary/5 dark:from-primary/20 dark:to-primary/10 flex items-center justify-center shrink-0 border border-primary/10">
+                        <span className="material-icons-round text-primary text-lg">inventory_2</span>
                       </div>
-                      <div>
-                        <span className="font-bold text-slate-700 dark:text-slate-200 hover:text-primary cursor-pointer transition-colors" onClick={() => navigate(`/products/${product.id}`)}>{product.name}</span>
-                        {product.category && (
-                          <p className="text-xs text-slate-400 mt-0.5">{product.category}</p>
-                        )}
+                      <div className="min-w-0">
+                        <span className="font-bold text-sm text-slate-700 dark:text-slate-200 hover:text-primary cursor-pointer transition-colors block truncate max-w-[280px]" onClick={() => navigate(`/products/${product.id}`)}>{product.name}</span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="font-mono text-[11px] text-slate-400">{product.code}</span>
+                          {product.category && (
+                            <Badge variant="neutral">{product.category}</Badge>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-5 text-slate-500 dark:text-slate-400 font-mono text-sm font-medium">{product.code}</td>
-                  <td className="px-6 py-5 text-center font-black text-slate-700 dark:text-slate-300">{formatNumber(product.openingStock)}</td>
-                  <td className="px-6 py-5 text-center">
-                    <span className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-sm font-black ring-1 ring-emerald-500/20">
+                  <td className="px-4 py-4 text-center font-bold text-slate-700 dark:text-slate-300 tabular-nums">{formatNumber(product.openingStock)}</td>
+                  <td className="px-4 py-4 text-center">
+                    <span className="inline-block px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-sm font-black tabular-nums">
                       {formatNumber(product.totalProduction)}
                     </span>
                   </td>
-                  <td className="px-6 py-5 text-center text-rose-500 font-bold">{formatNumber(product.wasteUnits)} <span className="text-[10px] font-normal opacity-70">وحدة</span></td>
-                  <td className="px-6 py-5 text-center">
-                    <div className="flex items-center justify-center gap-1.5 text-slate-500">
-                      <span className="material-icons-round text-sm text-slate-400">schedule</span>
-                      <span className="text-sm font-bold">{product.avgAssemblyTime} دقيقة</span>
-                    </div>
+                  <td className="px-4 py-4 text-center">
+                    {product.wasteUnits > 0 ? (
+                      <span className="text-sm font-bold text-rose-500 tabular-nums">{formatNumber(product.wasteUnits)}</span>
+                    ) : (
+                      <span className="text-sm text-slate-300">0</span>
+                    )}
                   </td>
-                  {canViewCosts && (
-                    <td className="px-6 py-5 text-center">
-                      {productCosts[product.id]?.costPerUnit > 0 ? (
-                        <span className="px-3 py-1.5 rounded-lg bg-primary/5 text-primary text-sm font-black ring-1 ring-primary/20">
-                          {formatCost(productCosts[product.id].costPerUnit)} ج.م
-                        </span>
-                      ) : (
-                        <span className="text-sm text-slate-300">—</span>
-                      )}
-                    </td>
-                  )}
-                  <td className="px-6 py-5 text-left">
-                    <div className="flex items-center gap-1 justify-end sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => navigate(`/products/${product.id}`)} className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all" title="عرض التفاصيل">
-                        <span className="material-icons-round text-lg">visibility</span>
+                  <td className="px-4 py-4 text-center">
+                    <span className={`text-sm font-black tabular-nums ${product.stockLevel > 100 ? 'text-slate-700 dark:text-slate-200' : product.stockLevel > 0 ? 'text-amber-600' : 'text-rose-500'}`}>
+                      {formatNumber(product.stockLevel)}
+                    </span>
+                  </td>
+                  {canViewCosts && (() => {
+                    const c = productCosts[product.id];
+                    const hasCost = c && c.totalCost > 0;
+                    return (
+                      <>
+                        <td className="px-4 py-4 text-center">
+                          {hasCost ? (
+                            <span className="text-sm font-black text-amber-700 dark:text-amber-400 tabular-nums">{formatCost(c.totalCost)} <span className="text-[10px] font-medium opacity-70">ج.م</span></span>
+                          ) : (
+                            <span className="text-sm text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          {hasCost ? (
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span className="text-xs tabular-nums text-blue-600 dark:text-blue-400 font-bold">{formatCost(c.laborCost)} <span className="text-[10px] font-normal opacity-70">مباشر</span></span>
+                              <span className="text-xs tabular-nums text-slate-500 font-bold">{formatCost(c.indirectCost)} <span className="text-[10px] font-normal opacity-70">غ.مباشر</span></span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          {hasCost ? (
+                            <span className="inline-block px-2.5 py-1 rounded-md bg-primary/5 text-primary text-sm font-black tabular-nums ring-1 ring-primary/10">
+                              {formatCost(c.costPerUnit)} <span className="text-[10px] font-medium opacity-70">ج.م</span>
+                            </span>
+                          ) : (
+                            <span className="text-sm text-slate-300">—</span>
+                          )}
+                        </td>
+                      </>
+                    );
+                  })()}
+                  <td className="px-4 py-4">
+                    <div className="flex items-center gap-0.5 justify-center sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => navigate(`/products/${product.id}`)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all" title="عرض التفاصيل">
+                        <span className="material-icons-round text-[18px]">visibility</span>
                       </button>
                       {can("products.edit") && (
-                        <button onClick={() => openEdit(product.id)} className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all">
-                          <span className="material-icons-round text-lg">edit</span>
+                        <button onClick={() => openEdit(product.id)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all" title="تعديل">
+                          <span className="material-icons-round text-[18px]">edit</span>
                         </button>
                       )}
                       {can("products.delete") && (
-                        <button onClick={() => setDeleteConfirmId(product.id)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-lg transition-all">
-                          <span className="material-icons-round text-lg">delete</span>
+                        <button onClick={() => setDeleteConfirmId(product.id)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-lg transition-all" title="حذف">
+                          <span className="material-icons-round text-[18px]">delete</span>
                         </button>
                       )}
                     </div>
@@ -345,7 +394,7 @@ export const Products: React.FC = () => {
             </tbody>
           </table>
         </div>
-        <div className="px-6 py-5 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <div className="px-5 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="text-sm text-slate-500 font-bold">
             إجمالي <span className="text-primary">{filtered.length}</span> منتج
           </div>
@@ -390,21 +439,40 @@ export const Products: React.FC = () => {
                     onChange={(e) => setForm({ ...form, model: e.target.value })}
                   >
                     <option value="">اختر الفئة</option>
-                    <option value="المواد الخام">المواد الخام</option>
+                    {canCreateRawMaterial && <option value="المواد الخام">المواد الخام</option>}
                     <option value="المنتجات النهائية">المنتجات النهائية</option>
                     <option value="نصف مصنع">نصف مصنع</option>
                   </select>
+                  {!canCreateRawMaterial && form.model === 'المواد الخام' && (
+                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                      <span className="material-icons-round text-sm">info</span>
+                      ليس لديك صلاحية إضافة مواد خام
+                    </p>
+                  )}
                 </div>
               </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">الرصيد الافتتاحي</label>
-                <input
-                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm focus:border-primary focus:ring-primary/20 p-3.5 outline-none font-medium transition-all"
-                  type="number"
-                  min={0}
-                  value={form.openingBalance}
-                  onChange={(e) => setForm({ ...form, openingBalance: Number(e.target.value) })}
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">الرصيد الافتتاحي</label>
+                  <input
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm focus:border-primary focus:ring-primary/20 p-3.5 outline-none font-medium transition-all"
+                    type="number"
+                    min={0}
+                    value={form.openingBalance}
+                    onChange={(e) => setForm({ ...form, openingBalance: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">سعر البيع (ج.م)</label>
+                  <input
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm focus:border-primary focus:ring-primary/20 p-3.5 outline-none font-medium transition-all"
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={form.sellingPrice ?? 0}
+                    onChange={(e) => setForm({ ...form, sellingPrice: Number(e.target.value) })}
+                  />
+                </div>
               </div>
 
               {/* ── Cost Breakdown Fields ── */}
@@ -459,7 +527,7 @@ export const Products: React.FC = () => {
             </div>
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
               <Button variant="outline" onClick={() => setShowModal(false)}>إلغاء</Button>
-              <Button variant="primary" onClick={handleSave} disabled={saving || !form.name || !form.code}>
+              <Button variant="primary" onClick={handleSave} disabled={saving || !form.name || !form.code || (form.model === 'المواد الخام' && !canCreateRawMaterial)}>
                 {saving ? (
                   <span className="material-icons-round animate-spin text-sm">refresh</span>
                 ) : (
@@ -538,9 +606,18 @@ export const Products: React.FC = () => {
                     <div className="bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-2 text-sm font-bold">
                       الإجمالي: <span className="text-primary">{importResult.totalRows}</span>
                     </div>
-                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl px-4 py-2 text-sm font-bold text-emerald-600">
-                      صالح: {importResult.validCount}
-                    </div>
+                    {importResult.newCount > 0 && (
+                      <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl px-4 py-2 text-sm font-bold text-emerald-600">
+                        <span className="material-icons-round text-xs align-middle ml-1">add_circle</span>
+                        جديد: {importResult.newCount}
+                      </div>
+                    )}
+                    {importResult.updateCount > 0 && (
+                      <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-2 text-sm font-bold text-amber-600">
+                        <span className="material-icons-round text-xs align-middle ml-1">sync</span>
+                        تحديث: {importResult.updateCount}
+                      </div>
+                    )}
                     {importResult.errorCount > 0 && (
                       <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl px-4 py-2 text-sm font-bold text-rose-500">
                         يحتوي أخطاء: {importResult.errorCount}
@@ -562,7 +639,8 @@ export const Products: React.FC = () => {
                           <th className="px-3 py-3 text-xs font-black text-slate-500">العلبة الداخلية</th>
                           <th className="px-3 py-3 text-xs font-black text-slate-500">الكرتونة</th>
                           <th className="px-3 py-3 text-xs font-black text-slate-500">وحدات/كرتونة</th>
-                          <th className="px-3 py-3 text-xs font-black text-slate-500">الأخطاء</th>
+                          <th className="px-3 py-3 text-xs font-black text-slate-500">سعر البيع</th>
+                          <th className="px-3 py-3 text-xs font-black text-slate-500">التفاصيل</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -570,13 +648,17 @@ export const Products: React.FC = () => {
                           <tr key={row.rowIndex} className={row.errors.length > 0 ? 'bg-rose-50/50 dark:bg-rose-900/10' : ''}>
                             <td className="px-3 py-2.5 text-slate-400 font-mono">{row.rowIndex}</td>
                             <td className="px-3 py-2.5">
-                              {row.errors.length === 0 ? (
-                                <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-bold">
-                                  <span className="material-icons-round text-sm">check_circle</span> صالح
-                                </span>
-                              ) : (
+                              {row.errors.length > 0 ? (
                                 <span className="inline-flex items-center gap-1 text-rose-500 text-xs font-bold">
                                   <span className="material-icons-round text-sm">error</span> خطأ
+                                </span>
+                              ) : row.action === 'update' ? (
+                                <span className="inline-flex items-center gap-1 text-amber-600 text-xs font-bold">
+                                  <span className="material-icons-round text-sm">sync</span> تحديث
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-bold">
+                                  <span className="material-icons-round text-sm">add_circle</span> جديد
                                 </span>
                               )}
                             </td>
@@ -588,12 +670,17 @@ export const Products: React.FC = () => {
                             <td className="px-3 py-2.5 text-slate-500 font-mono">{row.innerBoxCost || '—'}</td>
                             <td className="px-3 py-2.5 text-slate-500 font-mono">{row.outerCartonCost || '—'}</td>
                             <td className="px-3 py-2.5 text-slate-500 font-mono">{row.unitsPerCarton || '—'}</td>
+                            <td className="px-3 py-2.5 text-slate-500 font-mono">{row.sellingPrice || '—'}</td>
                             <td className="px-3 py-2.5">
-                              {row.errors.length > 0 && (
+                              {row.errors.length > 0 ? (
                                 <ul className="text-xs text-rose-500 space-y-0.5">
                                   {row.errors.map((err, i) => <li key={i}>• {err}</li>)}
                                 </ul>
-                              )}
+                              ) : row.changes && row.changes.length > 0 ? (
+                                <p className="text-xs text-amber-600">تحديث: {row.changes.join('، ')}</p>
+                              ) : row.action === 'update' ? (
+                                <p className="text-xs text-slate-400">لا توجد تغييرات</p>
+                              ) : null}
                             </td>
                           </tr>
                         ))}
@@ -616,11 +703,78 @@ export const Products: React.FC = () => {
                   ) : (
                     <>
                       <span className="material-icons-round text-sm">save</span>
-                      حفظ {importResult.validCount} منتج
+                      حفظ {importResult.newCount > 0 && importResult.updateCount > 0
+                        ? `${importResult.newCount} جديد + ${importResult.updateCount} تحديث`
+                        : importResult.updateCount > 0
+                          ? `تحديث ${importResult.updateCount} منتج`
+                          : `${importResult.newCount} منتج جديد`
+                      }
                     </>
                   )}
                 </Button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Export Customization Modal ── */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowExportModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-icons-round text-primary">tune</span>
+                <h3 className="text-lg font-bold">تخصيص التصدير</h3>
+              </div>
+              <button onClick={() => setShowExportModal(false)} className="text-slate-400 hover:text-slate-600">
+                <span className="material-icons-round">close</span>
+              </button>
+            </div>
+            <div className="p-6 space-y-3">
+              {[
+                { key: 'stock' as const, label: 'بيانات المخزون', desc: 'الرصيد الافتتاحي، الإنتاج، الهالك، الحالي', icon: 'inventory' },
+                { key: 'productCosts' as const, label: 'تكاليف المنتج', desc: 'تكلفة صينية، مواد خام، تغليف، كرتونة', icon: 'receipt_long' },
+                { key: 'manufacturingCosts' as const, label: 'تكاليف صناعية (م. وغ.م)', desc: 'نصيب المصاريف الصناعية من تقارير الإنتاج', icon: 'precision_manufacturing' },
+                { key: 'sellingPrice' as const, label: 'سعر البيع', desc: 'سعر بيع الوحدة', icon: 'sell' },
+                { key: 'profitMargin' as const, label: 'هامش الربح', desc: 'هامش الربح بالجنيه والنسبة المئوية', icon: 'trending_up' },
+              ].map((opt) => (
+                <label
+                  key={opt.key}
+                  className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                    exportOptions[opt.key]
+                      ? 'border-primary/30 bg-primary/5 dark:bg-primary/10'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={exportOptions[opt.key]}
+                    onChange={(e) => setExportOptions({ ...exportOptions, [opt.key]: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/20"
+                  />
+                  <span className={`material-icons-round text-lg ${exportOptions[opt.key] ? 'text-primary' : 'text-slate-400'}`}>{opt.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-700 dark:text-white">{opt.label}</p>
+                    <p className="text-[10px] text-slate-400">{opt.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <button
+                onClick={() => setExportOptions({ stock: false, productCosts: false, manufacturingCosts: false, sellingPrice: false, profitMargin: false })}
+                className="text-xs font-bold text-slate-400 hover:text-slate-600"
+              >
+                إلغاء تحديد الكل
+              </button>
+              <div className="flex items-center gap-3">
+                <Button variant="outline" onClick={() => setShowExportModal(false)}>إلغاء</Button>
+                <Button variant="primary" onClick={() => { doExportProducts(exportOptions); setShowExportModal(false); }}>
+                  <span className="material-icons-round text-sm">download</span>
+                  تصدير
+                </Button>
+              </div>
             </div>
           </div>
         </div>

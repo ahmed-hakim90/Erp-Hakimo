@@ -26,6 +26,7 @@ const BACKUP_VERSION = '2.0.0';
 const BACKUPS_COLLECTION = 'backups';
 
 const ALL_COLLECTIONS = [
+  // Core production
   'products',
   'production_lines',
   'employees',
@@ -33,10 +34,20 @@ const ALL_COLLECTIONS = [
   'line_status',
   'line_product_config',
   'production_plans',
+  // Work orders & notifications
+  'work_orders',
+  'notifications',
+  // Product cost & materials
+  'product_materials',
+  'monthly_production_costs',
+  // Line worker assignments
+  'line_worker_assignments',
+  // Cost management
   'cost_centers',
   'cost_center_values',
   'cost_allocations',
   'labor_settings',
+  // System
   'roles',
   'users',
   'system_settings',
@@ -54,6 +65,9 @@ const ALL_COLLECTIONS = [
   'leave_requests',
   'leave_balances',
   'employee_loans',
+  'employee_allowances',
+  'employee_deductions',
+  'vehicles',
   'approval_requests',
   'approval_settings',
   'approval_delegations',
@@ -73,6 +87,7 @@ const SETTINGS_COLLECTIONS = [
   'roles',
   'labor_settings',
   'line_product_config',
+  'product_materials',
   'hr_settings',
   'hr_config_modules',
   'penalty_rules',
@@ -272,8 +287,14 @@ export const backupService = {
       'production_reports',
       'line_status',
       'production_plans',
+      'work_orders',
+      'line_worker_assignments',
+      'monthly_production_costs',
       'cost_center_values',
       'cost_allocations',
+      'attendance_logs',
+      'attendance_raw_logs',
+      'leave_requests',
     ] as const;
 
     const collections: Record<string, Record<string, any>[]> = {};

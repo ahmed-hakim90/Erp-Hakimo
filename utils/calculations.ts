@@ -32,14 +32,14 @@ export const calculateWasteRatio = (waste: number, total: number): number => {
 // ─── Formatting ─────────────────────────────────────────────────────────────
 
 export const formatCurrency = (amount: number): string => {
-  return new Intl.NumberFormat('ar-EG', {
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'EGP',
   }).format(amount);
 };
 
 export const formatNumber = (num: number): string => {
-  return new Intl.NumberFormat('ar-EG').format(num);
+  return new Intl.NumberFormat('en-US').format(num);
 };
 
 export const getStatusColor = (status: string) => {

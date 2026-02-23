@@ -16,7 +16,7 @@ export interface PayslipData {
 
 /** Format a number as currency (Arabic locale) */
 function formatCurrency(amount: number): string {
-  return amount.toLocaleString('ar-EG', {
+  return amount.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });

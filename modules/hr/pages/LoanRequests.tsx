@@ -26,7 +26,7 @@ const LOAN_STATUS_VARIANT: Record<LoanStatus, 'warning' | 'success' | 'neutral'>
 };
 
 function formatCurrency(val: number): string {
-  return val.toLocaleString('ar-EG', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function getCurrentMonth(): string {

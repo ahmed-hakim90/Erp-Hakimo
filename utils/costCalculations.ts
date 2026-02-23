@@ -432,7 +432,7 @@ export const getDaysInMonth = (month: string): number => {
 };
 
 export const formatCost = (amount: number): string => {
-  return new Intl.NumberFormat('ar-EG', {
+  return new Intl.NumberFormat('en-US', {
     style: 'decimal',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,

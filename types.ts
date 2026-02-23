@@ -75,6 +75,7 @@ export interface FirestoreProduct {
   innerBoxCost?: number;
   outerCartonCost?: number;
   unitsPerCarton?: number;
+  sellingPrice?: number;
 }
 
 export interface ProductMaterial {
@@ -327,6 +328,9 @@ export interface PrintTemplateSettings {
   showWaste: boolean;
   showEmployee: boolean;
   showQRCode: boolean;
+  showCosts: boolean;
+  showWorkOrder: boolean;
+  showSellingPrice: boolean;
 }
 
 export interface PlanSettings {

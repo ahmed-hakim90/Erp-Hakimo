@@ -1,6 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useReactToPrint } from 'react-to-print';
 import { Card, Badge, Button, KPIBox } from '../components/UI';
+import { WorkOrderPrint } from '../components/ProductionReportPrint';
+import type { WorkOrderPrintData } from '../components/ProductionReportPrint';
 import { useAppStore, useShallowStore } from '../store/useAppStore';
 import { formatCurrency, formatNumber, getTodayDateString } from '../utils/calculations';
 import { usePermission } from '../utils/permissions';
@@ -60,6 +63,7 @@ export const WorkOrders: React.FC = () => {
   }));
 
   const uid = useAppStore((s) => s.uid);
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -67,7 +71,12 @@ export const WorkOrders: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [filterStatus, setFilterStatus] = useState<WorkOrderStatus | 'all'>('all');
   const [filterLine, setFilterLine] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const [printData, setPrintData] = useState<WorkOrderPrintData | null>(null);
+  const woPrintRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({ contentRef: woPrintRef });
 
   const [searchParams, setSearchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight');
@@ -88,12 +97,19 @@ export const WorkOrders: React.FC = () => {
     let list = [...workOrders];
     if (filterStatus !== 'all') list = list.filter((w) => w.status === filterStatus);
     if (filterLine) list = list.filter((w) => w.lineId === filterLine);
+    if (searchTerm.trim()) {
+      const q = searchTerm.trim().toLowerCase();
+      list = list.filter((w) =>
+        w.workOrderNumber.toLowerCase().includes(q) ||
+        (productName(w.productId)).toLowerCase().includes(q)
+      );
+    }
     list.sort((a, b) => {
       const statusOrder: Record<string, number> = { in_progress: 0, pending: 1, completed: 2, cancelled: 3 };
       return (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9);
     });
     return list;
-  }, [workOrders, filterStatus, filterLine]);
+  }, [workOrders, filterStatus, filterLine, searchTerm]);
 
   useEffect(() => {
     if (highlightId && highlightRef.current) {
@@ -190,6 +206,28 @@ export const WorkOrders: React.FC = () => {
     await updateWorkOrder(wo.id!, { status: newStatus, ...(newStatus === 'completed' ? { completedAt: new Date().toISOString() } : {}) });
   }, [updateWorkOrder]);
 
+  const triggerWOPrint = useCallback(async (wo: WorkOrder) => {
+    setPrintData({
+      workOrderNumber: wo.workOrderNumber,
+      productName: productName(wo.productId),
+      lineName: lineName(wo.lineId),
+      supervisorName: supervisorName(wo.supervisorId),
+      quantity: wo.quantity,
+      producedQuantity: wo.producedQuantity,
+      maxWorkers: wo.maxWorkers,
+      targetDate: wo.targetDate,
+      status: wo.status,
+      statusLabel: STATUS_CONFIG[wo.status].label,
+      estimatedCost: wo.estimatedCost,
+      actualCost: wo.actualCost,
+      notes: wo.notes,
+      showCosts: can('workOrders.viewCost'),
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    handlePrint();
+    setTimeout(() => setPrintData(null), 1000);
+  }, [productName, lineName, supervisorName, can, handlePrint]);
+
   const progress = (wo: WorkOrder) => wo.quantity > 0 ? Math.min((wo.producedQuantity / wo.quantity) * 100, 100) : 0;
 
   const costVariance = (wo: WorkOrder) => {
@@ -226,7 +264,17 @@ export const WorkOrders: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative">
+          <span className="material-icons-round absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">search</span>
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="بحث برقم أمر الشغل أو المنتج..."
+            className="pl-3 pr-9 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-bold w-64 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
+          />
+        </div>
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value as any)}
@@ -334,6 +382,11 @@ export const WorkOrders: React.FC = () => {
                       </td>
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-1">
+                          {can('print') && (
+                            <button onClick={() => triggerWOPrint(wo)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500" title="طباعة">
+                              <span className="material-icons-round text-sm">print</span>
+                            </button>
+                          )}
                           {can('workOrders.edit') && wo.status === 'pending' && (
                             <>
                               <button onClick={() => handleStatusChange(wo, 'in_progress')} className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-600" title="بدء التنفيذ">
@@ -505,6 +558,11 @@ export const WorkOrders: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Hidden print component */}
+      <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+        <WorkOrderPrint ref={woPrintRef} data={printData} printSettings={printTemplate} />
+      </div>
 
       {/* Delete Confirm Modal */}
       {deleteConfirm && (

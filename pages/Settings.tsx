@@ -38,7 +38,7 @@ import type {
 } from '../types';
 import type { ReportPrintRow } from '../components/ProductionReportPrint';
 
-type SettingsTab = 'general' | 'dashboardWidgets' | 'alertRules' | 'kpiThresholds' | 'printTemplate' | 'backup';
+type SettingsTab = 'general' | 'dashboardWidgets' | 'alertRules' | 'kpiThresholds' | 'printTemplate' | 'exportImport' | 'backup';
 
 const TABS: { key: SettingsTab; label: string; icon: string; adminOnly: boolean }[] = [
   { key: 'general', label: 'الإعدادات العامة', icon: 'settings', adminOnly: false },
@@ -46,6 +46,7 @@ const TABS: { key: SettingsTab; label: string; icon: string; adminOnly: boolean 
   { key: 'alertRules', label: 'قواعد التنبيهات', icon: 'notifications_active', adminOnly: true },
   { key: 'kpiThresholds', label: 'حدود المؤشرات', icon: 'tune', adminOnly: true },
   { key: 'printTemplate', label: 'إعدادات الطباعة', icon: 'print', adminOnly: true },
+  { key: 'exportImport', label: 'التصدير والاستيراد', icon: 'import_export', adminOnly: true },
   { key: 'backup', label: 'النسخ الاحتياطي', icon: 'backup', adminOnly: true },
 ];
 
@@ -1547,6 +1548,9 @@ export const Settings: React.FC = () => {
               {([
                 { key: 'showWaste' as const, label: 'عرض الهالك', icon: 'delete_sweep', desc: 'إظهار عمود ونسبة الهالك في التقرير' },
                 { key: 'showEmployee' as const, label: 'عرض الموظف', icon: 'person', desc: 'إظهار اسم الموظف في التقرير' },
+                { key: 'showCosts' as const, label: 'عرض التكاليف', icon: 'payments', desc: 'إظهار تكاليف المنتج والتكاليف الصناعية في الطباعة' },
+                { key: 'showWorkOrder' as const, label: 'عرض أمر الشغل', icon: 'assignment', desc: 'إظهار رقم أمر الشغل وبياناته في التقرير' },
+                { key: 'showSellingPrice' as const, label: 'عرض سعر البيع', icon: 'sell', desc: 'إظهار سعر البيع وهامش الربح في طباعة المنتج' },
                 { key: 'showQRCode' as const, label: 'عرض رمز QR', icon: 'qr_code', desc: 'إظهار رمز QR للتحقق من صحة التقرير' },
               ]).map((toggle) => (
                 <div
@@ -1626,6 +1630,124 @@ export const Settings: React.FC = () => {
       )}
 
       {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* ── TAB: Export & Import ─────────────────────────────────────────  */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'exportImport' && isAdmin && (
+        <>
+          <div>
+            <h3 className="text-lg font-bold">التصدير والاستيراد</h3>
+            <p className="text-sm text-slate-500">دليل شامل لجميع عمليات التصدير (Excel) والاستيراد المتاحة في النظام.</p>
+          </div>
+
+          {/* ─── Export Section ─── */}
+          <Card title="التصدير (Excel Export)">
+            <div className="space-y-3">
+              {[
+                { section: 'تقارير الإنتاج', page: 'صفحة التقارير', path: '/reports', icon: 'description', color: 'text-blue-500', features: ['تصدير التقارير بالتاريخ والخط والمنتج والموظف', 'تكلفة الوحدة (حسب الصلاحية)', 'بيانات أمر الشغل (الكمية والعمالة المخططة)', 'صف إجمالي بالمجاميع والمتوسطات'] },
+                { section: 'أوامر الشغل', page: 'صفحة التقارير / أوامر الشغل', path: '/work-orders', icon: 'assignment', color: 'text-amber-500', features: ['رقم الأمر، المنتج، الخط، المشرف', 'الكمية المطلوبة / المنتجة / المتبقية', 'عدد العمالة، التكلفة المقدرة والفعلية', 'الحالة والملاحظات'] },
+                { section: 'المنتجات (تخصيص)', page: 'صفحة المنتجات', path: '/products', icon: 'inventory_2', color: 'text-emerald-500', features: ['الكود والاسم والفئة', 'بيانات المخزون (افتتاحي / إنتاج / هالك / حالي)', 'تكاليف المنتج (صينية، مواد خام، تغليف)', 'تكاليف صناعية (م. وغ.م)', 'سعر البيع وهامش الربح', 'مودال تخصيص الأعمدة قبل التصدير'] },
+                { section: 'منتج واحد (تفصيلي)', page: 'صفحة تفاصيل المنتج', path: '/products', icon: 'receipt_long', color: 'text-teal-500', features: ['شيت بيانات المنتج الأساسية', 'شيت تفصيل التكاليف مع سعر البيع وهامش الربح', 'شيت المواد الخام المستخدمة', 'شيت التكلفة حسب خط الإنتاج'] },
+                { section: 'الموظفين', page: 'صفحة الموظفين', path: '/employees', icon: 'groups', color: 'text-purple-500', features: ['الكود والاسم والقسم والوظيفة', 'نوع التوظيف والمستوى والراتب', 'الوردية والبريد والحالة والصلاحيات'] },
+                { section: 'تقارير مشرف', page: 'صفحة تفاصيل المشرف', path: '/supervisors', icon: 'person', color: 'text-orange-500', features: ['تقارير الإنتاج الخاصة بالمشرف', 'تكلفة الوحدة (حسب الصلاحية)', 'صف إجمالي بالمجاميع'] },
+                { section: 'ملخص المنتجات', page: 'لوحة تحكم المصنع', path: '/factory-dashboard', icon: 'summarize', color: 'text-indigo-500', features: ['اسم المنتج والكود والكمية', 'متوسط تكلفة الوحدة (حسب الصلاحية)'] },
+                { section: 'بيانات الموارد البشرية', page: 'وحدة HR', path: '/hr', icon: 'badge', color: 'text-rose-500', features: ['كشوف المرتبات والحضور', 'الإجازات والقروض', 'تصدير عام لأي بيانات HR'] },
+              ].map((item) => (
+                <div key={item.section} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-all">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 mt-0.5">
+                      <span className={`material-icons-round ${item.color}`}>{item.icon}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="text-sm font-black text-slate-700 dark:text-white">{item.section}</h4>
+                        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">{item.page}</span>
+                      </div>
+                      <ul className="space-y-0.5">
+                        {item.features.map((f, i) => (
+                          <li key={i} className="text-xs text-slate-500 flex items-center gap-1.5">
+                            <span className="material-icons-round text-[10px] text-emerald-400">check</span>
+                            {f}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* ─── Import Section ─── */}
+          <Card title="الاستيراد (Excel Import)">
+            <div className="space-y-3">
+              {[
+                { section: 'استيراد تقارير الإنتاج', page: 'صفحة التقارير', path: '/reports', icon: 'upload_file', color: 'text-blue-500', features: ['رفع ملف Excel يحتوي على تقارير الإنتاج', 'مطابقة تلقائية للخط والمنتج والموظف (بالاسم أو الكود)', 'كشف التكرار مع التقارير الموجودة', 'معاينة البيانات قبل الحفظ مع عرض الأخطاء', 'تحميل نموذج Excel فارغ مع قوائم الاختيار'] },
+                { section: 'استيراد المنتجات', page: 'صفحة المنتجات', path: '/products', icon: 'inventory_2', color: 'text-emerald-500', features: ['رفع ملف Excel بأسماء وأكواد المنتجات', 'الرصيد الافتتاحي وتكاليف التعبئة والتغليف', 'سعر البيع', 'كشف التكرار بالاسم والكود', 'معاينة وتحقق قبل الحفظ'] },
+                { section: 'استيراد الموظفين', page: 'وحدة HR', path: '/hr/import', icon: 'person_add', color: 'text-purple-500', features: ['رفع بيانات الموظفين من Excel', 'مطابقة الأقسام والوظائف والورديات', 'بيانات الراتب ونوع التوظيف'] },
+              ].map((item) => (
+                <div key={item.section} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-all">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 mt-0.5">
+                      <span className={`material-icons-round ${item.color}`}>{item.icon}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="text-sm font-black text-slate-700 dark:text-white">{item.section}</h4>
+                        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">{item.page}</span>
+                      </div>
+                      <ul className="space-y-0.5">
+                        {item.features.map((f, i) => (
+                          <li key={i} className="text-xs text-slate-500 flex items-center gap-1.5">
+                            <span className="material-icons-round text-[10px] text-emerald-400">check</span>
+                            {f}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* ─── Templates Section ─── */}
+          <Card title="القوالب (Templates)">
+            <p className="text-sm text-slate-500 mb-4">يمكنك تحميل نماذج Excel فارغة مع أسماء الأعمدة الصحيحة وقوائم الاختيار لتسهيل عملية الاستيراد.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                { label: 'قالب تقارير الإنتاج', desc: 'يتضمن أسماء الخطوط والمنتجات والموظفين', icon: 'description', page: 'صفحة التقارير → تحميل قالب' },
+                { label: 'قالب المنتجات', desc: 'يتضمن أعمدة التكلفة وسعر البيع', icon: 'inventory_2', page: 'صفحة المنتجات → تحميل نموذج' },
+                { label: 'قالب الموظفين', desc: 'يتضمن الأقسام والوظائف والورديات', icon: 'person_add', page: 'HR → استيراد الموظفين' },
+              ].map((t) => (
+                <div key={t.label} className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="material-icons-round text-primary text-base">{t.icon}</span>
+                    <h4 className="text-sm font-bold text-slate-700 dark:text-white">{t.label}</h4>
+                  </div>
+                  <p className="text-xs text-slate-400 mb-2">{t.desc}</p>
+                  <p className="text-[10px] font-bold text-primary">{t.page}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* ─── Notes ─── */}
+          <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 flex items-start gap-3">
+            <span className="material-icons-round text-amber-500 mt-0.5">info</span>
+            <div className="text-sm text-amber-700 dark:text-amber-300">
+              <p className="font-bold mb-1">ملاحظات هامة</p>
+              <ul className="space-y-1 text-xs text-amber-600 dark:text-amber-400">
+                <li>• التكاليف تظهر في التصدير فقط للمستخدمين الذين لديهم صلاحية عرض التكاليف</li>
+                <li>• عمليات الاستيراد تعرض معاينة للبيانات قبل الحفظ مع إظهار الأخطاء والتحذيرات</li>
+                <li>• يتم كشف البيانات المكررة تلقائياً عند الاستيراد</li>
+                <li>• سعر البيع وهامش الربح متاحين في تصدير المنتجات وتصدير المنتج الواحد</li>
+              </ul>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════ */}
       {/* ── TAB: Backup & Restore ──────────────────────────────────────── */}
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'backup' && isAdmin && (
@@ -1677,7 +1799,7 @@ export const Settings: React.FC = () => {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-slate-700 dark:text-slate-300">نسخة احتياطية كاملة</p>
-                    <p className="text-xs text-slate-400">تصدير جميع البيانات — المنتجات، الخطوط، التقارير، الإعدادات، التكاليف، والمزيد</p>
+                    <p className="text-xs text-slate-400">تصدير جميع البيانات — المنتجات، الخطوط، التقارير، أوامر الشغل، الإشعارات، التكاليف، الخامات، تعيينات العمال، الموارد البشرية، المركبات، والإعدادات</p>
                   </div>
                 </div>
                 <Button onClick={handleExportFull} disabled={backupLoading}>
@@ -1695,7 +1817,7 @@ export const Settings: React.FC = () => {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-slate-700 dark:text-slate-300">نسخة شهرية</p>
-                    <p className="text-xs text-slate-400">تصدير تقارير الإنتاج وبيانات التكاليف لشهر محدد</p>
+                    <p className="text-xs text-slate-400">تصدير تقارير الإنتاج، أوامر الشغل، تعيينات العمال، تكاليف الإنتاج الشهرية، الحضور، والإجازات لشهر محدد</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -1721,7 +1843,7 @@ export const Settings: React.FC = () => {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-slate-700 dark:text-slate-300">الإعدادات فقط</p>
-                    <p className="text-xs text-slate-400">تصدير إعدادات النظام، الأدوار، وإعدادات العمالة فقط</p>
+                    <p className="text-xs text-slate-400">تصدير إعدادات النظام، الأدوار، إعدادات العمالة، خامات المنتجات، وإعدادات الموارد البشرية</p>
                   </div>
                 </div>
                 <Button onClick={handleExportSettings} disabled={backupLoading}>
@@ -1730,6 +1852,33 @@ export const Settings: React.FC = () => {
                   تصدير الإعدادات
                 </Button>
               </div>
+            </div>
+          </Card>
+
+          {/* ── Collections Summary ────────────────────────────────────────── */}
+          <Card title="المجموعات المشمولة في النسخة الكاملة">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {[
+                { title: 'الإنتاج', icon: 'factory', color: 'text-primary', items: ['المنتجات', 'خطوط الإنتاج', 'تقارير الإنتاج', 'خطط الإنتاج', 'حالة الخطوط', 'إعدادات خط المنتج'] },
+                { title: 'أوامر الشغل والإشعارات', icon: 'assignment', color: 'text-amber-600', items: ['أوامر الشغل', 'الإشعارات', 'تعيينات العمال على الخطوط'] },
+                { title: 'التكاليف والخامات', icon: 'payments', color: 'text-emerald-600', items: ['خامات المنتجات', 'تكاليف الإنتاج الشهرية', 'مراكز التكلفة', 'قيم مراكز التكلفة', 'توزيعات التكلفة', 'إعدادات العمالة'] },
+                { title: 'النظام', icon: 'settings', color: 'text-blue-600', items: ['إعدادات النظام', 'الأدوار والصلاحيات', 'المستخدمين', 'سجل النشاط'] },
+                { title: 'الموارد البشرية', icon: 'groups', color: 'text-violet-600', items: ['الموظفين', 'الأقسام', 'المسميات الوظيفية', 'الورديات', 'إعدادات HR', 'الحضور والانصراف', 'الإجازات', 'القروض', 'البدلات', 'الاستقطاعات', 'المركبات', 'قواعد الجزاءات', 'قواعد التأخير', 'أنواع البدلات'] },
+                { title: 'الرواتب والموافقات', icon: 'account_balance', color: 'text-rose-600', items: ['أشهر الرواتب', 'سجلات الرواتب', 'تدقيق الرواتب', 'ملخص تكلفة الرواتب', 'طلبات الموافقة', 'إعدادات الموافقة', 'التفويضات', 'تدقيق الموافقات'] },
+              ].map((group) => (
+                <div key={group.title} className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`material-icons-round text-sm ${group.color}`}>{group.icon}</span>
+                    <span className="text-xs font-black text-slate-700 dark:text-slate-300">{group.title}</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 mr-auto">{group.items.length}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {group.items.map((item) => (
+                      <span key={item} className="px-2 py-0.5 rounded text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border border-slate-100 dark:border-slate-700">{item}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </Card>
 

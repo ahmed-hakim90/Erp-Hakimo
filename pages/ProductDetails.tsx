@@ -26,7 +26,8 @@ import { ProductionReport, MonthlyProductionCost, ProductMaterial } from '../typ
 import { monthlyProductionCostService } from '../services/monthlyProductionCostService';
 import { productMaterialService } from '../services/productMaterialService';
 import { calculateProductCostBreakdown } from '../utils/productCostBreakdown';
-import { exportProductReports } from '../utils/exportExcel';
+import { exportProductReports, exportSingleProduct } from '../utils/exportExcel';
+import type { SingleProductExportData } from '../utils/exportExcel';
 import { exportToPDF, shareToWhatsApp } from '../utils/reportExport';
 import {
   ProductionReportPrint,
@@ -334,6 +335,35 @@ export const ProductDetails: React.FC = () => {
     finally { setExporting(false); }
   };
 
+  const handleExportProduct = () => {
+    if (!rawProduct) return;
+    const exportData: SingleProductExportData = {
+      raw: rawProduct,
+      stockLevel: currentBalance || product?.stockLevel || 0,
+      totalProduction: totalProduced || product?.totalProduction || 0,
+      totalWaste: totalWaste || product?.wasteUnits || 0,
+      wasteRatio: `${wasteRatio}%`,
+      avgDailyProduction,
+      costBreakdown: costBreakdown ?? null,
+      monthlyAvgCost: currentMonthCost?.averageUnitCost ?? null,
+      previousMonthAvgCost: previousMonthCost?.averageUnitCost ?? null,
+      materials: materials.map((m) => ({
+        name: m.materialName,
+        qty: m.quantityUsed,
+        unitCost: m.unitCost,
+        total: m.quantityUsed * m.unitCost,
+      })),
+      historicalAvgCost: historicalAvgCost?.costPerUnit ?? null,
+      costByLine: costByLine.map((l) => ({
+        lineName: l.lineName,
+        costPerUnit: l.costPerUnit,
+        totalCost: l.totalCost,
+        qty: l.totalProduced,
+      })),
+    };
+    exportSingleProduct(exportData, canViewCosts);
+  };
+
   if (!product && !rawProduct && !loading) {
     return (
       <div className="space-y-6">
@@ -395,10 +425,17 @@ export const ProductDetails: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {rawProduct && (
+            <Button variant="secondary" onClick={handleExportProduct}>
+              <span className="material-icons-round text-sm">download</span>
+              <span className="hidden sm:inline">تصدير المنتج</span>
+            </Button>
+          )}
           {reports.length > 0 && (
             <>
-              <Button variant="secondary" onClick={() => exportProductReports(productDisplayName, reports, lookups)}>
-                <span className="material-icons-round text-sm">download</span>Excel
+              <Button variant="outline" onClick={() => exportProductReports(productDisplayName, reports, lookups)}>
+                <span className="material-icons-round text-sm">table_chart</span>
+                <span className="hidden sm:inline">تقارير Excel</span>
               </Button>
               <Button variant="outline" disabled={exporting} onClick={() => handlePrint()}>
                 <span className="material-icons-round text-sm">print</span>طباعة
@@ -672,7 +709,7 @@ export const ProductDetails: React.FC = () => {
                   <p className="text-xl font-black text-indigo-600">{formatCost(currentMonthCost.averageUnitCost)}</p>
                   <span className="text-[10px] font-medium text-slate-400">ج.م / وحدة</span>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    {formatCost(currentMonthCost.totalProductionCost)} ج.م ÷ {currentMonthCost.totalProducedQty.toLocaleString('ar-EG')} وحدة
+                    {formatCost(currentMonthCost.totalProductionCost)} ج.م ÷ {currentMonthCost.totalProducedQty.toLocaleString('en-US')} وحدة
                   </p>
                 </>
               ) : (
@@ -688,7 +725,7 @@ export const ProductDetails: React.FC = () => {
                   <p className="text-xl font-black text-slate-700 dark:text-white">{formatCost(previousMonthCost.averageUnitCost)}</p>
                   <span className="text-[10px] font-medium text-slate-400">ج.م / وحدة</span>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    {formatCost(previousMonthCost.totalProductionCost)} ج.م ÷ {previousMonthCost.totalProducedQty.toLocaleString('ar-EG')} وحدة
+                    {formatCost(previousMonthCost.totalProductionCost)} ج.م ÷ {previousMonthCost.totalProducedQty.toLocaleString('en-US')} وحدة
                   </p>
                 </>
               ) : (
@@ -752,8 +789,17 @@ export const ProductDetails: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {/* ── تكاليف المنتج (مواد + تغليف) ── */}
+                <tr className="bg-teal-50/50 dark:bg-teal-900/10">
+                  <td colSpan={2} className="px-5 py-2 text-xs font-black text-teal-600 dark:text-teal-400 uppercase tracking-wider">
+                    <div className="flex items-center gap-1.5">
+                      <span className="material-icons-round text-sm">receipt_long</span>
+                      تكاليف المنتج (مواد + تغليف)
+                    </div>
+                  </td>
+                </tr>
                 <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                  <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">
+                  <td className="px-5 py-3 pr-10 text-sm font-bold text-slate-700 dark:text-slate-300">
                     <div className="flex items-center gap-2">
                       <span className="material-icons-round text-amber-500 text-base">local_shipping</span>
                       تكلفة الوحدة الصينية
@@ -762,7 +808,7 @@ export const ProductDetails: React.FC = () => {
                   <td className="px-5 py-3 text-center text-sm font-bold">{formatCost(costBreakdown?.chineseUnitCost ?? 0)} ج.م</td>
                 </tr>
                 <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                  <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">
+                  <td className="px-5 py-3 pr-10 text-sm font-bold text-slate-700 dark:text-slate-300">
                     <div className="flex items-center gap-2">
                       <span className="material-icons-round text-blue-500 text-base">category</span>
                       تكلفة المواد الخام
@@ -772,7 +818,7 @@ export const ProductDetails: React.FC = () => {
                   <td className="px-5 py-3 text-center text-sm font-bold">{formatCost(costBreakdown?.rawMaterialCost ?? 0)} ج.م</td>
                 </tr>
                 <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                  <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">
+                  <td className="px-5 py-3 pr-10 text-sm font-bold text-slate-700 dark:text-slate-300">
                     <div className="flex items-center gap-2">
                       <span className="material-icons-round text-orange-500 text-base">inventory_2</span>
                       تكلفة العلبة الداخلية
@@ -781,7 +827,7 @@ export const ProductDetails: React.FC = () => {
                   <td className="px-5 py-3 text-center text-sm font-bold">{formatCost(costBreakdown?.innerBoxCost ?? 0)} ج.م</td>
                 </tr>
                 <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                  <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">
+                  <td className="px-5 py-3 pr-10 text-sm font-bold text-slate-700 dark:text-slate-300">
                     <div className="flex items-center gap-2">
                       <span className="material-icons-round text-purple-500 text-base">package_2</span>
                       نصيب الكرتونة
@@ -794,11 +840,22 @@ export const ProductDetails: React.FC = () => {
                   </td>
                   <td className="px-5 py-3 text-center text-sm font-bold">{formatCost(costBreakdown?.cartonShare ?? 0)} ج.م</td>
                 </tr>
+
+                {/* ── تكاليف صناعية (م. وغ.م) ── */}
+                <tr className="bg-rose-50/50 dark:bg-rose-900/10">
+                  <td colSpan={2} className="px-5 py-2 text-xs font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider">
+                    <div className="flex items-center gap-1.5">
+                      <span className="material-icons-round text-sm">precision_manufacturing</span>
+                      تكاليف صناعية (مباشرة وغير مباشرة)
+                    </div>
+                  </td>
+                </tr>
                 <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                  <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">
+                  <td className="px-5 py-3 pr-10 text-sm font-bold text-slate-700 dark:text-slate-300">
                     <div className="flex items-center gap-2">
                       <span className="material-icons-round text-rose-500 text-base">precision_manufacturing</span>
                       نصيب المصاريف الصناعية
+                      <span className="text-[10px] text-slate-400 font-medium">(متوسط شهري)</span>
                     </div>
                   </td>
                   <td className="px-5 py-3 text-center text-sm font-bold">{formatCost(costBreakdown?.productionOverheadShare ?? 0)} ج.م</td>
@@ -818,6 +875,43 @@ export const ProductDetails: React.FC = () => {
                     </span>
                   </td>
                 </tr>
+                {(rawProduct?.sellingPrice ?? 0) > 0 && (
+                  <>
+                    <tr className="border-t border-slate-200 dark:border-slate-700">
+                      <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">
+                        <div className="flex items-center gap-2">
+                          <span className="material-icons-round text-green-500 text-base">sell</span>
+                          سعر البيع
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 text-center text-sm font-bold">{formatCost(rawProduct!.sellingPrice!)} ج.م</td>
+                    </tr>
+                    <tr className={`${(rawProduct!.sellingPrice! - (costBreakdown?.totalCalculatedCost ?? 0)) >= 0 ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : 'bg-rose-50/50 dark:bg-rose-900/10'}`}>
+                      <td className="px-5 py-3 text-sm font-black">
+                        <div className="flex items-center gap-2">
+                          <span className={`material-icons-round text-base ${(rawProduct!.sellingPrice! - (costBreakdown?.totalCalculatedCost ?? 0)) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {(rawProduct!.sellingPrice! - (costBreakdown?.totalCalculatedCost ?? 0)) >= 0 ? 'trending_up' : 'trending_down'}
+                          </span>
+                          هامش الربح
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 text-center">
+                        {(() => {
+                          const sp = rawProduct!.sellingPrice!;
+                          const tc = costBreakdown?.totalCalculatedCost ?? 0;
+                          const profit = sp - tc;
+                          const margin = sp > 0 ? (profit / sp) * 100 : 0;
+                          return (
+                            <span className={`text-sm font-black ${profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {formatCost(Math.abs(profit))} ج.م ({margin.toFixed(1)}%)
+                              {profit < 0 && ' خسارة'}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+                  </>
+                )}
               </tfoot>
             </table>
           </div>

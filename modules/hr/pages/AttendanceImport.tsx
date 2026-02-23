@@ -240,17 +240,17 @@ export const AttendanceImport: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-blue-500 text-3xl mb-2 block">description</span>
               <p className="text-xs text-slate-400 font-bold mb-1">إجمالي الصفوف</p>
-              <p className="text-2xl font-black">{parseResult.totalRows.toLocaleString('ar-EG')}</p>
+              <p className="text-2xl font-black">{parseResult.totalRows.toLocaleString('en-US')}</p>
             </div>
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">check_circle</span>
               <p className="text-xs text-slate-400 font-bold mb-1">صفوف صالحة</p>
-              <p className="text-2xl font-black text-emerald-600">{parseResult.validRows.toLocaleString('ar-EG')}</p>
+              <p className="text-2xl font-black text-emerald-600">{parseResult.validRows.toLocaleString('en-US')}</p>
             </div>
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-amber-500 text-3xl mb-2 block">warning</span>
               <p className="text-xs text-slate-400 font-bold mb-1">صفوف مُتخطاة</p>
-              <p className="text-2xl font-black text-amber-600">{parseResult.skippedRows.toLocaleString('ar-EG')}</p>
+              <p className="text-2xl font-black text-amber-600">{parseResult.skippedRows.toLocaleString('en-US')}</p>
             </div>
           </div>
 
@@ -297,7 +297,7 @@ export const AttendanceImport: React.FC = () => {
               </table>
               {parseResult.punches.length > 20 && (
                 <p className="text-xs text-slate-400 text-center py-3 font-medium">
-                  ... وعدد {(parseResult.punches.length - 20).toLocaleString('ar-EG')} صف إضافي
+                  ... وعدد {(parseResult.punches.length - 20).toLocaleString('en-US')} صف إضافي
                 </p>
               )}
             </div>
@@ -310,7 +310,7 @@ export const AttendanceImport: React.FC = () => {
             </Button>
             <Button variant="primary" onClick={handleProcess} disabled={parseResult.validRows === 0}>
               <span className="material-icons-round text-sm">play_arrow</span>
-              معالجة {parseResult.validRows.toLocaleString('ar-EG')} سجل
+              معالجة {parseResult.validRows.toLocaleString('en-US')} سجل
             </Button>
           </div>
         </>
@@ -432,7 +432,7 @@ export const AttendanceImport: React.FC = () => {
                 </table>
                 {batchResult.records.length > 30 && (
                   <p className="text-xs text-slate-400 text-center py-3 font-medium">
-                    ... وعدد {(batchResult.records.length - 30).toLocaleString('ar-EG')} سجل إضافي
+                    ... وعدد {(batchResult.records.length - 30).toLocaleString('en-US')} سجل إضافي
                   </p>
                 )}
               </div>

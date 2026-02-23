@@ -43,17 +43,17 @@ export const NotificationBell: React.FC = () => {
     subscribeToNotifications: s.subscribeToNotifications,
   }));
 
-  const isAuthenticated = useAppStore((s) => s.isAuthenticated);
+  const currentEmployeeId = useAppStore((s) => s.currentEmployee?.id);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!currentEmployeeId) return;
     fetchNotifications();
     const unsub = subscribeToNotifications();
     return unsub;
-  }, [isAuthenticated]);
+  }, [currentEmployeeId]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {

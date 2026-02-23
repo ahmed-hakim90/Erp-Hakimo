@@ -367,25 +367,25 @@ export const HRImport: React.FC = () => {
               <span className="material-icons-round text-blue-500 text-3xl mb-2 block">description</span>
               <p className="text-xs text-slate-400 font-bold mb-1">إجمالي الصفوف</p>
               <p className="text-2xl font-black">
-                {(result.departments.rows.length + result.positions.rows.length + result.employees.rows.length).toLocaleString('ar-EG')}
+                {(result.departments.rows.length + result.positions.rows.length + result.employees.rows.length).toLocaleString('en-US')}
               </p>
             </div>
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">add_circle</span>
               <p className="text-xs text-slate-400 font-bold mb-1">جديد</p>
-              <p className="text-2xl font-black text-emerald-600">{totalNew.toLocaleString('ar-EG')}</p>
+              <p className="text-2xl font-black text-emerald-600">{totalNew.toLocaleString('en-US')}</p>
             </div>
             {totalUpdates > 0 && (
               <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-amber-200 dark:border-amber-800 text-center">
                 <span className="material-icons-round text-amber-500 text-3xl mb-2 block">sync</span>
                 <p className="text-xs text-slate-400 font-bold mb-1">تحديث موظفين حاليين</p>
-                <p className="text-2xl font-black text-amber-600">{totalUpdates.toLocaleString('ar-EG')}</p>
+                <p className="text-2xl font-black text-amber-600">{totalUpdates.toLocaleString('en-US')}</p>
               </div>
             )}
             <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
               <span className="material-icons-round text-rose-500 text-3xl mb-2 block">error</span>
               <p className="text-xs text-slate-400 font-bold mb-1">بها أخطاء</p>
-              <p className="text-2xl font-black text-rose-600">{totalErrors.toLocaleString('ar-EG')}</p>
+              <p className="text-2xl font-black text-rose-600">{totalErrors.toLocaleString('en-US')}</p>
             </div>
           </div>
 
@@ -567,7 +567,7 @@ export const HRImport: React.FC = () => {
                             <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 text-xs">{row.positionTitle || '—'}</td>
                             <td className="py-2.5 px-3 text-xs">{row.providedFields.includes('level') ? (JOB_LEVEL_LABELS[row.level] ?? row.level) : '—'}</td>
                             <td className="py-2.5 px-3 text-xs">{row.providedFields.includes('employmentType') ? (EMPLOYMENT_TYPE_LABELS[row.employmentType] ?? row.employmentType) : '—'}</td>
-                            <td className="py-2.5 px-3 font-mono text-xs">{row.providedFields.includes('baseSalary') ? row.baseSalary.toLocaleString('ar-EG') : '—'}</td>
+                            <td className="py-2.5 px-3 font-mono text-xs">{row.providedFields.includes('baseSalary') ? row.baseSalary.toLocaleString('en-US') : '—'}</td>
                             <td className="py-2.5 px-3 text-xs">{row.providedFields.includes('email') ? row.email : '—'}</td>
                             <td className="py-2.5 px-3 text-xs">{row.providedFields.includes('isActive') ? (row.isActive ? 'نشط' : 'غير نشط') : '—'}</td>
                             <td className="py-2.5 px-3">
@@ -605,8 +605,8 @@ export const HRImport: React.FC = () => {
             <Button variant="primary" onClick={handleImport} disabled={totalValid === 0}>
               <span className="material-icons-round text-sm">upload</span>
               {totalUpdates > 0
-                ? `استيراد ${totalNew.toLocaleString('ar-EG')} جديد + تحديث ${totalUpdates.toLocaleString('ar-EG')}`
-                : `استيراد ${totalValid.toLocaleString('ar-EG')} سجل`
+                ? `استيراد ${totalNew.toLocaleString('en-US')} جديد + تحديث ${totalUpdates.toLocaleString('en-US')}`
+                : `استيراد ${totalValid.toLocaleString('en-US')} سجل`
               }
             </Button>
           </div>

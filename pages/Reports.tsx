@@ -179,8 +179,8 @@ export const Reports: React.FC = () => {
   // ── Bulk print data ────────────────────────────────────────────────────────
 
   const printRows = useMemo(
-    () => mapReportsToPrintRows(bulkPrintSource ?? displayedReports, lookups),
-    [bulkPrintSource, displayedReports, lookups]
+    () => mapReportsToPrintRows(bulkPrintSource ?? displayedReports, lookups, canViewCosts ? reportCosts : undefined),
+    [bulkPrintSource, displayedReports, lookups, canViewCosts, reportCosts]
   );
   const printTotals = useMemo(() => computePrintTotals(printRows), [printRows]);
 
@@ -190,17 +190,24 @@ export const Reports: React.FC = () => {
   const handleSinglePrint = useReactToPrint({ contentRef: singlePrintRef });
 
   const buildReportRow = useCallback(
-    (report: ProductionReport | typeof emptyForm): ReportPrintRow => ({
-      date: report.date,
-      lineName: getLineName(report.lineId),
-      productName: getProductName(report.productId),
-      employeeName: getEmployeeName(report.employeeId),
-      quantityProduced: report.quantityProduced || 0,
-      quantityWaste: report.quantityWaste || 0,
-      workersCount: report.workersCount || 0,
-      workHours: report.workHours || 0,
-    }),
-    [getLineName, getProductName, getEmployeeName]
+    (report: ProductionReport | typeof emptyForm): ReportPrintRow => {
+      const woId = (report as ProductionReport).workOrderId;
+      const wo = woId ? woMap.get(woId) : undefined;
+      const rid = (report as ProductionReport).id;
+      return {
+        date: report.date,
+        lineName: getLineName(report.lineId),
+        productName: getProductName(report.productId),
+        employeeName: getEmployeeName(report.employeeId),
+        quantityProduced: report.quantityProduced || 0,
+        quantityWaste: report.quantityWaste || 0,
+        workersCount: report.workersCount || 0,
+        workHours: report.workHours || 0,
+        costPerUnit: rid && canViewCosts ? reportCosts.get(rid) : undefined,
+        workOrderNumber: wo?.workOrderNumber,
+      };
+    },
+    [getLineName, getProductName, getEmployeeName, woMap, canViewCosts, reportCosts]
   );
 
   const triggerSinglePrint = useCallback(

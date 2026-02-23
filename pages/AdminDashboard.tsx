@@ -39,7 +39,7 @@ import {
 
 // ── Period filter types (local to this dashboard) ────────────────────────────
 
-type PeriodPreset = 'week' | 'month' | '3months' | 'custom';
+type PeriodPreset = 'today' | 'week' | 'month' | '3months' | 'custom';
 
 const getPresetRange = (preset: PeriodPreset): { start: string; end: string } => {
   const now = new Date();
@@ -52,6 +52,8 @@ const getPresetRange = (preset: PeriodPreset): { start: string; end: string } =>
   const end = fmt(now);
 
   switch (preset) {
+    case 'today':
+      return { start: end, end };
     case 'week': {
       const s = new Date(now);
       s.setDate(s.getDate() - 6);
@@ -75,6 +77,7 @@ const getPresetRange = (preset: PeriodPreset): { start: string; end: string } =>
 const PIE_COLORS = ['#1392ec', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
 
 const PRESET_LABELS: Record<PeriodPreset, string> = {
+  today: 'اليوم',
   week: 'هذا الأسبوع',
   month: 'هذا الشهر',
   '3months': 'آخر 3 أشهر',
@@ -362,6 +365,7 @@ export const AdminDashboard: React.FC = () => {
       planAchievementRate,
       totalLaborCost,
       totalIndirectCost,
+      totalCost,
     };
   }, [reports, hourlyRate, costCenters, costCenterValues, costAllocations, lineProductConfigs, productionPlans, planReports]);
 
@@ -793,7 +797,7 @@ export const AdminDashboard: React.FC = () => {
           <span className="material-icons-round text-base">precision_manufacturing</span>
           مؤشرات تشغيلية
         </h3>
-        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 ${canViewCosts ? 'xl:grid-cols-5' : 'xl:grid-cols-3'} gap-4`}>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 ${canViewCosts ? 'xl:grid-cols-6' : 'xl:grid-cols-3'} gap-4`}>
           <KPIBox
             label="إجمالي الإنتاج"
             value={formatNumber(kpis.totalProduction)}
@@ -801,6 +805,15 @@ export const AdminDashboard: React.FC = () => {
             unit="وحدة"
             colorClass="bg-primary/10 text-primary"
           />
+          {canViewCosts && (
+            <KPIBox
+              label={`إجمالي التكلفة (${PRESET_LABELS[preset]})`}
+              value={formatCost(kpis.totalCost)}
+              icon="account_balance_wallet"
+              unit="ج.م"
+              colorClass="bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400"
+            />
+          )}
           {canViewCosts && (
             <KPIBox
               label="تكلفة الوحدة"

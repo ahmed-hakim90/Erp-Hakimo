@@ -15,7 +15,7 @@ import { useAppStore } from '../store/useAppStore';
 
 export type Permission =
   | 'dashboard.view'
-  | 'products.view' | 'products.create' | 'products.edit' | 'products.delete'
+  | 'products.view' | 'products.create' | 'products.edit' | 'products.delete' | 'products.createRawMaterial'
   | 'lines.view' | 'lines.create' | 'lines.edit' | 'lines.delete'
   | 'employees.view' | 'employees.create' | 'employees.edit' | 'employees.delete'
   | 'supervisors.view'
@@ -29,7 +29,7 @@ export type Permission =
   | 'users.view' | 'users.create' | 'users.edit' | 'users.delete'
   | 'activityLog.view'
   | 'quickAction.view'
-  | 'costs.view' | 'costs.manage'
+  | 'costs.view' | 'costs.manage' | 'costs.closePeriod'
   | 'plans.view' | 'plans.create' | 'plans.edit'
   | 'workOrders.view' | 'workOrders.create' | 'workOrders.edit' | 'workOrders.delete' | 'workOrders.viewCost'
   | 'employeeDashboard.view'
@@ -73,6 +73,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     permissions: [
       { key: 'products.view', label: 'عرض' },
       { key: 'products.create', label: 'إنشاء' },
+      { key: 'products.createRawMaterial', label: 'إضافة مادة خام' },
       { key: 'products.edit', label: 'تعديل' },
       { key: 'products.delete', label: 'حذف' },
     ],
@@ -190,6 +191,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     permissions: [
       { key: 'costs.view', label: 'عرض التكاليف' },
       { key: 'costs.manage', label: 'إدارة التكاليف' },
+      { key: 'costs.closePeriod', label: 'إغلاق الفترة المحاسبية' },
     ],
   },
   {

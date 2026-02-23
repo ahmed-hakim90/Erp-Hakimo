@@ -105,7 +105,7 @@ export const CostCenters: React.FC = () => {
               <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 mb-4">
                 <p className="text-[11px] font-bold text-slate-400 mb-1">قيمة الشهر الحالي</p>
                 <p className="text-lg font-black text-slate-800 dark:text-white">
-                  {getCurrentMonthValue(cc.id!).toLocaleString('ar-EG')} ج.م
+                  {getCurrentMonthValue(cc.id!).toLocaleString('en-US')} ج.م
                 </p>
               </div>
 

@@ -246,35 +246,178 @@ interface ProductExportData {
 
 const fmtCost = (v: number) => v > 0 ? Number(v.toFixed(2)) : 0;
 
+export interface ProductExportOptions {
+  stock: boolean;
+  productCosts: boolean;
+  manufacturingCosts: boolean;
+  sellingPrice: boolean;
+  profitMargin: boolean;
+}
+
+export const PRODUCT_EXPORT_DEFAULTS: ProductExportOptions = {
+  stock: true,
+  productCosts: true,
+  manufacturingCosts: true,
+  sellingPrice: true,
+  profitMargin: true,
+};
+
 export const exportAllProducts = (
   data: ProductExportData[],
-  includeCosts: boolean
+  includeCosts: boolean,
+  options: ProductExportOptions = PRODUCT_EXPORT_DEFAULTS
 ) => {
   const rows = data.map((d) => {
     const base: Record<string, any> = {
       'الكود': d.raw.code,
       'اسم المنتج': d.raw.name,
       'الفئة': d.raw.model || '—',
-      'الرصيد الافتتاحي': d.product.openingStock,
-      'إجمالي الإنتاج': d.product.totalProduction,
-      'إجمالي الهالك': d.product.wasteUnits,
-      'الرصيد الحالي': d.product.stockLevel,
-      'حالة المخزون': d.product.stockStatus === 'available' ? 'متوفر' : d.product.stockStatus === 'low' ? 'منخفض' : 'نفذ',
     };
-    if (includeCosts && d.costBreakdown) {
+    if (options.stock) {
+      base['الرصيد الافتتاحي'] = d.product.openingStock;
+      base['إجمالي الإنتاج'] = d.product.totalProduction;
+      base['إجمالي الهالك'] = d.product.wasteUnits;
+      base['الرصيد الحالي'] = d.product.stockLevel;
+      base['حالة المخزون'] = d.product.stockStatus === 'available' ? 'متوفر' : d.product.stockStatus === 'low' ? 'منخفض' : 'نفذ';
+    }
+    if (includeCosts && d.costBreakdown && options.productCosts) {
       base['تكلفة الوحدة الصينية'] = fmtCost(d.costBreakdown.chineseUnitCost);
       base['تكلفة المواد الخام'] = fmtCost(d.costBreakdown.rawMaterialCost);
       base['تكلفة العلبة الداخلية'] = fmtCost(d.costBreakdown.innerBoxCost);
       base['تكلفة الكرتونة'] = fmtCost(d.costBreakdown.outerCartonCost);
       base['وحدات/كرتونة'] = d.costBreakdown.unitsPerCarton;
       base['نصيب الكرتونة'] = fmtCost(d.costBreakdown.cartonShare);
-      base['نصيب المصاريف الصناعية'] = fmtCost(d.costBreakdown.productionOverheadShare);
+    }
+    if (includeCosts && d.costBreakdown && options.manufacturingCosts) {
+      base['نصيب المصاريف الصناعية (م. وغ.م)'] = fmtCost(d.costBreakdown.productionOverheadShare);
+    }
+    if (includeCosts && d.costBreakdown && (options.productCosts || options.manufacturingCosts)) {
       base['إجمالي التكلفة المحسوبة'] = fmtCost(d.costBreakdown.totalCalculatedCost);
+    }
+    if (options.sellingPrice) {
+      base['سعر البيع'] = d.raw.sellingPrice ? fmtCost(d.raw.sellingPrice) : 0;
+    }
+    if (options.profitMargin && includeCosts && d.costBreakdown) {
+      const sp = d.raw.sellingPrice ?? 0;
+      const tc = d.costBreakdown.totalCalculatedCost;
+      const profit = sp - tc;
+      const margin = sp > 0 ? (profit / sp) * 100 : 0;
+      base['هامش الربح (ج.م)'] = sp > 0 ? fmtCost(profit) : '—';
+      base['نسبة هامش الربح %'] = sp > 0 ? `${margin.toFixed(1)}%` : '—';
     }
     return base;
   });
   const date = new Date().toISOString().slice(0, 10);
   downloadExcel(rows, 'المنتجات', `المنتجات-${date}`);
+};
+
+// ─── Single Product Export ────────────────────────────────────────────────────
+
+function buildSheet(rows: Record<string, any>[]) {
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const colWidths = Object.keys(rows[0] || {}).map((key) => {
+    const maxLen = Math.max(key.length, ...rows.map((r) => String(r[key] ?? '').length));
+    return { wch: Math.min(maxLen + 4, 35) };
+  });
+  ws['!cols'] = colWidths;
+  if (!ws['!views']) ws['!views'] = [];
+  (ws['!views'] as any[]).push({ rightToLeft: true });
+  return ws;
+}
+
+export interface SingleProductExportData {
+  raw: FirestoreProduct;
+  stockLevel: number;
+  totalProduction: number;
+  totalWaste: number;
+  wasteRatio: string;
+  avgDailyProduction: number;
+  costBreakdown: ProductCostBreakdown | null;
+  monthlyAvgCost: number | null;
+  previousMonthAvgCost: number | null;
+  materials: { name: string; qty: number; unitCost: number; total: number }[];
+  historicalAvgCost: number | null;
+  costByLine: { lineName: string; costPerUnit: number; totalCost: number; qty: number }[];
+}
+
+export const exportSingleProduct = (data: SingleProductExportData, includeCosts: boolean) => {
+  const wb = XLSX.utils.book_new();
+  const pName = data.raw.name;
+
+  // Sheet 1: Product Info
+  const infoRows: Record<string, any>[] = [{
+    'الكود': data.raw.code,
+    'اسم المنتج': data.raw.name,
+    'الفئة': data.raw.model || '—',
+    'الرصيد الافتتاحي': data.raw.openingBalance,
+    'إجمالي الإنتاج': data.totalProduction,
+    'إجمالي الهالك': data.totalWaste,
+    'نسبة الهالك': data.wasteRatio,
+    'الرصيد الحالي': data.stockLevel,
+    'متوسط الإنتاج اليومي': data.avgDailyProduction,
+    ...(data.raw.sellingPrice ? { 'سعر البيع': fmtCost(data.raw.sellingPrice) } : {}),
+  }];
+  XLSX.utils.book_append_sheet(wb, buildSheet(infoRows), 'بيانات المنتج');
+
+  // Sheet 2: Cost Breakdown (if allowed)
+  if (includeCosts && data.costBreakdown) {
+    const cb = data.costBreakdown;
+    const sp = data.raw.sellingPrice ?? 0;
+    const profit = sp > 0 ? sp - cb.totalCalculatedCost : 0;
+    const margin = sp > 0 ? (profit / sp) * 100 : 0;
+    const costRows: Record<string, any>[] = [
+      { 'عنصر التكلفة': 'تكلفة الوحدة الصينية', 'النوع': 'تكاليف المنتج', 'القيمة (ج.م)': fmtCost(cb.chineseUnitCost) },
+      { 'عنصر التكلفة': 'تكلفة المواد الخام', 'النوع': 'تكاليف المنتج', 'القيمة (ج.م)': fmtCost(cb.rawMaterialCost) },
+      { 'عنصر التكلفة': 'تكلفة العلبة الداخلية', 'النوع': 'تكاليف المنتج', 'القيمة (ج.م)': fmtCost(cb.innerBoxCost) },
+      { 'عنصر التكلفة': 'تكلفة الكرتونة الخارجية', 'النوع': 'تكاليف المنتج', 'القيمة (ج.م)': fmtCost(cb.outerCartonCost) },
+      { 'عنصر التكلفة': 'وحدات في الكرتونة', 'النوع': '—', 'القيمة (ج.م)': cb.unitsPerCarton },
+      { 'عنصر التكلفة': 'نصيب الكرتونة', 'النوع': 'تكاليف المنتج', 'القيمة (ج.م)': fmtCost(cb.cartonShare) },
+      { 'عنصر التكلفة': 'نصيب المصاريف الصناعية (م. وغ.م)', 'النوع': 'تكاليف صناعية', 'القيمة (ج.م)': fmtCost(cb.productionOverheadShare) },
+      { 'عنصر التكلفة': '═ إجمالي التكلفة المحسوبة', 'النوع': '', 'القيمة (ج.م)': fmtCost(cb.totalCalculatedCost) },
+    ];
+    if (sp > 0) {
+      costRows.push(
+        { 'عنصر التكلفة': 'سعر البيع', 'النوع': '', 'القيمة (ج.م)': fmtCost(sp) },
+        { 'عنصر التكلفة': 'هامش الربح', 'النوع': `${margin.toFixed(1)}%`, 'القيمة (ج.م)': fmtCost(profit) },
+      );
+    }
+    if (data.monthlyAvgCost != null && data.monthlyAvgCost > 0) {
+      costRows.push({ 'عنصر التكلفة': 'متوسط تكلفة الإنتاج الشهري', 'النوع': 'تقارير الإنتاج', 'القيمة (ج.م)': fmtCost(data.monthlyAvgCost) });
+    }
+    if (data.historicalAvgCost != null && data.historicalAvgCost > 0) {
+      costRows.push({ 'عنصر التكلفة': 'متوسط التكلفة التاريخي', 'النوع': 'تقارير الإنتاج', 'القيمة (ج.م)': fmtCost(data.historicalAvgCost) });
+    }
+    XLSX.utils.book_append_sheet(wb, buildSheet(costRows), 'تفصيل التكاليف');
+  }
+
+  // Sheet 3: Materials (if any)
+  if (includeCosts && data.materials.length > 0) {
+    const matRows = data.materials.map((m) => ({
+      'المادة': m.name,
+      'الكمية المستخدمة': m.qty,
+      'تكلفة الوحدة (ج.م)': fmtCost(m.unitCost),
+      'الإجمالي (ج.م)': fmtCost(m.total),
+    }));
+    const totalMat = data.materials.reduce((s, m) => s + m.total, 0);
+    matRows.push({ 'المادة': 'الإجمالي', 'الكمية المستخدمة': 0 as any, 'تكلفة الوحدة (ج.م)': '' as any, 'الإجمالي (ج.م)': fmtCost(totalMat) });
+    XLSX.utils.book_append_sheet(wb, buildSheet(matRows), 'المواد الخام');
+  }
+
+  // Sheet 4: Cost by Line (if any)
+  if (includeCosts && data.costByLine.length > 0) {
+    const lineRows = data.costByLine.map((l) => ({
+      'خط الإنتاج': l.lineName,
+      'الكمية المنتجة': l.qty,
+      'تكلفة الوحدة (ج.م)': fmtCost(l.costPerUnit),
+      'إجمالي التكلفة (ج.م)': fmtCost(l.totalCost),
+    }));
+    XLSX.utils.book_append_sheet(wb, buildSheet(lineRows), 'التكلفة حسب الخط');
+  }
+
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const date = new Date().toISOString().slice(0, 10);
+  saveAs(blob, `تفاصيل-${pName}-${date}.xlsx`);
 };
 
 // ─── Employees Export ────────────────────────────────────────────────────────

@@ -644,6 +644,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       lineProductConfigs: configs,
       todayReports,
       monthlyReports,
+      productionReports: monthlyReports,
       lineStatuses,
       productionPlans,
       planReports,
@@ -658,7 +659,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     applyTheme(mergedSettings.theme);
     setupAutoThemeListener(mergedSettings.theme);
 
-    const products = buildProducts(rawProducts, todayReports, configs);
+    const allReports = monthlyReports.length > 0 ? monthlyReports : todayReports;
+    const products = buildProducts(rawProducts, allReports, configs);
     const productionLines = buildProductionLines(
       rawLines, rawProducts, rawEmployees, todayReports, lineStatuses, configs,
       productionPlans, planReports
