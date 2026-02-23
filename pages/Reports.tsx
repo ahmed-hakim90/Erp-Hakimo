@@ -10,7 +10,7 @@ import { usePermission } from '../utils/permissions';
 import { exportReportsByDateRange } from '../utils/exportExcel';
 import { exportToPDF, shareToWhatsApp, ShareResult } from '../utils/reportExport';
 import { parseExcelFile, toReportData, ImportResult, ParsedReportRow } from '../utils/importExcel';
-import { downloadReportsTemplate } from '../utils/downloadTemplates';
+import { downloadReportsTemplate, ReportsTemplateLookups } from '../utils/downloadTemplates';
 import { lineAssignmentService } from '../services/lineAssignmentService';
 import {
   ProductionReportPrint,
@@ -66,6 +66,7 @@ export const Reports: React.FC = () => {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [shareToast, setShareToast] = useState<string | null>(null);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
 
   // Import from Excel state
   const [showImportModal, setShowImportModal] = useState(false);
@@ -82,6 +83,8 @@ export const Reports: React.FC = () => {
   // Bulk print ref
   const bulkPrintRef = useRef<HTMLDivElement>(null);
   const [bulkPrintSource, setBulkPrintSource] = useState<ProductionReport[] | null>(null);
+  const [bulkDeleteItems, setBulkDeleteItems] = useState<ProductionReport[] | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Line workers for auto-fill and viewing
   const [formLineWorkers, setFormLineWorkers] = useState<LineWorkerAssignment[]>([]);
@@ -92,6 +95,10 @@ export const Reports: React.FC = () => {
   const [startDate, setStartDate] = useState(getTodayDateString());
   const [endDate, setEndDate] = useState(getTodayDateString());
   const [viewMode, setViewMode] = useState<'today' | 'range'>('today');
+
+  // Line & supervisor filters
+  const [filterLineId, setFilterLineId] = useState('');
+  const [filterEmployeeId, setFilterEmployeeId] = useState('');
 
   // Employee-only filter: basic employees see only their own reports
   const myEmployeeId = useMemo(() => {
@@ -111,15 +118,28 @@ export const Reports: React.FC = () => {
   }, [showModal, form.lineId, form.date]);
 
   const allReports = viewMode === 'today' ? todayReports : productionReports;
-  const displayedReports = myEmployeeId
-    ? allReports.filter((r) => r.employeeId === myEmployeeId)
-    : allReports;
+  const displayedReports = useMemo(() => {
+    let list = myEmployeeId
+      ? allReports.filter((r) => r.employeeId === myEmployeeId)
+      : allReports;
+    if (filterLineId) list = list.filter((r) => r.lineId === filterLineId);
+    if (filterEmployeeId) list = list.filter((r) => r.employeeId === filterEmployeeId);
+    return list;
+  }, [allReports, myEmployeeId, filterLineId, filterEmployeeId]);
 
   const reportCosts = useMemo(() => {
     if (!canViewCosts) return new Map<string, number>();
     const hourlyRate = laborSettings?.hourlyRate ?? 0;
     return buildReportsCosts(displayedReports, hourlyRate, costCenters, costCenterValues, costAllocations);
   }, [canViewCosts, displayedReports, laborSettings, costCenters, costCenterValues, costAllocations]);
+
+  // ── Template lookups (for dynamic Excel template) ──────────────────────────
+
+  const templateLookups = useMemo<ReportsTemplateLookups>(() => ({
+    lines: _rawLines.map((l) => ({ name: l.name })),
+    products: _rawProducts.map((p) => ({ name: p.name, code: p.code })),
+    employees: employees.filter((e) => e.level === 2).map((e) => ({ name: e.name, code: e.code ?? '' })),
+  }), [_rawLines, _rawProducts, employees]);
 
   // ── Lookups ────────────────────────────────────────────────────────────────
 
@@ -221,7 +241,11 @@ export const Reports: React.FC = () => {
     setViewMode('today');
     setStartDate(getTodayDateString());
     setEndDate(getTodayDateString());
+    setFilterLineId('');
+    setFilterEmployeeId('');
   };
+
+  const activeFilterCount = (filterLineId ? 1 : 0) + (filterEmployeeId ? 1 : 0);
 
   const openCreate = () => {
     setEditId(null);
@@ -250,12 +274,16 @@ export const Reports: React.FC = () => {
 
     if (editId) {
       await updateReport(editId, form);
+      setSaving(false);
+      setShowModal(false);
+      setEditId(null);
     } else {
       await createReport(form);
+      setSaving(false);
+      setForm({ ...emptyForm, date: form.date, lineId: form.lineId });
+      setSaveToast('تم حفظ التقرير بنجاح');
+      setTimeout(() => setSaveToast(null), 3000);
     }
-    setSaving(false);
-    setShowModal(false);
-    setEditId(null);
   };
 
   const handleDelete = async (id: string) => {
@@ -315,10 +343,11 @@ export const Reports: React.FC = () => {
         products: _rawProducts,
         lines: _rawLines,
         employees: _rawEmployees,
+        existingReports: displayedReports,
       });
       setImportResult(result);
     } catch {
-      setImportResult({ rows: [], totalRows: 0, validCount: 0, errorCount: 0 });
+      setImportResult({ rows: [], totalRows: 0, validCount: 0, errorCount: 0, warningCount: 0, duplicateCount: 0 });
     } finally {
       setImportParsing(false);
     }
@@ -407,9 +436,20 @@ export const Reports: React.FC = () => {
     setTimeout(() => setBulkPrintSource(null), 1000);
   }, [handleBulkPrint]);
 
+  const handleBulkDeleteConfirmed = useCallback(async () => {
+    if (!bulkDeleteItems) return;
+    setBulkDeleting(true);
+    for (const item of bulkDeleteItems) {
+      try { await deleteReport(item.id!); } catch { /* skip */ }
+    }
+    setBulkDeleting(false);
+    setBulkDeleteItems(null);
+  }, [bulkDeleteItems, deleteReport]);
+
   const reportBulkActions = useMemo<TableBulkAction<ProductionReport>[]>(() => [
     { label: 'طباعة المحدد', icon: 'print', action: handleBulkPrintSelected, permission: 'print' },
     { label: 'تصدير المحدد', icon: 'download', action: (items) => exportReportsByDateRange(items, startDate, endDate, lookups), permission: 'export' },
+    { label: 'حذف المحدد', icon: 'delete', action: (items) => setBulkDeleteItems(items), permission: 'reports.delete', variant: 'danger' },
   ], [handleBulkPrintSelected, startDate, endDate, lookups]);
 
   const renderReportActions = (report: ProductionReport) => (
@@ -498,6 +538,10 @@ export const Reports: React.FC = () => {
           )}
           {can("reports.create") && (
             <>
+              <Button variant="outline" onClick={() => downloadReportsTemplate(templateLookups)}>
+                <span className="material-icons-round text-sm">file_download</span>
+                <span className="hidden sm:inline">تحميل قالب</span>
+              </Button>
               <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
                 <span className="material-icons-round text-sm">upload_file</span>
                 <span className="hidden sm:inline">رفع Excel</span>
@@ -530,44 +574,89 @@ export const Reports: React.FC = () => {
         </div>
       )}
 
-      {/* Date Filter Bar */}
-      <div className="bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap gap-3 sm:gap-4 items-center shadow-sm">
-        <Button
-          variant={viewMode === 'today' ? 'primary' : 'outline'}
-          onClick={handleShowToday}
-          className="text-xs py-2"
-        >
-          <span className="material-icons-round text-sm">today</span>
-          اليوم
-        </Button>
-        <div className="hidden sm:block h-8 w-[1px] bg-slate-200 dark:bg-slate-700"></div>
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-bold text-slate-500">من:</label>
-            <input
-              type="date"
-              className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 w-[130px] sm:w-auto"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-bold text-slate-500">إلى:</label>
-            <input
-              type="date"
-              className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 w-[130px] sm:w-auto"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
-          </div>
-          <Button variant="outline" onClick={handleFetchRange} className="text-xs py-2">
-            {reportsLoading ? (
-              <span className="material-icons-round animate-spin text-sm">refresh</span>
-            ) : (
-              <span className="material-icons-round text-sm">search</span>
-            )}
-            عرض
+      {/* Filter Bar */}
+      <div className="bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-sm">
+        {/* Row 1: Date filters */}
+        <div className="flex flex-wrap gap-3 sm:gap-4 items-center">
+          <Button
+            variant={viewMode === 'today' ? 'primary' : 'outline'}
+            onClick={handleShowToday}
+            className="text-xs py-2"
+          >
+            <span className="material-icons-round text-sm">today</span>
+            اليوم
           </Button>
+          <div className="hidden sm:block h-8 w-[1px] bg-slate-200 dark:bg-slate-700"></div>
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-bold text-slate-500">من:</label>
+              <input
+                type="date"
+                className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 w-[130px] sm:w-auto"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-bold text-slate-500">إلى:</label>
+              <input
+                type="date"
+                className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 w-[130px] sm:w-auto"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+            <Button variant="outline" onClick={handleFetchRange} className="text-xs py-2">
+              {reportsLoading ? (
+                <span className="material-icons-round animate-spin text-sm">refresh</span>
+              ) : (
+                <span className="material-icons-round text-sm">search</span>
+              )}
+              عرض
+            </Button>
+          </div>
+        </div>
+
+        {/* Row 2: Line & Supervisor filters */}
+        <div className="flex flex-wrap gap-3 items-center border-t border-slate-100 dark:border-slate-800 pt-3">
+          <span className="material-icons-round text-slate-400 text-lg">filter_list</span>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-bold text-slate-500 whitespace-nowrap">الخط:</label>
+            <select
+              className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 min-w-[140px]"
+              value={filterLineId}
+              onChange={(e) => setFilterLineId(e.target.value)}
+            >
+              <option value="">الكل</option>
+              {_rawLines.map((l) => (
+                <option key={l.id} value={l.id!}>{l.name}</option>
+              ))}
+            </select>
+          </div>
+          {!myEmployeeId && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-bold text-slate-500 whitespace-nowrap">المشرف:</label>
+              <select
+                className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 min-w-[160px]"
+                value={filterEmployeeId}
+                onChange={(e) => setFilterEmployeeId(e.target.value)}
+              >
+                <option value="">الكل</option>
+                {employees.filter((e) => e.level === 2).map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {activeFilterCount > 0 && (
+            <button
+              onClick={() => { setFilterLineId(''); setFilterEmployeeId(''); }}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-lg transition-all"
+            >
+              <span className="material-icons-round text-sm">close</span>
+              مسح الفلاتر ({activeFilterCount})
+            </button>
+          )}
         </div>
       </div>
 
@@ -599,15 +688,24 @@ export const Reports: React.FC = () => {
 
       {/* ══ Create / Edit Report Modal ══ */}
       {showModal && (can("reports.create") || can("reports.edit")) && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowModal(false); setEditId(null); }}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowModal(false); setEditId(null); setSaveToast(null); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <h3 className="text-lg font-bold">{editId ? 'تعديل تقرير إنتاج' : 'إنشاء تقرير إنتاج'}</h3>
-              <button onClick={() => { setShowModal(false); setEditId(null); }} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button onClick={() => { setShowModal(false); setEditId(null); setSaveToast(null); }} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
             <div className="p-4 sm:p-6 space-y-5">
+              {saveToast && (
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 flex items-center gap-2 animate-in fade-in duration-300">
+                  <span className="material-icons-round text-emerald-500 text-lg">check_circle</span>
+                  <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300 flex-1">{saveToast}</p>
+                  <button onClick={() => setSaveToast(null)} className="text-emerald-400 hover:text-emerald-600 transition-colors">
+                    <span className="material-icons-round text-sm">close</span>
+                  </button>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">التاريخ *</label>
@@ -769,7 +867,7 @@ export const Reports: React.FC = () => {
               );
             })()}
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
-              <Button variant="outline" onClick={() => { setShowModal(false); setEditId(null); }}>إلغاء</Button>
+              <Button variant="outline" onClick={() => { setShowModal(false); setEditId(null); setSaveToast(null); }}>إلغاء</Button>
               <Button
                 variant="primary"
                 onClick={handleSave}
@@ -807,6 +905,40 @@ export const Reports: React.FC = () => {
         </div>
       )}
 
+      {/* ══ Bulk Delete Confirmation ══ */}
+      {bulkDeleteItems && can("reports.delete") && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { if (!bulkDeleting) setBulkDeleteItems(null); }}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-800 p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="material-icons-round text-rose-500 text-3xl">delete_sweep</span>
+            </div>
+            <h3 className="text-lg font-bold mb-2">حذف {bulkDeleteItems.length} تقرير</h3>
+            <p className="text-sm text-slate-500 mb-6">هل أنت متأكد من حذف التقارير المحددة؟ لا يمكن التراجع عن هذا الإجراء.</p>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => setBulkDeleteItems(null)}
+                disabled={bulkDeleting}
+                className="px-4 py-2.5 rounded-lg font-bold text-sm bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all disabled:opacity-50"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={handleBulkDeleteConfirmed}
+                disabled={bulkDeleting}
+                className="px-4 py-2.5 rounded-lg font-bold text-sm bg-rose-500 text-white hover:bg-rose-600 shadow-lg shadow-rose-500/20 transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                {bulkDeleting ? (
+                  <span className="material-icons-round animate-spin text-sm">refresh</span>
+                ) : (
+                  <span className="material-icons-round text-sm">delete</span>
+                )}
+                {bulkDeleting ? 'جاري الحذف...' : `حذف ${bulkDeleteItems.length} تقرير`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ══ Import from Excel Modal ══ */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { if (!importSaving) { setShowImportModal(false); setImportResult(null); } }}>
@@ -820,7 +952,7 @@ export const Reports: React.FC = () => {
                 <div>
                   <div className="flex items-center gap-3">
                     <h3 className="text-lg font-bold">استيراد تقارير من Excel</h3>
-                    <button onClick={downloadReportsTemplate} className="text-primary hover:text-primary/80 text-xs font-bold flex items-center gap-1 underline">
+                    <button onClick={() => downloadReportsTemplate(templateLookups)} className="text-primary hover:text-primary/80 text-xs font-bold flex items-center gap-1 underline">
                       <span className="material-icons-round text-sm">download</span>
                       تحميل نموذج
                     </button>
@@ -853,7 +985,7 @@ export const Reports: React.FC = () => {
                   <span className="material-icons-round text-5xl text-slate-300 block mb-3">warning</span>
                   <p className="font-bold text-slate-600 dark:text-slate-400">لا توجد بيانات في الملف</p>
                   <p className="text-sm text-slate-400 mt-1">تأكد أن الملف يحتوي على أعمدة: التاريخ، خط الإنتاج، المنتج، المشرف، الكمية المنتجة، الهالك، عدد العمال، ساعات العمل</p>
-                  <button onClick={downloadReportsTemplate} className="text-primary hover:text-primary/80 text-sm font-bold flex items-center gap-1 underline mt-3 mx-auto">
+                  <button onClick={() => downloadReportsTemplate(templateLookups)} className="text-primary hover:text-primary/80 text-sm font-bold flex items-center gap-1 underline mt-3 mx-auto">
                     <span className="material-icons-round text-sm">download</span>
                     تحميل نموذج التقارير
                   </button>
@@ -873,7 +1005,19 @@ export const Reports: React.FC = () => {
                     {importResult.errorCount > 0 && (
                       <div className="flex items-center gap-2 px-3 py-2 bg-rose-50 dark:bg-rose-900/20 rounded-lg text-sm font-bold text-rose-500">
                         <span className="material-icons-round text-sm">error</span>
-                        {importResult.errorCount} يحتاج تعديل
+                        {importResult.errorCount} خطأ
+                      </div>
+                    )}
+                    {importResult.warningCount > 0 && (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-sm font-bold text-amber-600 dark:text-amber-400">
+                        <span className="material-icons-round text-sm">warning</span>
+                        {importResult.warningCount} تحذير
+                      </div>
+                    )}
+                    {importResult.duplicateCount > 0 && (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-sm font-bold text-orange-600 dark:text-orange-400">
+                        <span className="material-icons-round text-sm">content_copy</span>
+                        {importResult.duplicateCount} مكرر
                       </div>
                     )}
                   </div>
@@ -888,7 +1032,8 @@ export const Reports: React.FC = () => {
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500">التاريخ</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500">خط الإنتاج</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500">المنتج</th>
-                          <th className="px-3 py-2.5 text-xs font-black text-slate-500">الموظف</th>
+                          <th className="px-3 py-2.5 text-xs font-black text-slate-500">المشرف</th>
+                          <th className="px-3 py-2.5 text-xs font-black text-slate-500">الكود</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500 text-center">الكمية</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500 text-center">الهالك</th>
                           <th className="px-3 py-2.5 text-xs font-black text-slate-500 text-center">عمال</th>
@@ -898,20 +1043,35 @@ export const Reports: React.FC = () => {
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                         {importResult.rows.map((row) => {
                           const isValid = row.errors.length === 0;
+                          const hasWarnings = row.warnings.length > 0;
+                          const rowBg = !isValid
+                            ? 'bg-rose-50/50 dark:bg-rose-900/5'
+                            : row.isDuplicate
+                              ? 'bg-orange-50/50 dark:bg-orange-900/5'
+                              : hasWarnings
+                                ? 'bg-amber-50/30 dark:bg-amber-900/5'
+                                : '';
                           return (
-                            <tr key={row.rowIndex} className={isValid ? '' : 'bg-rose-50/50 dark:bg-rose-900/5'}>
+                            <tr key={row.rowIndex} className={rowBg}>
                               <td className="px-3 py-2 text-slate-400 font-mono text-xs">{row.rowIndex}</td>
                               <td className="px-3 py-2">
-                                {isValid ? (
-                                  <span className="material-icons-round text-emerald-500 text-sm">check_circle</span>
-                                ) : (
-                                  <span className="material-icons-round text-rose-500 text-sm" title={row.errors.join('\n')}>error</span>
-                                )}
+                                <div className="flex items-center gap-1">
+                                  {!isValid ? (
+                                    <span className="material-icons-round text-rose-500 text-sm" title={row.errors.join('\n')}>error</span>
+                                  ) : row.isDuplicate ? (
+                                    <span className="material-icons-round text-orange-500 text-sm" title="تقرير مكرر">content_copy</span>
+                                  ) : hasWarnings ? (
+                                    <span className="material-icons-round text-amber-500 text-sm" title={row.warnings.join('\n')}>warning</span>
+                                  ) : (
+                                    <span className="material-icons-round text-emerald-500 text-sm">check_circle</span>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-3 py-2 font-medium">{row.date}</td>
                               <td className={`px-3 py-2 ${row.lineId ? '' : 'text-rose-500'}`}>{row.lineName || '—'}</td>
                               <td className={`px-3 py-2 ${row.productId ? '' : 'text-rose-500'}`}>{row.productName || '—'}</td>
                               <td className={`px-3 py-2 ${row.employeeId ? '' : 'text-rose-500'}`}>{row.employeeName || '—'}</td>
+                              <td className="px-3 py-2 text-slate-400 font-mono text-xs">{row.employeeCode || '—'}</td>
                               <td className="px-3 py-2 text-center font-bold">{row.quantityProduced}</td>
                               <td className="px-3 py-2 text-center text-rose-500">{row.quantityWaste}</td>
                               <td className="px-3 py-2 text-center">{row.workersCount}</td>
@@ -927,13 +1087,30 @@ export const Reports: React.FC = () => {
                   {importResult.errorCount > 0 && (
                     <div className="bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800 rounded-xl p-4">
                       <p className="text-sm font-bold text-rose-600 dark:text-rose-400 mb-2">
-                        <span className="material-icons-round text-sm align-middle ml-1">info</span>
+                        <span className="material-icons-round text-sm align-middle ml-1">error</span>
                         الصفوف التالية تحتاج تعديل ولن يتم حفظها:
                       </p>
                       <div className="space-y-1 max-h-32 overflow-y-auto">
                         {importResult.rows.filter((r) => r.errors.length > 0).map((row) => (
                           <p key={row.rowIndex} className="text-xs text-rose-600 dark:text-rose-400">
                             صف {row.rowIndex}: {row.errors.join(' · ')}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Warning details */}
+                  {importResult.warningCount > 0 && (
+                    <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
+                      <p className="text-sm font-bold text-amber-600 dark:text-amber-400 mb-2">
+                        <span className="material-icons-round text-sm align-middle ml-1">warning</span>
+                        تنبيهات (سيتم الحفظ لكن يرجى المراجعة):
+                      </p>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {importResult.rows.filter((r) => r.warnings.length > 0).map((row) => (
+                          <p key={row.rowIndex} className="text-xs text-amber-600 dark:text-amber-400">
+                            صف {row.rowIndex}: {row.warnings.join(' · ')}
                           </p>
                         ))}
                       </div>

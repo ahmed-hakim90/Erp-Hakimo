@@ -16,22 +16,110 @@ export function downloadProductsTemplate() {
   XLSX.writeFile(wb, 'template_products.xlsx');
 }
 
-export function downloadReportsTemplate() {
+export interface ReportsTemplateLookups {
+  lines: { name: string }[];
+  products: { name: string; code: string }[];
+  employees: { name: string; code: string }[];
+}
+
+export function downloadReportsTemplate(lookups?: ReportsTemplateLookups) {
   const wb = XLSX.utils.book_new();
-  const aoa: (string | number)[][] = [
-    ['التاريخ', 'خط الإنتاج', 'المنتج', 'المشرف', 'الكمية المنتجة', 'الهالك', 'عدد العمال', 'ساعات العمل'],
-    ['2026-02-16', 'خط 1', 'منتج أ', 'أحمد محمد', 500, 10, 8, 8],
-    ['2026-02-16', 'خط 2', 'منتج ب', 'سعيد علي', 300, 5, 6, 8],
-    ['2026-02-17', 'خط 1', 'منتج أ', 'أحمد محمد', 450, 8, 8, 8],
-    ['2026-02-17', 'خط 3', 'منتج ج', 'محمود حسن', 600, 12, 10, 8],
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [
-    { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 18 },
+
+  const lineNames = lookups?.lines.map((l) => l.name) ?? [];
+  const productNames = lookups?.products.map((p) => p.name) ?? [];
+  const employeeEntries = lookups?.employees ?? [];
+
+  // Sheet 1: Main data entry
+  const headers = ['التاريخ', 'خط الإنتاج', 'المنتج', 'المشرف', 'كود المشرف', 'الكمية المنتجة', 'الهالك', 'عدد العمال', 'ساعات العمل'];
+  const sampleRows: (string | number)[][] = lineNames.length > 0
+    ? [
+        [getTodayForTemplate(), lineNames[0] ?? '', productNames[0] ?? '', employeeEntries[0]?.name ?? '', employeeEntries[0]?.code ?? '', 500, 10, 8, 8],
+        [getTodayForTemplate(), lineNames[Math.min(1, lineNames.length - 1)] ?? '', productNames[Math.min(1, productNames.length - 1)] ?? '', employeeEntries[Math.min(1, employeeEntries.length - 1)]?.name ?? '', employeeEntries[Math.min(1, employeeEntries.length - 1)]?.code ?? '', 300, 5, 6, 8],
+      ]
+    : [
+        ['2026-02-16', 'خط 1', 'منتج أ', 'أحمد محمد', 'EMP-001', 500, 10, 8, 8],
+        ['2026-02-16', 'خط 2', 'منتج ب', 'سعيد علي', 'EMP-002', 300, 5, 6, 8],
+      ];
+
+  const mainAoa = [headers, ...sampleRows];
+  const wsMain = XLSX.utils.aoa_to_sheet(mainAoa);
+  wsMain['!cols'] = [
+    { wch: 14 }, { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 14 },
     { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
   ];
-  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+
+  // Data validation (dropdowns) — only if we have real data
+  if (lineNames.length > 0 || productNames.length > 0 || employeeEntries.length > 0) {
+    const maxRows = 500;
+    const validations: any[] = [];
+
+    if (lineNames.length > 0) {
+      validations.push({
+        sqref: `B2:B${maxRows}`,
+        type: 'list',
+        formula1: `'خطوط الإنتاج'!$A$2:$A$${lineNames.length + 1}`,
+      });
+    }
+    if (productNames.length > 0) {
+      validations.push({
+        sqref: `C2:C${maxRows}`,
+        type: 'list',
+        formula1: `'المنتجات'!$A$2:$A$${productNames.length + 1}`,
+      });
+    }
+    if (employeeEntries.length > 0) {
+      validations.push({
+        sqref: `D2:D${maxRows}`,
+        type: 'list',
+        formula1: `'المشرفين'!$A$2:$A$${employeeEntries.length + 1}`,
+      });
+    }
+
+    if (validations.length > 0) {
+      wsMain['!dataValidation'] = validations;
+    }
+  }
+
+  if (!wsMain['!views']) wsMain['!views'] = [];
+  (wsMain['!views'] as any[]).push({ rightToLeft: true });
+  XLSX.utils.book_append_sheet(wb, wsMain, 'تقارير الإنتاج');
+
+  // Sheet 2: Lines reference
+  if (lineNames.length > 0) {
+    const linesAoa: string[][] = [['خط الإنتاج'], ...lineNames.map((n) => [n])];
+    const wsLines = XLSX.utils.aoa_to_sheet(linesAoa);
+    wsLines['!cols'] = [{ wch: 28 }];
+    XLSX.utils.book_append_sheet(wb, wsLines, 'خطوط الإنتاج');
+  }
+
+  // Sheet 3: Products reference
+  if (productNames.length > 0) {
+    const prodAoa: (string)[][] = [
+      ['المنتج', 'الكود'],
+      ...lookups!.products.map((p) => [p.name, p.code]),
+    ];
+    const wsProducts = XLSX.utils.aoa_to_sheet(prodAoa);
+    wsProducts['!cols'] = [{ wch: 28 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsProducts, 'المنتجات');
+  }
+
+  // Sheet 4: Employees/Supervisors reference
+  if (employeeEntries.length > 0) {
+    const empAoa: (string)[][] = [
+      ['المشرف', 'الكود'],
+      ...employeeEntries.map((e) => [e.name, e.code]),
+    ];
+    const wsEmps = XLSX.utils.aoa_to_sheet(empAoa);
+    wsEmps['!cols'] = [{ wch: 28 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsEmps, 'المشرفين');
+  }
+
   XLSX.writeFile(wb, 'template_reports.xlsx');
+}
+
+function getTodayForTemplate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function downloadHRTemplate() {

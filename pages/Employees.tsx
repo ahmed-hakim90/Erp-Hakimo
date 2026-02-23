@@ -74,6 +74,7 @@ export const Employees: React.FC = () => {
   const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [toggleConfirmId, setToggleConfirmId] = useState<string | null>(null);
+  const [permanentDeleteId, setPermanentDeleteId] = useState<string | null>(null);
 
   // Quick-add states
   const [quickAddType, setQuickAddType] = useState<'department' | 'position' | 'shift' | null>(null);
@@ -265,6 +266,26 @@ export const Employees: React.FC = () => {
             console.error('Create user error:', authErr);
             setSaveMsg({ type: 'error', text: `تم حفظ بيانات الموظف، لكن فشل إنشاء الحساب: ${getAuthErrorMsg(authErr)}` });
           }
+        } else if (editingRaw?.userId) {
+          const updates: string[] = [];
+          const newEmail = formEmail.trim();
+          if (newEmail && newEmail !== (editingRaw.email ?? '')) {
+            await userService.update(editingRaw.userId, { email: newEmail });
+            await updateEmployee(editId, { email: newEmail });
+            updates.push('البريد الإلكتروني');
+          }
+          const currentUser = usersMap[editingRaw.userId];
+          if (formRoleId && formRoleId !== currentUser?.roleId) {
+            await userService.updateRoleId(editingRaw.userId, formRoleId);
+            updates.push('الدور');
+          }
+          if (updates.length > 0) {
+            setSaveMsg({ type: 'success', text: `تم تحديث ${updates.join(' و ')} بنجاح` });
+            await loadUsers();
+            setTimeout(() => setShowModal(false), 1500);
+          } else {
+            setShowModal(false);
+          }
         } else {
           setShowModal(false);
         }
@@ -374,7 +395,21 @@ export const Employees: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDeactivate = async (id: string) => {
+    const raw = _rawEmployees.find((e) => e.id === id);
+    if (!raw) return;
+    await updateEmployee(id, { isActive: false });
+    if (raw.userId) {
+      try { await userService.toggleActive(raw.userId, false); } catch { /* ignore */ }
+    }
+    setDeleteConfirmId(null);
+  };
+
+  const handlePermanentDelete = async (id: string) => {
+    const raw = _rawEmployees.find((e) => e.id === id);
+    if (raw?.userId) {
+      try { await userService.delete(raw.userId); } catch { /* ignore */ }
+    }
     await deleteEmployee(id);
     setDeleteConfirmId(null);
   };
@@ -545,22 +580,31 @@ export const Employees: React.FC = () => {
           <span className="material-icons-round text-lg">edit</span>
         </button>
       )}
-      {can('employees.edit') && (
-        <button
-          onClick={() => setToggleConfirmId(emp.id!)}
-          className="p-2 text-slate-400 hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all"
-          title={emp.isActive !== false ? 'تعطيل' : 'تفعيل'}
-        >
-          <span className="material-icons-round text-lg">toggle_on</span>
-        </button>
-      )}
-      {can('employees.delete') && (
+      {can('employees.edit') && emp.isActive !== false && (
         <button
           onClick={() => setDeleteConfirmId(emp.id!)}
-          className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-all"
-          title="حذف"
+          className="p-2 text-slate-400 hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all"
+          title="تعطيل"
         >
-          <span className="material-icons-round text-lg">delete</span>
+          <span className="material-icons-round text-lg">person_off</span>
+        </button>
+      )}
+      {can('employees.edit') && emp.isActive === false && (
+        <button
+          onClick={() => setToggleConfirmId(emp.id!)}
+          className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+          title="إعادة تفعيل"
+        >
+          <span className="material-icons-round text-lg">person_add</span>
+        </button>
+      )}
+      {can('employees.delete') && emp.isActive === false && (
+        <button
+          onClick={() => setPermanentDeleteId(emp.id!)}
+          className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-all"
+          title="حذف نهائي"
+        >
+          <span className="material-icons-round text-lg">delete_forever</span>
         </button>
       )}
     </div>
@@ -1114,10 +1158,37 @@ export const Employees: React.FC = () => {
                   const alreadyHasAccount = editingRaw?.userId;
                   if (alreadyHasAccount) {
                     return (
-                      <div className="border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 bg-emerald-50 dark:bg-emerald-900/20">
+                      <div className="border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 space-y-3 bg-emerald-50 dark:bg-emerald-900/20">
                         <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
                           <span className="material-icons-round text-lg">check_circle</span>
-                          <span className="text-sm font-bold">لديه حساب دخول: {editingRaw?.email || '—'}</span>
+                          <span className="text-sm font-bold">لديه حساب دخول</span>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-emerald-600 dark:text-emerald-400">البريد الإلكتروني</label>
+                          <input
+                            type="email"
+                            className="w-full border border-emerald-200 dark:border-emerald-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                            value={formEmail}
+                            onChange={(e) => setFormEmail(e.target.value)}
+                          />
+                          {formEmail.trim() !== (editingRaw?.email ?? '') && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                              <span className="material-icons-round text-xs">info</span>
+                              سيتم تحديث البريد في بيانات الموظف. لتغيير بريد تسجيل الدخول يجب إعادة تعيين من Firebase.
+                            </p>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-emerald-600 dark:text-emerald-400">الدور</label>
+                          <select
+                            className="w-full border border-emerald-200 dark:border-emerald-700 dark:bg-slate-800 rounded-xl text-sm p-3 outline-none font-medium"
+                            value={formRoleId}
+                            onChange={(e) => setFormRoleId(e.target.value)}
+                          >
+                            {roles.map((r) => (
+                              <option key={r.id} value={r.id}>{r.name}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     );
@@ -1217,39 +1288,83 @@ export const Employees: React.FC = () => {
         </div>
       )}
 
-      {/* Delete confirmation */}
+      {/* Deactivate confirmation (soft delete) */}
       {deleteConfirmId && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setDeleteConfirmId(null)}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-800 p-6 text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="w-16 h-16 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="material-icons-round text-rose-500 text-3xl">delete_forever</span>
+            <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="material-icons-round text-amber-500 text-3xl">person_off</span>
             </div>
-            <h3 className="text-lg font-bold mb-2">تأكيد الحذف</h3>
-            <p className="text-sm text-slate-500 mb-6">هل أنت متأكد من حذف هذا الموظف؟ لا يمكن التراجع عن هذا الإجراء.</p>
+            <h3 className="text-lg font-bold mb-2">تعطيل الموظف</h3>
+            <p className="text-sm text-slate-500 mb-2">
+              سيتم تعطيل <span className="font-bold text-slate-700 dark:text-slate-300">{_rawEmployees.find((e) => e.id === deleteConfirmId)?.name}</span> وإيقاف حساب الدخول المرتبط به.
+            </p>
+            <p className="text-xs text-slate-400 mb-6">يمكنك إعادة تفعيله لاحقاً. البيانات والتقارير السابقة ستبقى محفوظة.</p>
             <div className="flex items-center justify-center gap-3">
               <Button variant="outline" onClick={() => setDeleteConfirmId(null)}>إلغاء</Button>
               <button
-                onClick={() => handleDelete(deleteConfirmId)}
-                className="px-4 py-2.5 rounded-lg font-bold text-sm bg-rose-500 text-white hover:bg-rose-600 flex items-center gap-2"
+                onClick={() => handleDeactivate(deleteConfirmId)}
+                className="px-4 py-2.5 rounded-lg font-bold text-sm bg-amber-500 text-white hover:bg-amber-600 flex items-center gap-2"
               >
-                نعم، احذف
+                <span className="material-icons-round text-sm">person_off</span>
+                تعطيل
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Toggle active confirmation */}
+      {/* Permanent delete confirmation (hard delete - only for inactive employees) */}
+      {permanentDeleteId && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setPermanentDeleteId(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-800 p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="material-icons-round text-rose-500 text-3xl">delete_forever</span>
+            </div>
+            <h3 className="text-lg font-bold mb-2">حذف نهائي</h3>
+            <p className="text-sm text-slate-500 mb-2">
+              سيتم حذف <span className="font-bold text-rose-600">{_rawEmployees.find((e) => e.id === permanentDeleteId)?.name}</span> نهائياً مع بيانات حسابه.
+            </p>
+            <div className="bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800 rounded-xl p-3 mb-4 text-right">
+              <p className="text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                <span className="material-icons-round text-sm">warning</span>
+                لا يمكن التراجع عن هذا الإجراء
+              </p>
+              {_rawEmployees.find((e) => e.id === permanentDeleteId)?.userId && (
+                <p className="text-xs text-rose-500 mt-1">سيتم حذف حساب المستخدم المرتبط. حساب Firebase Auth يحتاج حذف يدوي من الـ Console.</p>
+              )}
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <Button variant="outline" onClick={() => setPermanentDeleteId(null)}>إلغاء</Button>
+              <button
+                onClick={() => handlePermanentDelete(permanentDeleteId)}
+                className="px-4 py-2.5 rounded-lg font-bold text-sm bg-rose-500 text-white hover:bg-rose-600 flex items-center gap-2"
+              >
+                <span className="material-icons-round text-sm">delete_forever</span>
+                حذف نهائي
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reactivate confirmation */}
       {toggleConfirmId && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setToggleConfirmId(null)}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-800 p-6 text-center" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-2">تغيير حالة الموظف</h3>
+            <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="material-icons-round text-emerald-500 text-3xl">person_add</span>
+            </div>
+            <h3 className="text-lg font-bold mb-2">إعادة تفعيل الموظف</h3>
             <p className="text-sm text-slate-500 mb-6">
-              {_rawEmployees.find((e) => e.id === toggleConfirmId)?.isActive !== false ? 'تعطيل الموظف؟' : 'تفعيل الموظف؟'}
+              سيتم إعادة تفعيل <span className="font-bold text-slate-700 dark:text-slate-300">{_rawEmployees.find((e) => e.id === toggleConfirmId)?.name}</span> وتفعيل حساب الدخول المرتبط به.
             </p>
             <div className="flex items-center justify-center gap-3">
               <Button variant="outline" onClick={() => setToggleConfirmId(null)}>إلغاء</Button>
-              <Button variant="primary" onClick={() => handleToggleActive(toggleConfirmId)}>تأكيد</Button>
+              <Button variant="primary" onClick={() => handleToggleActive(toggleConfirmId)}>
+                <span className="material-icons-round text-sm">check_circle</span>
+                تفعيل
+              </Button>
             </div>
           </div>
         </div>

@@ -1,6 +1,7 @@
 /**
  * Excel Import Utility — parse .xlsx/.xls files into ProductionReport data.
- * Resolves Arabic column headers and maps names → IDs using lookup arrays.
+ * Resolves Arabic column headers and maps names/codes → IDs using lookup arrays.
+ * Supports fuzzy matching and duplicate detection.
  */
 import * as XLSX from 'xlsx';
 import type { ProductionReport, FirestoreProduct, FirestoreProductionLine, FirestoreEmployee } from '../types';
@@ -15,12 +16,15 @@ export interface ParsedReportRow {
   productName: string;
   productId: string;
   employeeName: string;
+  employeeCode: string;
   employeeId: string;
   quantityProduced: number;
   quantityWaste: number;
   workersCount: number;
   workHours: number;
   errors: string[];
+  warnings: string[];
+  isDuplicate: boolean;
 }
 
 export interface ImportResult {
@@ -28,12 +32,15 @@ export interface ImportResult {
   totalRows: number;
   validCount: number;
   errorCount: number;
+  warningCount: number;
+  duplicateCount: number;
 }
 
 interface Lookups {
   products: FirestoreProduct[];
   lines: FirestoreProductionLine[];
   employees: FirestoreEmployee[];
+  existingReports?: ProductionReport[];
 }
 
 // ─── Header mapping (Arabic → field) ────────────────────────────────────────
@@ -41,40 +48,94 @@ interface Lookups {
 const HEADER_MAP: Record<string, string> = {
   'التاريخ': 'date',
   'تاريخ': 'date',
+  'date': 'date',
   'خط الإنتاج': 'lineName',
   'خط الانتاج': 'lineName',
   'الخط': 'lineName',
+  'line': 'lineName',
   'المنتج': 'productName',
   'منتج': 'productName',
+  'product': 'productName',
   'المشرف': 'employeeName',
   'مشرف': 'employeeName',
   'الموظف': 'employeeName',
   'موظف': 'employeeName',
+  'اسم المشرف': 'employeeName',
+  'supervisor': 'employeeName',
+  'employee': 'employeeName',
+  'كود المشرف': 'employeeCode',
+  'كود الموظف': 'employeeCode',
+  'الكود': 'employeeCode',
+  'رمز الموظف': 'employeeCode',
+  'code': 'employeeCode',
   'الكمية المنتجة': 'quantityProduced',
   'كمية الانتاج': 'quantityProduced',
   'كمية الإنتاج': 'quantityProduced',
   'الكمية': 'quantityProduced',
+  'الانتاج': 'quantityProduced',
+  'الإنتاج': 'quantityProduced',
+  'quantity': 'quantityProduced',
   'الهالك': 'quantityWaste',
   'هالك': 'quantityWaste',
+  'waste': 'quantityWaste',
   'عدد العمال': 'workersCount',
   'العمال': 'workersCount',
   'عمال': 'workersCount',
+  'workers': 'workersCount',
   'ساعات العمل': 'workHours',
   'ساعات': 'workHours',
+  'hours': 'workHours',
 };
 
 function normalizeHeader(h: string): string {
   return h.trim().replace(/\s+/g, ' ');
 }
 
-// ─── Name → ID resolvers ────────────────────────────────────────────────────
+// ─── Text normalization for fuzzy matching ──────────────────────────────────
 
-function findByName<T extends { id?: string; name: string }>(
+function normalizeArabic(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670]/g, '')  // strip tashkeel/diacritics
+    .replace(/[أإآٱ]/g, 'ا')                // normalize alef variants
+    .replace(/ة/g, 'ه')                     // taa marbuta → haa
+    .replace(/ى/g, 'ي')                     // alef maqsura → ya
+    .replace(/\s+/g, ' ');
+}
+
+// ─── Name/Code → ID resolvers ───────────────────────────────────────────────
+
+function findByNameFuzzy<T extends { id?: string; name: string }>(
   items: T[],
   name: string,
-): T | undefined {
+): { item: T; exact: boolean } | undefined {
   const n = name.trim().toLowerCase();
-  return items.find((i) => i.name.trim().toLowerCase() === n);
+  const nNorm = normalizeArabic(name);
+
+  // 1. Exact match
+  const exact = items.find((i) => i.name.trim().toLowerCase() === n);
+  if (exact) return { item: exact, exact: true };
+
+  // 2. Normalized match (diacritics/alef variants removed)
+  const normalized = items.find((i) => normalizeArabic(i.name) === nNorm);
+  if (normalized) return { item: normalized, exact: false };
+
+  // 3. Contains match (input is substring of item or vice versa)
+  const contains = items.find(
+    (i) => normalizeArabic(i.name).includes(nNorm) || nNorm.includes(normalizeArabic(i.name))
+  );
+  if (contains) return { item: contains, exact: false };
+
+  return undefined;
+}
+
+function findEmployeeByCode(
+  employees: FirestoreEmployee[],
+  code: string,
+): FirestoreEmployee | undefined {
+  const c = code.trim().toLowerCase();
+  return employees.find((e) => e.code?.trim().toLowerCase() === c);
 }
 
 // ─── Date normalization ─────────────────────────────────────────────────────
@@ -94,22 +155,27 @@ function normalizeDate(raw: any): string {
 
   const s = String(raw).trim();
 
-  // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // DD/MM/YYYY or DD-MM-YYYY
+  // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
   const slashMatch = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
   if (slashMatch) {
     return `${slashMatch[3]}-${slashMatch[2].padStart(2, '0')}-${slashMatch[1].padStart(2, '0')}`;
   }
 
-  // MM/DD/YYYY
+  // YYYY/MM/DD or YYYY.MM.DD
   const usMatch = s.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/);
   if (usMatch) {
     return `${usMatch[1]}-${usMatch[2].padStart(2, '0')}-${usMatch[3].padStart(2, '0')}`;
   }
 
   return s;
+}
+
+function isValidDate(dateStr: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const d = new Date(dateStr);
+  return !isNaN(d.getTime());
 }
 
 // ─── Main parse function ────────────────────────────────────────────────────
@@ -125,13 +191,17 @@ export function parseExcelFile(
       try {
         const data = new Uint8Array(e.target!.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: 'array', cellDates: false });
-        const sheetName = wb.SheetNames[0];
-        const ws = wb.Sheets[sheetName];
+
+        // Find the data sheet — prefer "تقارير الإنتاج", fall back to first sheet
+        const targetSheet = wb.SheetNames.find(
+          (n) => n === 'تقارير الإنتاج' || n === 'Sheet1'
+        ) ?? wb.SheetNames[0];
+        const ws = wb.Sheets[targetSheet];
 
         const jsonRows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
 
         if (jsonRows.length === 0) {
-          resolve({ rows: [], totalRows: 0, validCount: 0, errorCount: 0 });
+          resolve({ rows: [], totalRows: 0, validCount: 0, errorCount: 0, warningCount: 0, duplicateCount: 0 });
           return;
         }
 
@@ -144,71 +214,163 @@ export function parseExcelFile(
           if (mapped) headerMapping[rawH] = mapped;
         }
 
+        // Build existing reports index for duplicate detection
+        const existingIndex = new Set<string>();
+        if (lookups.existingReports) {
+          for (const r of lookups.existingReports) {
+            existingIndex.add(`${r.date}|${r.lineId}|${r.productId}`);
+          }
+        }
+
+        // Track duplicates within the file itself
+        const fileIndex = new Map<string, number>();
+
         const rows: ParsedReportRow[] = jsonRows
           .filter((row) => {
-            const dateVal = String(row[rawHeaders.find((h) => headerMapping[h] === 'date') ?? ''] ?? '').trim();
-            return dateVal !== '' && dateVal !== 'الإجمالي' && dateVal !== 'الاجمالي';
+            const dateKey = rawHeaders.find((h) => headerMapping[h] === 'date') ?? '';
+            const dateVal = String(row[dateKey] ?? '').trim();
+            return dateVal !== '' && dateVal !== 'الإجمالي' && dateVal !== 'الاجمالي' && dateVal !== 'إجمالي';
           })
           .map((row, idx) => {
             const errors: string[] = [];
+            const warnings: string[] = [];
 
             const getValue = (field: string): any => {
               const key = rawHeaders.find((h) => headerMapping[h] === field);
               return key ? row[key] : undefined;
             };
 
+            // ── Date
             const date = normalizeDate(getValue('date'));
             if (!date) errors.push('التاريخ مفقود');
+            else if (!isValidDate(date)) errors.push(`تاريخ غير صالح: ${date}`);
 
+            // ── Line
             const lineName = String(getValue('lineName') ?? '').trim();
-            const line = lineName ? findByName(lookups.lines, lineName) : undefined;
-            if (lineName && !line) errors.push(`خط "${lineName}" غير موجود`);
-            if (!lineName) errors.push('خط الإنتاج مفقود');
+            let lineId = '';
+            if (lineName) {
+              const lineMatch = findByNameFuzzy(lookups.lines, lineName);
+              if (lineMatch) {
+                lineId = lineMatch.item.id ?? '';
+                if (!lineMatch.exact) warnings.push(`تم مطابقة الخط "${lineName}" → "${lineMatch.item.name}"`);
+              } else {
+                errors.push(`خط "${lineName}" غير موجود`);
+              }
+            } else {
+              errors.push('خط الإنتاج مفقود');
+            }
 
+            // ── Product
             const productName = String(getValue('productName') ?? '').trim();
-            const product = productName ? findByName(lookups.products, productName) : undefined;
-            if (productName && !product) errors.push(`المنتج "${productName}" غير موجود`);
-            if (!productName) errors.push('المنتج مفقود');
+            let productId = '';
+            if (productName) {
+              const productMatch = findByNameFuzzy(lookups.products, productName);
+              if (productMatch) {
+                productId = productMatch.item.id ?? '';
+                if (!productMatch.exact) warnings.push(`تم مطابقة المنتج "${productName}" → "${productMatch.item.name}"`);
+              } else {
+                errors.push(`المنتج "${productName}" غير موجود`);
+              }
+            } else {
+              errors.push('المنتج مفقود');
+            }
 
+            // ── Employee: try code first, then name
+            const employeeCode = String(getValue('employeeCode') ?? '').trim();
             const employeeName = String(getValue('employeeName') ?? '').trim();
-            const employee = employeeName ? findByName(lookups.employees, employeeName) : undefined;
-            if (employeeName && !employee) errors.push(`الموظف "${employeeName}" غير موجود`);
-            if (!employeeName) errors.push('الموظف مفقود');
+            let employeeId = '';
+            let resolvedName = employeeName;
 
+            if (employeeCode) {
+              const byCode = findEmployeeByCode(lookups.employees, employeeCode);
+              if (byCode) {
+                employeeId = byCode.id ?? '';
+                resolvedName = byCode.name;
+                if (employeeName && byCode.name.trim().toLowerCase() !== employeeName.trim().toLowerCase()) {
+                  warnings.push(`الكود "${employeeCode}" يخص "${byCode.name}" (مختلف عن "${employeeName}")`);
+                }
+              } else {
+                errors.push(`كود الموظف "${employeeCode}" غير موجود`);
+              }
+            } else if (employeeName) {
+              const nameMatch = findByNameFuzzy(lookups.employees, employeeName);
+              if (nameMatch) {
+                employeeId = nameMatch.item.id ?? '';
+                resolvedName = nameMatch.item.name;
+                if (!nameMatch.exact) warnings.push(`تم مطابقة المشرف "${employeeName}" → "${nameMatch.item.name}"`);
+              } else {
+                errors.push(`المشرف "${employeeName}" غير موجود`);
+              }
+            } else {
+              errors.push('المشرف مفقود (أدخل الاسم أو الكود)');
+            }
+
+            // ── Numeric fields
             const quantityProduced = Number(getValue('quantityProduced')) || 0;
             if (quantityProduced <= 0) errors.push('الكمية المنتجة يجب أن تكون أكبر من 0');
 
             const quantityWaste = Number(getValue('quantityWaste')) || 0;
+            if (quantityWaste < 0) errors.push('الهالك لا يمكن أن يكون سالب');
+
             const workersCount = Number(getValue('workersCount')) || 0;
             if (workersCount <= 0) errors.push('عدد العمال مفقود');
 
             const workHours = Number(getValue('workHours')) || 0;
             if (workHours <= 0) errors.push('ساعات العمل مفقودة');
 
+            // ── Waste ratio warning
+            if (quantityProduced > 0 && quantityWaste > 0) {
+              const wasteRatio = quantityWaste / (quantityProduced + quantityWaste);
+              if (wasteRatio > 0.2) warnings.push(`نسبة الهالك مرتفعة (${(wasteRatio * 100).toFixed(1)}%)`);
+            }
+
+            // ── Duplicate detection
+            let isDuplicate = false;
+            const dupeKey = `${date}|${lineId}|${productId}`;
+            if (date && lineId && productId) {
+              if (existingIndex.has(dupeKey)) {
+                isDuplicate = true;
+                warnings.push('تقرير مكرر — يوجد تقرير بنفس التاريخ والخط والمنتج');
+              }
+              const prevRow = fileIndex.get(dupeKey);
+              if (prevRow !== undefined) {
+                isDuplicate = true;
+                warnings.push(`مكرر مع الصف ${prevRow} في نفس الملف`);
+              }
+              fileIndex.set(dupeKey, idx + 2);
+            }
+
             return {
               rowIndex: idx + 2,
               date,
-              lineName,
-              lineId: line?.id ?? '',
+              lineName: lineName || resolvedName ? lineName : '',
+              lineId,
               productName,
-              productId: product?.id ?? '',
-              employeeName,
-              employeeId: employee?.id ?? '',
+              productId,
+              employeeName: resolvedName || employeeName,
+              employeeCode,
+              employeeId,
               quantityProduced,
               quantityWaste,
               workersCount,
               workHours,
               errors,
+              warnings,
+              isDuplicate,
             };
           });
 
         const validCount = rows.filter((r) => r.errors.length === 0).length;
+        const warningCount = rows.filter((r) => r.warnings.length > 0).length;
+        const duplicateCount = rows.filter((r) => r.isDuplicate).length;
 
         resolve({
           rows,
           totalRows: rows.length,
           validCount,
           errorCount: rows.length - validCount,
+          warningCount,
+          duplicateCount,
         });
       } catch (err) {
         reject(err);

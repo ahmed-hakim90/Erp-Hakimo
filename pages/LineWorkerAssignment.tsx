@@ -9,6 +9,8 @@ import { getTodayDateString } from '../utils/calculations';
 import type { LineWorkerAssignment as LWA } from '../types';
 import type { FirestoreDepartment, FirestoreJobPosition } from '../modules/hr/types';
 
+const WORKER_POSITION_KEYWORDS = ['عامل انتاج', 'عامل إنتاج', 'عامل الانتاج', 'عامل الإنتاج'];
+
 export const LineWorkerAssignment: React.FC = () => {
   const _rawLines = useAppStore((s) => s._rawLines);
   const _rawEmployees = useAppStore((s) => s._rawEmployees);
@@ -28,8 +30,11 @@ export const LineWorkerAssignment: React.FC = () => {
   const [showCopyConfirm, setShowCopyConfirm] = useState(false);
   const [expandedLines, setExpandedLines] = useState<Set<string>>(new Set());
 
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout>>();
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     (async () => {
@@ -141,9 +146,33 @@ export const LineWorkerAssignment: React.FC = () => {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      setShowSuggestions(false);
       handleScan(scanInput);
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false);
     }
   };
+
+  const handleSelectWorker = (emp: typeof _rawEmployees[0]) => {
+    setShowSuggestions(false);
+    setScanInput('');
+    handleScan(emp.code ?? '');
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(e.target as Node) &&
+        inputRef.current &&
+        !inputRef.current.contains(e.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleRemove = async (id: string) => {
     try {
@@ -229,6 +258,37 @@ export const LineWorkerAssignment: React.FC = () => {
     return _rawEmployees.find((e) => e.id === employeeId);
   };
 
+  const workerPositionIds = useMemo(() => {
+    return new Set(
+      jobPositions
+        .filter((jp) => WORKER_POSITION_KEYWORDS.some((kw) => jp.title.includes(kw)))
+        .map((jp) => jp.id!)
+    );
+  }, [jobPositions]);
+
+  const productionWorkers = useMemo(() => {
+    return _rawEmployees.filter(
+      (e) => e.isActive !== false && workerPositionIds.has(e.jobPositionId)
+    );
+  }, [_rawEmployees, workerPositionIds]);
+
+  const assignedEmployeeIds = useMemo(
+    () => new Set(allDayAssignments.map((a) => a.employeeId)),
+    [allDayAssignments]
+  );
+
+  const searchResults = useMemo(() => {
+    const q = scanInput.trim().toLowerCase();
+    if (!q) return [];
+    return productionWorkers
+      .filter((e) => {
+        const nameMatch = e.name.toLowerCase().includes(q);
+        const codeMatch = (e.code ?? '').toLowerCase().includes(q);
+        return nameMatch || codeMatch;
+      })
+      .slice(0, 8);
+  }, [scanInput, productionWorkers]);
+
   const formatTime = (ts: any) => {
     if (!ts) return '—';
     const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -288,11 +348,11 @@ export const LineWorkerAssignment: React.FC = () => {
 
       {/* Scanner Section */}
       {selectedLineId && (
-        <Card>
+        <Card className="relative z-20 !overflow-visible">
           <div className="space-y-3">
             <div className="flex items-center gap-2 mb-1">
               <span className="material-icons-round text-primary text-xl">qr_code_scanner</span>
-              <h3 className="font-bold text-base">مسح / إدخال كود الموظف</h3>
+              <h3 className="font-bold text-base">اسم / إدخال كود الموظف</h3>
             </div>
             <div className="flex gap-2">
               <div className="flex-1 relative">
@@ -300,22 +360,69 @@ export const LineWorkerAssignment: React.FC = () => {
                   ref={inputRef}
                   type="text"
                   className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl px-4 py-3 text-sm font-medium pr-10 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  placeholder="امسح الباركود أو اكتب كود الموظف..."
+                  placeholder="ابحث باسم / كود العامل..."
                   value={scanInput}
-                  onChange={(e) => setScanInput(e.target.value)}
+                  onChange={(e) => { setScanInput(e.target.value); setShowSuggestions(true); }}
+                  onFocus={() => setShowSuggestions(true)}
                   onKeyDown={handleKeyDown}
                   autoComplete="off"
                 />
                 <span className="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
+
+                {showSuggestions && scanInput.trim() && searchResults.length > 0 && (
+                  <div
+                    ref={suggestionsRef}
+                    className="absolute z-50 top-full mt-1 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-64 overflow-y-auto"
+                  >
+                    {searchResults.map((emp) => {
+                      const alreadyAssigned = assignedEmployeeIds.has(emp.id!);
+                      const onThisLine = assignments.some((a) => a.employeeId === emp.id);
+                      return (
+                        <button
+                          key={emp.id}
+                          onClick={() => !alreadyAssigned && handleSelectWorker(emp)}
+                          disabled={alreadyAssigned}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm text-right transition-colors ${
+                            alreadyAssigned
+                              ? 'opacity-50 cursor-not-allowed bg-slate-50 dark:bg-slate-800/50'
+                              : 'hover:bg-primary/5 cursor-pointer'
+                          }`}
+                        >
+                          <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
+                            <span className="material-icons-round text-primary text-sm">person</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-slate-800 dark:text-white truncate">{emp.name}</p>
+                            <p className="text-xs text-slate-400">{emp.code} — {getPositionTitle(emp.jobPositionId)}</p>
+                          </div>
+                          {alreadyAssigned && (
+                            <span className="text-xs font-bold text-amber-500 shrink-0">
+                              {onThisLine ? 'مسجل هنا' : 'مسجل على خط آخر'}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {showSuggestions && scanInput.trim().length >= 2 && searchResults.length === 0 && (
+                  <div
+                    ref={suggestionsRef}
+                    className="absolute z-50 top-full mt-1 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-4 text-center"
+                  >
+                    <span className="material-icons-round text-slate-300 text-2xl block mb-1">search_off</span>
+                    <p className="text-xs text-slate-400 font-medium">لا يوجد عامل إنتاج بهذا الاسم أو الكود</p>
+                  </div>
+                )}
               </div>
-              <button
+              {/* <button
                 onClick={() => setShowCamera(true)}
                 className="px-4 py-3 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0 flex items-center gap-1.5"
                 title="مسح بالكاميرا"
               >
                 <span className="material-icons-round text-xl">photo_camera</span>
                 <span className="text-sm font-bold hidden sm:inline">كاميرا</span>
-              </button>
+              </button> */}
               <button
                 onClick={() => handleScan(scanInput)}
                 disabled={!scanInput.trim()}
