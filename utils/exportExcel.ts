@@ -5,7 +5,7 @@
  */
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
-import type { ProductionReport, Product, FirestoreProduct, FirestoreEmployee } from '../types';
+import type { ProductionReport, Product, FirestoreProduct, FirestoreEmployee, WorkOrder } from '../types';
 import type { ProductCostBreakdown } from './productCostBreakdown';
 
 interface ReportRow {
@@ -18,12 +18,16 @@ interface ReportRow {
   'نسبة الهالك %': string;
   'عدد العمال': number;
   'ساعات العمل': number;
+  'أمر الشغل'?: string;
+  'كمية أمر الشغل'?: number | string;
+  'عمالة أمر الشغل'?: number | string;
 }
 
 interface LookupFns {
   getLineName: (id: string) => string;
   getProductName: (id: string) => string;
   getEmployeeName: (id: string) => string;
+  getWorkOrder?: (id: string) => WorkOrder | undefined;
 }
 
 /**
@@ -33,13 +37,14 @@ const mapReportsToRows = (
   reports: ProductionReport[],
   lookups: LookupFns
 ): ReportRow[] => {
+  const hasWO = lookups.getWorkOrder && reports.some((r) => r.workOrderId);
   return reports.map((r) => {
     const total = (r.quantityProduced || 0) + (r.quantityWaste || 0);
     const wasteRatio =
       total > 0
         ? (((r.quantityWaste || 0) / total) * 100).toFixed(1)
         : '0';
-    return {
+    const row: ReportRow = {
       التاريخ: r.date,
       'خط الإنتاج': lookups.getLineName(r.lineId),
       المنتج: lookups.getProductName(r.productId),
@@ -50,6 +55,13 @@ const mapReportsToRows = (
       'عدد العمال': r.workersCount || 0,
       'ساعات العمل': r.workHours || 0,
     };
+    if (hasWO) {
+      const wo = r.workOrderId && lookups.getWorkOrder ? lookups.getWorkOrder(r.workOrderId) : undefined;
+      row['أمر الشغل'] = wo ? wo.workOrderNumber : '—';
+      row['كمية أمر الشغل'] = wo ? wo.quantity : '—';
+      row['عمالة أمر الشغل'] = wo ? wo.maxWorkers : '—';
+    }
+    return row;
   });
 };
 
@@ -65,7 +77,7 @@ const appendSummary = (rows: ReportRow[]): ReportRow[] => {
   const total = totalProduced + totalWaste;
   const wasteRatio = total > 0 ? ((totalWaste / total) * 100).toFixed(1) : '0';
 
-  rows.push({
+  const summaryRow: ReportRow = {
     التاريخ: 'الإجمالي',
     'خط الإنتاج': '',
     المنتج: '',
@@ -75,7 +87,13 @@ const appendSummary = (rows: ReportRow[]): ReportRow[] => {
     'نسبة الهالك %': `${wasteRatio}%`,
     'عدد العمال': totalWorkers,
     'ساعات العمل': totalHours,
-  });
+  };
+  if (rows[0]?.['أمر الشغل'] !== undefined) {
+    summaryRow['أمر الشغل'] = '';
+    summaryRow['كمية أمر الشغل'] = '';
+    summaryRow['عمالة أمر الشغل'] = '';
+  }
+  rows.push(summaryRow);
   return rows;
 };
 
@@ -235,4 +253,43 @@ export const exportAllEmployees = (
   }));
   const date = new Date().toISOString().slice(0, 10);
   downloadExcel(rows, 'الموظفين', `الموظفين-${date}`);
+};
+
+// ─── Work Orders Export ──────────────────────────────────────────────────────
+
+const WO_STATUS_AR: Record<string, string> = {
+  pending: 'قيد الانتظار',
+  in_progress: 'قيد التنفيذ',
+  completed: 'مكتمل',
+  cancelled: 'ملغي',
+};
+
+interface WOExportLookups {
+  getProductName: (id: string) => string;
+  getLineName: (id: string) => string;
+  getSupervisorName: (id: string) => string;
+}
+
+export const exportWorkOrders = (
+  workOrders: WorkOrder[],
+  lookups: WOExportLookups
+) => {
+  if (workOrders.length === 0) return;
+  const rows = workOrders.map((wo) => ({
+    'رقم أمر الشغل': wo.workOrderNumber,
+    'المنتج': lookups.getProductName(wo.productId),
+    'خط الإنتاج': lookups.getLineName(wo.lineId),
+    'المشرف': lookups.getSupervisorName(wo.supervisorId),
+    'الكمية المطلوبة': wo.quantity,
+    'الكمية المنتجة': wo.producedQuantity,
+    'الكمية المتبقية': Math.max(0, wo.quantity - wo.producedQuantity),
+    'عدد العمالة (أقصى)': wo.maxWorkers,
+    'التاريخ المستهدف': wo.targetDate,
+    'التكلفة المقدرة': wo.estimatedCost > 0 ? Number(wo.estimatedCost.toFixed(2)) : 0,
+    'التكلفة الفعلية': wo.actualCost > 0 ? Number(wo.actualCost.toFixed(2)) : 0,
+    'الحالة': WO_STATUS_AR[wo.status] || wo.status,
+    'ملاحظات': wo.notes || '',
+  }));
+  const date = new Date().toISOString().slice(0, 10);
+  downloadExcel(rows, 'أوامر الشغل', `أوامر-الشغل-${date}`);
 };

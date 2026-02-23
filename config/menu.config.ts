@@ -63,7 +63,7 @@ export const MENU_CONFIG: MenuGroup[] = [
       { key: 'work-orders', label: 'أوامر الشغل', icon: 'assignment', path: '/work-orders', permission: 'workOrders.view' },
       { key: 'supervisors', label: 'المشرفين', icon: 'engineering', path: '/supervisors', permission: 'employees.view', activePatterns: ['/supervisors/'] },
       { key: 'production-workers', label: 'عمال الإنتاج', icon: 'construction', path: '/production-workers', permission: 'employees.view', activePatterns: ['/production-workers/'] },
-      { key: 'line-workers', label: 'ربط العمالة بالخطوط', icon: 'qr_code_scanner', path: '/line-workers', permission: 'lines.edit' },
+      { key: 'line-workers', label: 'ربط العمالة بالخطوط', icon: 'qr_code_scanner', path: '/line-workers', permission: 'lineWorkers.view' },
       { key: 'reports', label: 'التقارير', icon: 'bar_chart', path: '/reports', permission: 'reports.view' },
       { key: 'quick', label: 'إدخال سريع', icon: 'bolt', path: '/quick-action', permission: 'quickAction.view' },
     ],

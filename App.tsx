@@ -22,6 +22,7 @@ import { CostCenters } from './pages/CostCenters';
 import { CostCenterDistribution } from './pages/CostCenterDistribution';
 import { CostSettings } from './pages/CostSettings';
 import { ProductionPlans } from './pages/ProductionPlans';
+import { WorkOrders } from './pages/WorkOrders';
 import { EmployeeDashboard } from './pages/EmployeeDashboard';
 import { EmployeeSelfService } from './pages/EmployeeSelfService';
 import { FactoryManagerDashboard } from './pages/FactoryManagerDashboard';
@@ -148,7 +149,7 @@ const App: React.FC = () => {
                 <Route path="/employees" element={<ProtectedRoute permission="employees.view"><Employees /></ProtectedRoute>} />
                 <Route path="/employees/import" element={<ProtectedRoute permission="employees.create"><HRImport /></ProtectedRoute>} />
                 <Route path="/employees/:id" element={<ProtectedRoute permission="employees.view"><EmployeeProfile /></ProtectedRoute>} />
-                <Route path="/line-workers" element={<ProtectedRoute permission="lines.edit"><LineWorkerAssignment /></ProtectedRoute>} />
+                <Route path="/line-workers" element={<ProtectedRoute permission="lineWorkers.view"><LineWorkerAssignment /></ProtectedRoute>} />
                 <Route path="/reports" element={<ProtectedRoute permission="reports.view"><Reports /></ProtectedRoute>} />
                 <Route path="/quick-action" element={<ProtectedRoute permission="quickAction.view"><QuickAction /></ProtectedRoute>} />
                 <Route path="/users" element={<Navigate to="/employees" replace />} />
@@ -163,6 +164,7 @@ const App: React.FC = () => {
                 <Route path="/factory-dashboard" element={<ProtectedRoute permission="factoryDashboard.view"><FactoryManagerDashboard /></ProtectedRoute>} />
                 <Route path="/admin-dashboard" element={<ProtectedRoute permission="adminDashboard.view"><AdminDashboard /></ProtectedRoute>} />
                 <Route path="/production-plans" element={<ProtectedRoute permission="plans.view"><ProductionPlans /></ProtectedRoute>} />
+                <Route path="/work-orders" element={<ProtectedRoute permission="workOrders.view"><WorkOrders /></ProtectedRoute>} />
                 <Route path="/cost-centers" element={<ProtectedRoute permission="costs.view"><CostCenters /></ProtectedRoute>} />
                 <Route path="/cost-centers/:id" element={<ProtectedRoute permission="costs.view"><CostCenterDistribution /></ProtectedRoute>} />
                 <Route path="/cost-settings" element={<ProtectedRoute permission="costs.manage"><CostSettings /></ProtectedRoute>} />

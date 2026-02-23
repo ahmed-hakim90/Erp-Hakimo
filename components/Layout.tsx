@@ -4,6 +4,7 @@ import { useAppStore } from '../store/useAppStore';
 import { usePermission, useCurrentRole } from '../utils/permissions';
 import { MENU_CONFIG } from '../config/menu.config';
 import { useBadgeCounts, useActiveRoute, useSidebarCollapse } from '../hooks/useNavigation';
+import { NotificationBell } from './NotificationBell';
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
@@ -262,10 +263,7 @@ const Header: React.FC<{ onMenuToggle: () => void }> = ({ onMenuToggle }) => {
             قراءة فقط
           </span>
         )}
-        <button className="relative p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors group">
-          <span className="material-icons-round">notifications</span>
-          <span className="absolute top-2 left-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white group-hover:scale-125 transition-transform"></span>
-        </button>
+        <NotificationBell />
         <div className="hidden md:block h-8 w-[1px] bg-slate-200 dark:bg-slate-700 mx-1"></div>
         <div className="hidden md:flex flex-col items-end">
           <span className="text-xs text-slate-400 font-bold uppercase tracking-widest">التاريخ</span>
@@ -294,7 +292,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         <Header onMenuToggle={() => setSidebarOpen((o) => !o)} />
         <div className="p-4 sm:p-6 lg:p-8 flex-1 animate-in fade-in duration-500 overflow-x-hidden">{children}</div>
         <footer className="mt-auto py-4 sm:py-6 px-4 sm:px-8 border-t border-slate-200 dark:border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-400 text-xs sm:text-sm font-medium">
-          <p>© {new Date().getFullYear()} HAKIM PRODUCTION SYSTEM</p>
+          <p>© {new Date().getFullYear()} HAKIM PRODUCTION SYSTEM — v{__APP_VERSION__}</p>
           <div className="flex items-center gap-4 sm:gap-6">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>

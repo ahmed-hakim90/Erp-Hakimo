@@ -5,9 +5,9 @@ import { useAppStore } from '../store/useAppStore';
 import { Card, Button, Badge, SearchableSelect } from '../components/UI';
 import { formatNumber, getTodayDateString } from '../utils/calculations';
 import { buildReportsCosts, estimateReportCost, formatCost } from '../utils/costCalculations';
-import { ProductionReport, LineWorkerAssignment } from '../types';
+import { ProductionReport, LineWorkerAssignment, WorkOrder } from '../types';
 import { usePermission } from '../utils/permissions';
-import { exportReportsByDateRange } from '../utils/exportExcel';
+import { exportReportsByDateRange, exportWorkOrders } from '../utils/exportExcel';
 import { exportToPDF, shareToWhatsApp, ShareResult } from '../utils/reportExport';
 import { parseExcelFile, toReportData, ImportResult, ParsedReportRow } from '../utils/importExcel';
 import { downloadReportsTemplate, ReportsTemplateLookups } from '../utils/downloadTemplates';
@@ -54,6 +54,7 @@ export const Reports: React.FC = () => {
   const laborSettings = useAppStore((s) => s.laborSettings);
   const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
   const productionPlans = useAppStore((s) => s.productionPlans);
+  const workOrders = useAppStore((s) => s.workOrders);
   const planSettings = useAppStore((s) => s.systemSettings.planSettings);
 
   const { can } = usePermission();
@@ -90,6 +91,9 @@ export const Reports: React.FC = () => {
   const [formLineWorkers, setFormLineWorkers] = useState<LineWorkerAssignment[]>([]);
   const [viewWorkersData, setViewWorkersData] = useState<{ lineId: string; date: string; workers: LineWorkerAssignment[] } | null>(null);
   const [viewWorkersLoading, setViewWorkersLoading] = useState(false);
+
+  // Work order detail popup
+  const [viewWOReport, setViewWOReport] = useState<ProductionReport | null>(null);
 
   // Date range filter
   const [startDate, setStartDate] = useState(getTodayDateString());
@@ -156,9 +160,20 @@ export const Reports: React.FC = () => {
     [employees]
   );
 
+  const woMap = useMemo(() => {
+    const m = new Map<string, WorkOrder>();
+    workOrders.forEach((wo) => { if (wo.id) m.set(wo.id, wo); });
+    return m;
+  }, [workOrders]);
+
+  const getWorkOrder = useCallback(
+    (id: string) => woMap.get(id),
+    [woMap]
+  );
+
   const lookups = useMemo(
-    () => ({ getLineName, getProductName, getEmployeeName }),
-    [getLineName, getProductName, getEmployeeName]
+    () => ({ getLineName, getProductName, getEmployeeName, getWorkOrder }),
+    [getLineName, getProductName, getEmployeeName, getWorkOrder]
   );
 
   // ── Bulk print data ────────────────────────────────────────────────────────
@@ -412,6 +427,26 @@ export const Reports: React.FC = () => {
         ),
       },
       { header: 'ساعات', headerClassName: 'text-center', className: 'text-center font-bold', render: (r) => <>{r.workHours}</> },
+      {
+        header: 'أمر شغل',
+        headerClassName: 'text-center',
+        className: 'text-center',
+        render: (r) => {
+          if (!r.workOrderId) return <span className="text-sm text-slate-300">—</span>;
+          const wo = woMap.get(r.workOrderId);
+          if (!wo) return <span className="text-sm text-slate-300">—</span>;
+          return (
+            <button
+              onClick={(e) => { e.stopPropagation(); setViewWOReport(r); }}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg hover:bg-primary/10 text-primary transition-colors text-sm font-bold"
+              title="عرض تفاصيل أمر الشغل"
+            >
+              {wo.workOrderNumber}
+              <span className="material-icons-round text-xs">assignment</span>
+            </button>
+          );
+        },
+      },
     ];
     if (canViewCosts) {
       cols.push({
@@ -427,7 +462,7 @@ export const Reports: React.FC = () => {
       });
     }
     return cols;
-  }, [canViewCosts, getLineName, getProductName, getEmployeeName, reportCosts]);
+  }, [canViewCosts, getLineName, getProductName, getEmployeeName, reportCosts, woMap]);
 
   const handleBulkPrintSelected = useCallback(async (items: ProductionReport[]) => {
     setBulkPrintSource(items);
@@ -516,8 +551,19 @@ export const Reports: React.FC = () => {
                 }
               >
                 <span className="material-icons-round text-sm">download</span>
-                <span className="hidden sm:inline">Excel</span>
+                <span className="hidden sm:inline">تقارير Excel</span>
               </Button>
+              {workOrders.length > 0 && can("workOrders.view") && (
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    exportWorkOrders(workOrders, { getProductName, getLineName, getSupervisorName: getEmployeeName })
+                  }
+                >
+                  <span className="material-icons-round text-sm">assignment</span>
+                  <span className="hidden sm:inline">أوامر الشغل Excel</span>
+                </Button>
+              )}
               <Button variant="outline" onClick={() => handleBulkPrint()}>
                 <span className="material-icons-round text-sm">print</span>
                 <span className="hidden sm:inline">طباعة</span>
@@ -706,6 +752,45 @@ export const Reports: React.FC = () => {
                   </button>
                 </div>
               )}
+              {/* Work Order Selector */}
+              {!editId && can('workOrders.view') && (() => {
+                const activeWOs = workOrders.filter((w) => w.status === 'pending' || w.status === 'in_progress');
+                if (activeWOs.length === 0) return null;
+                return (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">
+                      <span className="material-icons-round text-sm align-middle ml-1 text-primary">assignment</span>
+                      أمر شغل (اختياري)
+                    </label>
+                    <select
+                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm focus:border-primary focus:ring-primary/20 p-3.5 outline-none font-bold transition-all"
+                      value=""
+                      onChange={(e) => {
+                        const wo = activeWOs.find((w) => w.id === e.target.value);
+                        if (!wo) return;
+                        setForm({
+                          ...form,
+                          lineId: wo.lineId,
+                          productId: wo.productId,
+                          employeeId: wo.supervisorId,
+                        });
+                      }}
+                    >
+                      <option value="">اختر أمر شغل لتعبئة البيانات تلقائياً</option>
+                      {activeWOs.map((wo) => {
+                        const pName = _rawProducts.find((p) => p.id === wo.productId)?.name ?? '';
+                        const lName = _rawLines.find((l) => l.id === wo.lineId)?.name ?? '';
+                        const remaining = wo.quantity - (wo.producedQuantity || 0);
+                        return (
+                          <option key={wo.id} value={wo.id!}>
+                            {wo.workOrderNumber} — {pName} — {lName} — متبقي: {remaining} وحدة
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                );
+              })()}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">التاريخ *</label>
@@ -1147,6 +1232,83 @@ export const Reports: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* ══ Work Order Detail Modal ══ */}
+      {viewWOReport && (() => {
+        const wo = woMap.get(viewWOReport.workOrderId!);
+        if (!wo) return null;
+        const statusLabels: Record<string, { label: string; color: string }> = {
+          pending: { label: 'قيد الانتظار', color: 'text-amber-600 bg-amber-50 dark:bg-amber-900/20' },
+          in_progress: { label: 'قيد التنفيذ', color: 'text-blue-600 bg-blue-50 dark:bg-blue-900/20' },
+          completed: { label: 'مكتمل', color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' },
+          cancelled: { label: 'ملغي', color: 'text-rose-600 bg-rose-50 dark:bg-rose-900/20' },
+        };
+        const st = statusLabels[wo.status] || statusLabels.pending;
+        const rows = [
+          { label: 'المنتج', value: getProductName(wo.productId) },
+          { label: 'خط الإنتاج', value: getLineName(wo.lineId) },
+          { label: 'المشرف', value: getEmployeeName(wo.supervisorId) },
+          { label: 'التاريخ المستهدف', value: wo.targetDate },
+        ];
+        const compareRows = [
+          { label: 'الكمية', planned: formatNumber(wo.quantity), actual: formatNumber(viewWOReport.quantityProduced), icon: 'inventory_2' },
+          { label: 'العمالة', planned: String(wo.maxWorkers), actual: String(viewWOReport.workersCount), icon: 'groups' },
+        ];
+        return (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setViewWOReport(null)}>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="material-icons-round text-primary">assignment</span>
+                  <h3 className="font-bold">{wo.workOrderNumber}</h3>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
+                </div>
+                <button onClick={() => setViewWOReport(null)} className="text-slate-400 hover:text-slate-600">
+                  <span className="material-icons-round">close</span>
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  {rows.map((r) => (
+                    <div key={r.label} className="text-sm">
+                      <span className="text-slate-400 block text-xs mb-0.5">{r.label}</span>
+                      <span className="font-bold text-slate-700 dark:text-slate-200">{r.value}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
+                  <h4 className="text-sm font-bold text-slate-500 mb-3">المخطط vs الفعلي</h4>
+                  <div className="space-y-3">
+                    {compareRows.map((cr) => (
+                      <div key={cr.label} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                        <span className="material-icons-round text-primary text-lg">{cr.icon}</span>
+                        <span className="text-sm font-bold text-slate-600 dark:text-slate-300 w-16">{cr.label}</span>
+                        <div className="flex-1 flex items-center gap-2">
+                          <div className="flex-1 text-center">
+                            <span className="text-xs text-slate-400 block">مخطط</span>
+                            <span className="text-sm font-black text-slate-700 dark:text-white">{cr.planned}</span>
+                          </div>
+                          <span className="material-icons-round text-slate-300 text-sm">arrow_forward</span>
+                          <div className="flex-1 text-center">
+                            <span className="text-xs text-slate-400 block">فعلي</span>
+                            <span className="text-sm font-black text-primary">{cr.actual}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {wo.notes && (
+                  <div className="text-sm">
+                    <span className="text-slate-400 block text-xs mb-1">ملاحظات</span>
+                    <p className="text-slate-600 dark:text-slate-300 font-medium">{wo.notes}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ══ View Workers Modal ══ */}
       {viewWorkersData && (

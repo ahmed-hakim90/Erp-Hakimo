@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Card, Badge, Button, KPIBox, LoadingSkeleton } from '../components/UI';
 import { useAppStore, useShallowStore } from '../store/useAppStore';
 import {
@@ -53,6 +53,7 @@ type ViewMode = 'table' | 'kanban' | 'timeline';
 
 export const ProductionPlans: React.FC = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const {
     products, _rawLines, _rawProducts, productionPlans, planReports,
@@ -721,6 +722,11 @@ export const ProductionPlans: React.FC = () => {
                                   <span className="material-icons-round text-sm">swap_horiz</span>
                                 </button>
                               </>
+                            )}
+                            {can('workOrders.create') && (plan.status === 'planned' || plan.status === 'in_progress') && (
+                              <button onClick={() => navigate(`/work-orders?planId=${plan.id}&productId=${plan.productId}`)} className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 rounded-lg transition-all" title="إنشاء أمر شغل">
+                                <span className="material-icons-round text-sm">assignment</span>
+                              </button>
                             )}
                             {can('roles.manage') && (
                               <button onClick={() => setDeletePlanId(plan.id!)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-lg transition-all" title="حذف">

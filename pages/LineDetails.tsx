@@ -6,7 +6,8 @@ import { useAppStore } from '../store/useAppStore';
 import { usePermission } from '../utils/permissions';
 import { reportService } from '../services/reportService';
 import { lineAssignmentService } from '../services/lineAssignmentService';
-import type { LineWorkerAssignment } from '../types';
+import { workOrderService } from '../services/workOrderService';
+import type { LineWorkerAssignment, WorkOrder } from '../types';
 import {
   formatNumber,
   calculateAvgAssemblyTime,
@@ -92,6 +93,7 @@ export const LineDetails: React.FC = () => {
   const systemSettings = useAppStore((s) => s.systemSettings);
 
   const [reports, setReports] = useState<ProductionReport[]>([]);
+  const [lineWorkOrders, setLineWorkOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [chartTab, setChartTab] = useState<ChartTab>('production');
   const [viewWorkersData, setViewWorkersData] = useState<{ date: string; workers: LineWorkerAssignment[] } | null>(null);
@@ -120,10 +122,15 @@ export const LineDetails: React.FC = () => {
     if (!id) return;
     let cancelled = false;
     setLoading(true);
-    reportService
-      .getByLine(id)
-      .then((data) => {
-        if (!cancelled) setReports(data);
+    Promise.all([
+      reportService.getByLine(id),
+      workOrderService.getActiveByLine(id),
+    ])
+      .then(([data, wos]) => {
+        if (!cancelled) {
+          setReports(data);
+          setLineWorkOrders(wos);
+        }
       })
       .catch(console.error)
       .finally(() => {
@@ -854,6 +861,54 @@ export const LineDetails: React.FC = () => {
           ))}
         </div>
       </Card>
+
+      {/* ── Active Work Orders ──────────────────────────────────────────── */}
+      {can('workOrders.view') && lineWorkOrders.length > 0 && (
+        <Card className="!p-0 border-none overflow-hidden shadow-xl shadow-slate-200/50" title="">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
+            <span className="material-icons-round text-primary">assignment</span>
+            <h3 className="text-lg font-bold">أوامر الشغل النشطة</h3>
+            <Badge variant="info">{lineWorkOrders.length}</Badge>
+          </div>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {lineWorkOrders.map((wo) => {
+              const product = _rawProducts.find((p) => p.id === wo.productId);
+              const supervisor = employees.find((e) => e.id === wo.supervisorId);
+              const prog = wo.quantity > 0 ? Math.min((wo.producedQuantity / wo.quantity) * 100, 100) : 0;
+              return (
+                <div key={wo.id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-mono text-xs font-bold text-primary">{wo.workOrderNumber}</span>
+                      <Badge variant={wo.status === 'in_progress' ? 'warning' : 'info'}>
+                        {wo.status === 'in_progress' ? 'قيد التنفيذ' : 'قيد الانتظار'}
+                      </Badge>
+                    </div>
+                    <p className="text-sm font-bold text-slate-800 dark:text-white">{product?.name ?? '—'}</p>
+                    <p className="text-xs text-slate-500">المشرف: {supervisor?.name ?? '—'} · الحد الأقصى: {wo.maxWorkers} عامل · التسليم: {wo.targetDate}</p>
+                  </div>
+                  <div className="sm:w-48 space-y-1">
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-500">{formatNumber(wo.producedQuantity)} / {formatNumber(wo.quantity)}</span>
+                      <span className="text-primary">{prog.toFixed(0)}%</span>
+                    </div>
+                    <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${prog >= 100 ? 'bg-emerald-500' : 'bg-primary'}`} style={{ width: `${prog}%` }} />
+                    </div>
+                  </div>
+                  {can('workOrders.viewCost') && (
+                    <div className="sm:w-32 text-left">
+                      <p className="text-[10px] text-slate-400 font-bold">التكلفة</p>
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{formatCost(wo.actualCost)}</p>
+                      <p className="text-[10px] text-slate-400">مقدرة: {formatCost(wo.estimatedCost)}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* ── Reports Table ─────────────────────────────────────────────────── */}
       <Card className="!p-0 border-none overflow-hidden shadow-xl shadow-slate-200/50" title="">

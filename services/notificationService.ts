@@ -6,7 +6,6 @@ import {
   updateDoc,
   query,
   where,
-  orderBy,
   serverTimestamp,
   onSnapshot,
   writeBatch,
@@ -17,20 +16,31 @@ import type { AppNotification } from '../types';
 
 const COLLECTION = 'notifications';
 
+function sortByCreatedAtDesc(a: AppNotification, b: AppNotification): number {
+  const getTime = (v: any) => {
+    if (!v) return 0;
+    if (v.toDate) return v.toDate().getTime();
+    if (v.seconds) return v.seconds * 1000;
+    return new Date(v).getTime();
+  };
+  return getTime(b.createdAt) - getTime(a.createdAt);
+}
+
 export const notificationService = {
-  async getByUser(userId: string): Promise<AppNotification[]> {
+  async getByRecipient(recipientId: string): Promise<AppNotification[]> {
     if (!isConfigured) return [];
     try {
       const q = query(
         collection(db, COLLECTION),
-        where('recipientId', '==', userId),
-        orderBy('createdAt', 'desc'),
+        where('recipientId', '==', recipientId),
       );
       const snap = await getDocs(q);
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppNotification));
+      const results = snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppNotification));
+      results.sort(sortByCreatedAtDesc);
+      return results;
     } catch (error) {
-      console.error('notificationService.getByUser error:', error);
-      throw error;
+      console.error('notificationService.getByRecipient error:', error);
+      return [];
     }
   },
 
@@ -54,16 +64,15 @@ export const notificationService = {
       await updateDoc(doc(db, COLLECTION, id), { isRead: true });
     } catch (error) {
       console.error('notificationService.markAsRead error:', error);
-      throw error;
     }
   },
 
-  async markAllAsRead(userId: string): Promise<void> {
+  async markAllAsRead(recipientId: string): Promise<void> {
     if (!isConfigured) return;
     try {
       const q = query(
         collection(db, COLLECTION),
-        where('recipientId', '==', userId),
+        where('recipientId', '==', recipientId),
         where('isRead', '==', false),
       );
       const snap = await getDocs(q);
@@ -73,19 +82,26 @@ export const notificationService = {
       await batch.commit();
     } catch (error) {
       console.error('notificationService.markAllAsRead error:', error);
-      throw error;
     }
   },
 
-  subscribeToUser(userId: string, callback: (notifications: AppNotification[]) => void): Unsubscribe {
+  subscribeToRecipient(recipientId: string, callback: (notifications: AppNotification[]) => void): Unsubscribe {
     if (!isConfigured) return () => {};
     const q = query(
       collection(db, COLLECTION),
-      where('recipientId', '==', userId),
-      orderBy('createdAt', 'desc'),
+      where('recipientId', '==', recipientId),
     );
-    return onSnapshot(q, (snap) => {
-      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppNotification)));
-    });
+    return onSnapshot(
+      q,
+      (snap) => {
+        const results = snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppNotification));
+        results.sort(sortByCreatedAtDesc);
+        callback(results);
+      },
+      (error) => {
+        console.error('notificationService.subscribeToRecipient error:', error);
+        callback([]);
+      },
+    );
   },
 };

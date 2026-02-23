@@ -590,13 +590,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Internal: Load all app data (after auth) ────────────────────────────
 
   _loadAppData: async () => {
-    const [rawProducts, rawLines, rawEmployees, configs, productionPlans, costCenters, costCenterValues, costAllocations, laborSettings, systemSettingsRaw] =
+    const [rawProducts, rawLines, rawEmployees, configs, productionPlans, workOrders, costCenters, costCenterValues, costAllocations, laborSettings, systemSettingsRaw] =
       await Promise.all([
         productService.getAll(),
         lineService.getAll(),
         employeeService.getAll(),
         lineProductConfigService.getAll(),
         productionPlanService.getAll(),
+        workOrderService.getAll(),
         costCenterService.getAll(),
         costCenterValueService.getAll(),
         costAllocationService.getAll(),
@@ -646,6 +647,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       lineStatuses,
       productionPlans,
       planReports,
+      workOrders,
       costCenters,
       costCenterValues,
       costAllocations,
@@ -885,6 +887,118 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  // ── Work Orders ──────────────────────────────────────────────────────────
+
+  fetchWorkOrders: async () => {
+    try {
+      const workOrders = await workOrderService.getAll();
+      set({ workOrders });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    }
+  },
+
+  createWorkOrder: async (data) => {
+    try {
+      const id = await workOrderService.create(data);
+      if (id) {
+        await get().fetchWorkOrders();
+        const { _rawProducts } = get();
+        const product = _rawProducts.find((p) => p.id === data.productId);
+        if (data.supervisorId) {
+          await notificationService.create({
+            recipientId: data.supervisorId,
+            type: 'work_order_assigned',
+            title: 'أمر شغل جديد',
+            message: `أمر شغل ${data.workOrderNumber} — ${product?.name ?? ''} — ${data.quantity} وحدة`,
+            referenceId: id,
+            isRead: false,
+          });
+        }
+      }
+      return id;
+    } catch (error) {
+      set({ error: (error as Error).message });
+      return null;
+    }
+  },
+
+  updateWorkOrder: async (id, data) => {
+    try {
+      const existing = get().workOrders.find((w) => w.id === id);
+      await workOrderService.update(id, data);
+      await get().fetchWorkOrders();
+      if (existing?.supervisorId && data.status !== existing.status) {
+        const { _rawProducts } = get();
+        const product = _rawProducts.find((p) => p.id === existing.productId);
+        const statusLabels: Record<string, string> = { in_progress: 'بدأ التنفيذ', completed: 'مكتمل', cancelled: 'ملغي' };
+        const statusLabel = statusLabels[data.status || ''];
+        if (statusLabel) {
+          await notificationService.create({
+            recipientId: existing.supervisorId,
+            type: data.status === 'completed' ? 'work_order_completed' : 'work_order_updated',
+            title: `تحديث أمر شغل — ${statusLabel}`,
+            message: `أمر شغل ${existing.workOrderNumber} — ${product?.name ?? ''} — ${statusLabel}`,
+            referenceId: id,
+            isRead: false,
+          });
+        }
+      }
+    } catch (error) {
+      set({ error: (error as Error).message });
+    }
+  },
+
+  deleteWorkOrder: async (id) => {
+    try {
+      await workOrderService.delete(id);
+      await get().fetchWorkOrders();
+    } catch (error) {
+      set({ error: (error as Error).message });
+    }
+  },
+
+  // ── Notifications ────────────────────────────────────────────────────────
+
+  fetchNotifications: async () => {
+    try {
+      const empId = get().currentEmployee?.id;
+      if (!empId) return;
+      const notifications = await notificationService.getByRecipient(empId);
+      set({ notifications });
+    } catch (error) {
+      console.error('fetchNotifications error:', error);
+    }
+  },
+
+  markNotificationRead: async (id) => {
+    try {
+      await notificationService.markAsRead(id);
+      set({ notifications: get().notifications.map((n) => n.id === id ? { ...n, isRead: true } : n) });
+    } catch (error) {
+      console.error('markNotificationRead error:', error);
+    }
+  },
+
+  markAllNotificationsRead: async () => {
+    try {
+      const empId = get().currentEmployee?.id;
+      if (!empId) return;
+      await notificationService.markAllAsRead(empId);
+      set({ notifications: get().notifications.map((n) => ({ ...n, isRead: true })) });
+    } catch (error) {
+      console.error('markAllNotificationsRead error:', error);
+    }
+  },
+
+  subscribeToNotifications: () => {
+    const empId = get().currentEmployee?.id;
+    if (!empId) return () => {};
+    return notificationService.subscribeToRecipient(empId, (notifications) => {
+      set({ notifications });
+    });
+  },
+
   // ── Mutations ─────────────────────────────────────────────────────────────
 
   createProduct: async (data) => {
@@ -1005,12 +1119,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }
 
-      const id = await reportService.create(data);
+      const activeWOs = await workOrderService.getActiveByLineAndProduct(data.lineId, data.productId);
+      const activeWO = activeWOs[0] ?? null;
+
+      const reportData = { ...data, workOrderId: activeWO?.id || '' };
+      const id = await reportService.create(reportData);
+
+      const laborCost = (laborSettings?.hourlyRate ?? 0) * (data.workHours || 0) * (data.workersCount || 0);
+
+      if (activeWO?.id) {
+        await workOrderService.incrementProduced(activeWO.id, data.quantityProduced, laborCost);
+        const newProduced = (activeWO.producedQuantity ?? 0) + data.quantityProduced;
+        if (newProduced >= activeWO.quantity) {
+          await workOrderService.update(activeWO.id, { status: 'completed', completedAt: new Date().toISOString() });
+        } else if (activeWO.status === 'pending') {
+          await workOrderService.update(activeWO.id, { status: 'in_progress' });
+        }
+      }
 
       if (activePlan?.id) {
-        const laborCost = (laborSettings?.hourlyRate ?? 0) * (data.workHours || 0) * (data.workersCount || 0);
         await productionPlanService.incrementProduced(activePlan.id, data.quantityProduced, laborCost);
-
         const newProduced = (activePlan.producedQuantity ?? 0) + data.quantityProduced;
         if (newProduced >= activePlan.plannedQuantity) {
           await productionPlanService.update(activePlan.id, { status: 'completed' });
@@ -1019,11 +1147,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const today = getTodayDateString();
       const { start: monthStart, end: monthEnd } = getMonthDateRange();
-      const [todayReports, monthlyReports] = await Promise.all([
+      const [todayReports, monthlyReports, workOrders] = await Promise.all([
         reportService.getByDateRange(today, today),
         reportService.getByDateRange(monthStart, monthEnd),
+        workOrderService.getAll(),
       ]);
-      set({ todayReports, monthlyReports, productionReports: monthlyReports });
+      set({ todayReports, monthlyReports, productionReports: monthlyReports, workOrders });
       get()._rebuildProducts();
       get()._rebuildLines();
       if (activePlan) await get().fetchProductionPlans();

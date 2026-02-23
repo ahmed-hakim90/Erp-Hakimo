@@ -1,10 +1,11 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, SearchableSelect } from '../components/UI';
 import { usePermission } from '../utils/permissions';
 import { exportToPDF, shareToWhatsApp, ShareResult } from '../utils/reportExport';
 import { lineAssignmentService } from '../services/lineAssignmentService';
+import { formatNumber } from '../utils/calculations';
 import type { LineWorkerAssignment } from '../types';
 import {
   SingleReportPrint,
@@ -166,7 +167,21 @@ export const QuickAction: React.FC = () => {
     }
   };
 
+  const workOrders = useAppStore((s) => s.workOrders);
+  const { can } = usePermission();
   const activeEmployees = employees.filter((s) => s.isActive && s.level === 2);
+  const activeWOs = useMemo(
+    () => workOrders.filter((w) => w.status === 'pending' || w.status === 'in_progress'),
+    [workOrders],
+  );
+
+  const handleSelectWO = useCallback((woId: string) => {
+    const wo = activeWOs.find((w) => w.id === woId);
+    if (!wo) return;
+    setLineId(wo.lineId);
+    setProductId(wo.productId);
+    setEmployeeId(wo.supervisorId);
+  }, [activeWOs]);
 
   return (
     <div className="space-y-6">
@@ -188,6 +203,32 @@ export const QuickAction: React.FC = () => {
 
       {!saved ? (
         <Card title="بيانات التقرير">
+          {/* Work Order Selector */}
+          {can('workOrders.view') && activeWOs.length > 0 && (
+            <div className="mb-5">
+              <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1">
+                <span className="material-icons-round text-sm text-primary">assignment</span>
+                أمر شغل (اختياري)
+              </label>
+              <select
+                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                value=""
+                onChange={(e) => handleSelectWO(e.target.value)}
+              >
+                <option value="">اختر أمر شغل لتعبئة البيانات تلقائياً</option>
+                {activeWOs.map((wo) => {
+                  const pName = _rawProducts.find((p) => p.id === wo.productId)?.name ?? '';
+                  const lName = _rawLines.find((l) => l.id === wo.lineId)?.name ?? '';
+                  const remaining = wo.quantity - (wo.producedQuantity || 0);
+                  return (
+                    <option key={wo.id} value={wo.id!}>
+                      {wo.workOrderNumber} — {pName} — {lName} — متبقي: {formatNumber(remaining)} وحدة
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
               <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 block">المشرف *</label>

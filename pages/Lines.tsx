@@ -34,6 +34,7 @@ export const Lines: React.FC = () => {
   const deleteLine = useAppStore((s) => s.deleteLine);
   const createLineStatus = useAppStore((s) => s.createLineStatus);
   const updateLineStatus = useAppStore((s) => s.updateLineStatus);
+  const workOrders = useAppStore((s) => s.workOrders);
 
   const { can } = usePermission();
   const navigate = useNavigate();
@@ -191,7 +192,7 @@ export const Lines: React.FC = () => {
                   <p className="text-base font-bold text-slate-700 dark:text-slate-200">{line.currentProduct}</p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 mb-4 text-center">
+                <div className="grid grid-cols-3 gap-3 mb-4 text-center">
                   <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
                     <p className="text-xs text-slate-400 mb-1">ساعات العمل</p>
                     <p className="text-lg font-black text-primary">{raw?.dailyWorkingHours ?? 0}</p>
@@ -207,6 +208,17 @@ export const Lines: React.FC = () => {
                       );
                     })()}
                   </div>
+                  {can('workOrders.view') && (() => {
+                    const woCount = workOrders.filter((w) => w.lineId === line.id && (w.status === 'pending' || w.status === 'in_progress')).length;
+                    return (
+                      <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                        <p className="text-xs text-slate-400 mb-1">أوامر شغل</p>
+                        <p className={`text-lg font-black ${woCount > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                          {woCount > 0 ? woCount : '—'}
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="space-y-3 mb-5">

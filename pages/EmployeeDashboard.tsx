@@ -3,12 +3,14 @@ import { Card, Badge, LoadingSkeleton } from '../components/UI';
 import { useAppStore, useShallowStore } from '../store/useAppStore';
 import {
   formatNumber,
+  formatCurrency,
   calculateWasteRatio,
   calculatePlanProgress,
   getTodayDateString,
   countUniqueDays,
 } from '../utils/calculations';
 import { reportService } from '../services/reportService';
+import { usePermission } from '../utils/permissions';
 import type { ProductionReport } from '../types';
 
 type Period = 'daily' | 'weekly' | 'monthly';
@@ -76,6 +78,8 @@ export const EmployeeDashboard: React.FC = () => {
     planReports,
     todayReports,
     monthlyReports,
+    workOrders,
+    updateWorkOrder,
     loading,
   } = useShallowStore((s) => ({
     uid: s.uid,
@@ -86,8 +90,12 @@ export const EmployeeDashboard: React.FC = () => {
     planReports: s.planReports,
     todayReports: s.todayReports,
     monthlyReports: s.monthlyReports,
+    workOrders: s.workOrders,
+    updateWorkOrder: s.updateWorkOrder,
     loading: s.loading,
   }));
+
+  const { can } = usePermission();
 
   const [period, setPeriod] = useState<Period>('daily');
   const [periodReports, setPeriodReports] = useState<ProductionReport[]>([]);
@@ -553,6 +561,83 @@ export const EmployeeDashboard: React.FC = () => {
           </div>
         </>
       )}
+
+      {/* ── Supervisor Work Orders ─────────────────────────────────────── */}
+      {employee && employee.level === 2 && can('workOrders.view') && (() => {
+        const myWOs = workOrders.filter(
+          (w) => w.supervisorId === employee.id && (w.status === 'pending' || w.status === 'in_progress'),
+        );
+        if (myWOs.length === 0) return null;
+        return (
+          <Card className="!p-0 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
+              <span className="material-icons-round text-primary">assignment</span>
+              <h3 className="text-lg font-bold">أوامر الشغل</h3>
+              <Badge variant="warning">{myWOs.length}</Badge>
+            </div>
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {myWOs.map((wo) => {
+                const product = _rawProducts.find((p) => p.id === wo.productId);
+                const line = _rawLines.find((l) => l.id === wo.lineId);
+                const prog = wo.quantity > 0 ? Math.min((wo.producedQuantity / wo.quantity) * 100, 100) : 0;
+                return (
+                  <div key={wo.id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-xs font-bold text-primary">{wo.workOrderNumber}</span>
+                        <Badge variant={wo.status === 'in_progress' ? 'warning' : 'info'}>
+                          {wo.status === 'in_progress' ? 'قيد التنفيذ' : 'قيد الانتظار'}
+                        </Badge>
+                      </div>
+                      <p className="text-sm font-bold text-slate-800 dark:text-white">{product?.name ?? '—'}</p>
+                      <p className="text-xs text-slate-500">
+                        {line?.name ?? '—'} · {wo.maxWorkers} عامل كحد أقصى · التسليم: {wo.targetDate}
+                      </p>
+                    </div>
+                    <div className="sm:w-48 space-y-1">
+                      <div className="flex justify-between text-xs font-bold">
+                        <span className="text-slate-500">{formatNumber(wo.producedQuantity)} / {formatNumber(wo.quantity)}</span>
+                        <span className="text-primary">{prog.toFixed(0)}%</span>
+                      </div>
+                      <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${prog >= 100 ? 'bg-emerald-500' : 'bg-primary'}`} style={{ width: `${prog}%` }} />
+                      </div>
+                    </div>
+                    {can('workOrders.viewCost') && (
+                      <div className="sm:w-28 text-left">
+                        <p className="text-[10px] text-slate-400 font-bold">التكلفة</p>
+                        <p className="text-sm font-bold">{formatCurrency(wo.actualCost)}</p>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {can('workOrders.edit') && wo.status === 'pending' && (
+                        <button
+                          onClick={() => updateWorkOrder(wo.id!, { status: 'in_progress' })}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-xs font-bold transition-colors"
+                          title="بدء التنفيذ"
+                        >
+                          <span className="material-icons-round text-base">play_arrow</span>
+                          بدء
+                        </button>
+                      )}
+                      {can('workOrders.edit') && wo.status === 'in_progress' && (
+                        <button
+                          onClick={() => updateWorkOrder(wo.id!, { status: 'completed', completedAt: new Date().toISOString() })}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-xs font-bold transition-colors"
+                          title="اكتمل"
+                        >
+                          <span className="material-icons-round text-base">check_circle</span>
+                          اكتمل
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        );
+      })()}
     </div>
   );
 };

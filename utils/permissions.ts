@@ -20,6 +20,7 @@ export type Permission =
   | 'employees.view' | 'employees.create' | 'employees.edit' | 'employees.delete'
   | 'supervisors.view'
   | 'productionWorkers.view'
+  | 'lineWorkers.view'
   | 'reports.view' | 'reports.create' | 'reports.edit' | 'reports.delete' | 'reports.viewCost'
   | 'lineStatus.view' | 'lineStatus.edit'
   | 'lineProductConfig.view'
@@ -108,6 +109,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     label: 'عمال الإنتاج',
     permissions: [
       { key: 'productionWorkers.view', label: 'عرض عمال الإنتاج' },
+    ],
+  },
+  {
+    key: 'lineWorkers',
+    label: 'ربط العمالة بالخطوط',
+    permissions: [
+      { key: 'lineWorkers.view', label: 'عرض وإدارة ربط العمالة' },
     ],
   },
   {
@@ -430,6 +438,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/cost-centers': 'costs.view',
   '/cost-centers/:id': 'costs.view',
   '/cost-settings': 'costs.manage',
+  '/line-workers': 'lineWorkers.view',
   '/roles': 'roles.manage',
   '/settings': 'settings.view',
   '/attendance': 'attendance.view',

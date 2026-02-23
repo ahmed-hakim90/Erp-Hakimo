@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { usePermission } from '../utils/permissions';
-import { Card, KPIBox, LoadingSkeleton } from '../components/UI';
+import { Card, KPIBox, Badge, LoadingSkeleton } from '../components/UI';
 import { reportService } from '../services/reportService';
 import { adminService, type SystemUsers } from '../services/adminService';
 import { formatNumber, calculateWasteRatio } from '../utils/calculations';
@@ -197,6 +198,7 @@ const GaugeChart: React.FC<{ value: number; label: string }> = ({ value, label }
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export const AdminDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
 
@@ -226,6 +228,7 @@ export const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // ── System metrics state ─────────────────────────────────────────────────
+  const [productSearch, setProductSearch] = useState('');
   const [systemUsers, setSystemUsers] = useState<SystemUsers>({ total: 0, active: 0, disabled: 0 });
   const [rolesDistribution, setRolesDistribution] = useState<{ roleName: string; color: string; count: number }[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
@@ -516,6 +519,52 @@ export const AdminDashboard: React.FC = () => {
       .slice(0, 6);
   }, [costCenters, costCenterValues, costAllocations]);
 
+  // ── Product Summary (products worked on during the period) ────────────────
+
+  const productSummary = useMemo(() => {
+    const map = new Map<string, { qty: number; laborCost: number; indirectCost: number }>();
+
+    const lineMonthIndirectCache = new Map<string, number>();
+    const lineDateTotals = new Map<string, number>();
+    reports.forEach((r) => {
+      const key = `${r.lineId}_${r.date}`;
+      lineDateTotals.set(key, (lineDateTotals.get(key) || 0) + (r.quantityProduced || 0));
+    });
+
+    reports.forEach((r) => {
+      if (!r.quantityProduced || r.quantityProduced <= 0) return;
+      const prev = map.get(r.productId) || { qty: 0, laborCost: 0, indirectCost: 0 };
+      prev.qty += r.quantityProduced;
+      prev.laborCost += (r.workersCount || 0) * (r.workHours || 0) * hourlyRate;
+
+      const month = r.date?.slice(0, 7) || getCurrentMonth();
+      const cacheKey = `${r.lineId}_${month}`;
+      if (!lineMonthIndirectCache.has(cacheKey)) {
+        lineMonthIndirectCache.set(cacheKey,
+          calculateDailyIndirectCost(r.lineId, month, costCenters, costCenterValues, costAllocations)
+        );
+      }
+      const lineIndirect = lineMonthIndirectCache.get(cacheKey) || 0;
+      const lineDateKey = `${r.lineId}_${r.date}`;
+      const lineDateTotal = lineDateTotals.get(lineDateKey) || 0;
+      if (lineDateTotal > 0) {
+        prev.indirectCost += lineIndirect * (r.quantityProduced / lineDateTotal);
+      }
+
+      map.set(r.productId, prev);
+    });
+
+    return Array.from(map.entries())
+      .map(([productId, d]) => ({
+        id: productId,
+        name: _rawProducts.find((p) => p.id === productId)?.name || productId,
+        code: _rawProducts.find((p) => p.id === productId)?.code || '',
+        qty: d.qty,
+        avgCost: d.qty > 0 ? (d.laborCost + d.indirectCost) / d.qty : 0,
+      }))
+      .sort((a, b) => b.qty - a.qty);
+  }, [reports, _rawProducts, hourlyRate, costCenters, costCenterValues, costAllocations]);
+
   // ── Alerts ────────────────────────────────────────────────────────────────
 
   const alerts = useMemo(() => {
@@ -800,6 +849,92 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
       )}
+
+      {/* ── Product Summary Table ──────────────────────────────────────────── */}
+      {productSummary.length > 0 && (() => {
+        const q = productSearch.trim().toLowerCase();
+        const filtered = q
+          ? productSummary.filter((p) => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
+          : productSummary;
+        return (
+          <Card>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <span className="material-icons-round text-primary">inventory_2</span>
+                <h3 className="text-lg font-bold">ملخص المنتجات خلال الفترة</h3>
+                <Badge variant="info">{productSummary.length} منتج</Badge>
+              </div>
+              <div className="sm:mr-auto relative">
+                <span className="material-icons-round text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 text-sm">search</span>
+                <input
+                  type="text"
+                  placeholder="بحث بالكود أو الاسم..."
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  className="pr-9 pl-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold w-full sm:w-56 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
+                />
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-700">
+                    <th className="text-right py-3 px-4 font-bold text-slate-500 text-xs">#</th>
+                    <th className="text-right py-3 px-4 font-bold text-slate-500 text-xs">المنتج</th>
+                    <th className="text-right py-3 px-4 font-bold text-slate-500 text-xs">الكود</th>
+                    <th className="text-right py-3 px-4 font-bold text-slate-500 text-xs">الكمية المنتجة</th>
+                    {canViewCosts && (
+                      <th className="text-right py-3 px-4 font-bold text-slate-500 text-xs">متوسط تكلفة الوحدة</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={canViewCosts ? 5 : 4} className="py-8 text-center text-slate-400 text-sm">
+                        لا توجد نتائج للبحث "{productSearch}"
+                      </td>
+                    </tr>
+                  ) : (
+                    filtered.map((p, i) => (
+                      <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                        <td className="py-3 px-4 text-slate-400 font-mono text-xs">{i + 1}</td>
+                        <td className="py-3 px-4 font-bold">
+                          <button
+                            onClick={() => navigate(`/products/${p.id}`)}
+                            className="text-primary hover:underline cursor-pointer transition-colors"
+                          >{p.name}</button>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-slate-500">{p.code}</td>
+                        <td className="py-3 px-4 font-mono font-bold text-primary">{formatNumber(p.qty)}</td>
+                        {canViewCosts && (
+                          <td className="py-3 px-4 font-mono font-bold text-amber-600 dark:text-amber-400">{formatCost(p.avgCost)} ج.م</td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                {filtered.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                      <td colSpan={3} className="py-3 px-4 font-black text-slate-600 dark:text-slate-300">الإجمالي</td>
+                      <td className="py-3 px-4 font-mono font-black text-primary">{formatNumber(filtered.reduce((s, p) => s + p.qty, 0))}</td>
+                      {canViewCosts && (
+                        <td className="py-3 px-4 font-mono font-bold text-amber-600 dark:text-amber-400">
+                          {formatCost(filtered.reduce((s, p) => s + p.qty, 0) > 0
+                            ? filtered.reduce((s, p) => s + p.avgCost * p.qty, 0) / filtered.reduce((s, p) => s + p.qty, 0)
+                            : 0
+                          )} ج.م
+                        </td>
+                      )}
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* ── System KPIs ─────────────────────────────────────────────────────── */}
       {isVisible('system_kpis') && <div>
