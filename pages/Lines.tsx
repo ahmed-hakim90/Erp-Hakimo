@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, Badge } from '../components/UI';
 import { formatNumber, getTodayDateString } from '../utils/calculations';
-import { ProductionLineStatus, FirestoreProductionLine } from '../types';
+import { ProductionLineStatus, FirestoreProductionLine, WorkOrder } from '../types';
 import type { LineWorkerAssignment } from '../types';
 import { usePermission } from '../utils/permissions';
 import { lineAssignmentService } from '../services/lineAssignmentService';

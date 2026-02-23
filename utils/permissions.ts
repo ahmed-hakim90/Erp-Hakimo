@@ -26,7 +26,6 @@ export type Permission =
   | 'lineProductConfig.view'
   | 'settings.view' | 'settings.edit'
   | 'roles.view' | 'roles.manage'
-  | 'users.view' | 'users.create' | 'users.edit' | 'users.delete'
   | 'activityLog.view'
   | 'quickAction.view'
   | 'costs.view' | 'costs.manage' | 'costs.closePeriod'
@@ -159,16 +158,6 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     permissions: [
       { key: 'roles.view', label: 'عرض الأدوار' },
       { key: 'roles.manage', label: 'إدارة الأدوار' },
-    ],
-  },
-  {
-    key: 'users',
-    label: 'إدارة المستخدمين',
-    permissions: [
-      { key: 'users.view', label: 'عرض المستخدمين' },
-      { key: 'users.create', label: 'إنشاء مستخدم' },
-      { key: 'users.edit', label: 'تعديل مستخدم' },
-      { key: 'users.delete', label: 'حذف مستخدم' },
     ],
   },
   {
@@ -431,7 +420,6 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/self-service': 'selfService.view',
   '/reports': 'reports.view',
   '/quick-action': 'quickAction.view',
-  '/users': 'users.view',
   '/activity-log': 'activityLog.view',
   '/production-plans': 'plans.view',
   '/work-orders': 'workOrders.view',
@@ -517,7 +505,7 @@ export function usePermission(): PermissionGuards {
       canCreateReport: can('reports.create'),
       canEditReport: can('reports.edit'),
       canDeleteReport: can('reports.delete'),
-      canManageUsers: can('users.create') || can('users.edit'),
+      canManageUsers: can('employees.create') || can('employees.edit'),
       canViewActivityLog: can('activityLog.view'),
       canUseQuickAction: can('quickAction.view'),
     };

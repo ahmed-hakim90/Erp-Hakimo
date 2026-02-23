@@ -41,7 +41,6 @@ export const Products: React.FC = () => {
 
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
-  const canCreateRawMaterial = can('products.createRawMaterial');
   const navigate = useNavigate();
 
   const [showModal, setShowModal] = useState(false);
@@ -117,7 +116,7 @@ export const Products: React.FC = () => {
 
   const handleSave = async () => {
     if (!form.name || !form.code) return;
-    if (form.model === 'المواد الخام' && !canCreateRawMaterial) return;
+    if (!form.model) return;
     setSaving(true);
     if (editId) {
       await updateProduct(editId, form);
@@ -244,9 +243,8 @@ export const Products: React.FC = () => {
             onChange={(e) => setCategoryFilter(e.target.value)}
           >
             <option value="">كل الفئات</option>
-            <option value="المواد الخام">المواد الخام</option>
-            <option value="المنتجات النهائية">المنتجات النهائية</option>
-            <option value="نصف مصنع">نصف مصنع</option>
+            <option value="منزلي">منزلي</option>
+            <option value="سريا">سريا</option>
           </select>
           <select
             className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 px-4 text-sm font-bold focus:ring-primary outline-none min-w-[140px]"
@@ -439,16 +437,9 @@ export const Products: React.FC = () => {
                     onChange={(e) => setForm({ ...form, model: e.target.value })}
                   >
                     <option value="">اختر الفئة</option>
-                    {canCreateRawMaterial && <option value="المواد الخام">المواد الخام</option>}
-                    <option value="المنتجات النهائية">المنتجات النهائية</option>
-                    <option value="نصف مصنع">نصف مصنع</option>
+                    <option value="منزلي">منزلي</option>
+                    <option value="سريا">سريا</option>
                   </select>
-                  {!canCreateRawMaterial && form.model === 'المواد الخام' && (
-                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                      <span className="material-icons-round text-sm">info</span>
-                      ليس لديك صلاحية إضافة مواد خام
-                    </p>
-                  )}
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -527,7 +518,7 @@ export const Products: React.FC = () => {
             </div>
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
               <Button variant="outline" onClick={() => setShowModal(false)}>إلغاء</Button>
-              <Button variant="primary" onClick={handleSave} disabled={saving || !form.name || !form.code || (form.model === 'المواد الخام' && !canCreateRawMaterial)}>
+              <Button variant="primary" onClick={handleSave} disabled={saving || !form.name || !form.code}>
                 {saving ? (
                   <span className="material-icons-round animate-spin text-sm">refresh</span>
                 ) : (

@@ -278,6 +278,7 @@ export interface CostAllocation {
 export interface LaborSettings {
   id?: string;
   hourlyRate: number;
+  cnyToEgpRate?: number;
 }
 
 // ─── Monthly Production Cost ─────────────────────────────────────────────────
