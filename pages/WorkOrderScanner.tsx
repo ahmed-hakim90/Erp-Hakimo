@@ -26,6 +26,7 @@ export const WorkOrderScanner: React.FC = () => {
     fetchWorkOrders,
     subscribeToWorkOrderScans,
     toggleBarcodeScan,
+    updateWorkOrder,
   } = useShallowStore((s) => ({
     workOrders: s.workOrders,
     _rawProducts: s._rawProducts,
@@ -37,12 +38,18 @@ export const WorkOrderScanner: React.FC = () => {
     fetchWorkOrders: s.fetchWorkOrders,
     subscribeToWorkOrderScans: s.subscribeToWorkOrderScans,
     toggleBarcodeScan: s.toggleBarcodeScan,
+    updateWorkOrder: s.updateWorkOrder,
   }));
 
   const [serialInput, setSerialInput] = useState('');
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
+  const [closeWorkers, setCloseWorkers] = useState(0);
+  const [closeConfirmedQty, setCloseConfirmedQty] = useState('');
+  const [closeBusy, setCloseBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scanBufferRef = useRef('');
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -113,6 +120,12 @@ export const WorkOrderScanner: React.FC = () => {
 
   const summary = liveProduction[workOrderId ?? ''] ?? scanEventService.summaryFromSessions(sessions);
 
+  const openCloseModal = useCallback(() => {
+    setCloseWorkers(summary.activeWorkers || workOrder?.actualWorkersCount || workOrder?.maxWorkers || 0);
+    setCloseConfirmedQty(String(summary.completedUnits || 0));
+    setCloseModalOpen(true);
+  }, [summary.activeWorkers, summary.completedUnits, workOrder?.actualWorkersCount, workOrder?.maxWorkers]);
+
   const handleScan = async (rawCode: string) => {
     if (!workOrder || !workOrderId) return;
     const code = rawCode.trim();
@@ -143,6 +156,65 @@ export const WorkOrderScanner: React.FC = () => {
       setBusy(false);
     }
   };
+
+  const handleDeleteSession = useCallback(async (sessionId: string) => {
+    if (!workOrderId) return;
+    const ok = window.confirm('هل تريد حذف هذه الجلسة؟ سيتم حذف الدخول والخروج المرتبطين بها.');
+    if (!ok) return;
+    setScanMsg(null);
+    setScanError(null);
+    setDeletingSessionId(sessionId);
+    try {
+      await scanEventService.deleteSession(workOrderId, sessionId);
+      setScanMsg('تم حذف الجلسة بنجاح');
+      playFeedbackTone('success');
+    } catch (error: any) {
+      setScanError(error?.message || 'فشل حذف الجلسة');
+      playFeedbackTone('error');
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }, [playFeedbackTone, workOrderId]);
+
+  const handleCloseWorkOrder = useCallback(async () => {
+    if (!workOrder || !workOrderId) return;
+    setCloseBusy(true);
+    setScanMsg(null);
+    setScanError(null);
+    try {
+      const latest = await scanEventService.buildWorkOrderSummary(workOrderId);
+      const scannedQty = latest.summary.completedUnits || 0;
+      const parsedConfirmedQty = Number(closeConfirmedQty);
+      const confirmedQty = Number.isFinite(parsedConfirmedQty) ? parsedConfirmedQty : scannedQty;
+
+      const closeNotes: string[] = [];
+      if (confirmedQty !== scannedQty) {
+        closeNotes.push(`الكمية المؤكدة عند الإغلاق: ${confirmedQty} (كمية الاسكان: ${scannedQty})`);
+      }
+      closeNotes.push(`العمالة الفعلية عند الإغلاق: ${Number(closeWorkers) || 0}`);
+      const mergedNote = [workOrder.notes, ...closeNotes].filter(Boolean).join(' | ');
+
+      await updateWorkOrder(workOrderId, {
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        // Keep scan tracked quantity as the official scan result.
+        actualProducedFromScans: scannedQty,
+        actualWorkersCount: Number(closeWorkers) || 0,
+        scanSummary: latest.summary,
+        scanSessionClosedAt: new Date().toISOString(),
+        notes: mergedNote,
+      });
+
+      setCloseModalOpen(false);
+      setScanMsg('تم إنهاء أمر الشغل بنجاح');
+      playFeedbackTone('success');
+    } catch (error: any) {
+      setScanError(error?.message || 'فشل إنهاء أمر الشغل');
+      playFeedbackTone('error');
+    } finally {
+      setCloseBusy(false);
+    }
+  }, [closeConfirmedQty, closeWorkers, playFeedbackTone, updateWorkOrder, workOrder, workOrderId]);
 
   useEffect(() => {
     const flushBuffer = () => {
@@ -217,6 +289,12 @@ export const WorkOrderScanner: React.FC = () => {
             <Badge variant={workOrder.status === 'completed' ? 'success' : workOrder.status === 'in_progress' ? 'warning' : 'info'}>
               {workOrder.status === 'completed' ? 'مكتمل' : workOrder.status === 'in_progress' ? 'قيد التنفيذ' : 'قيد الانتظار'}
             </Badge>
+            {workOrder.status !== 'completed' && (
+              <Button variant="primary" onClick={openCloseModal}>
+                <span className="material-icons-round text-sm">task_alt</span>
+                الانتهاء
+              </Button>
+            )}
             <Button variant="outline" onClick={() => navigate('/work-orders')}>رجوع</Button>
           </div>
         </div>
@@ -281,12 +359,13 @@ export const WorkOrderScanner: React.FC = () => {
                 <th className="text-right py-3 px-3">دخول</th>
                 <th className="text-right py-3 px-3">خروج</th>
                 <th className="text-right py-3 px-3">السيكل تايم</th>
+                <th className="text-right py-3 px-3">إجراء</th>
               </tr>
             </thead>
             <tbody>
               {sessions.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">لا توجد جلسات اسكان بعد</td>
+                  <td colSpan={7} className="py-8 text-center text-slate-400">لا توجد جلسات اسكان بعد</td>
                 </tr>
               )}
               {sessions.map((session) => (
@@ -303,12 +382,74 @@ export const WorkOrderScanner: React.FC = () => {
                   <td className="py-3 px-3 font-mono text-xs font-bold">
                     {session.cycleSeconds ? `${formatNumber(session.cycleSeconds)} ث` : '—'}
                   </td>
+                  <td className="py-3 px-3">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSession(session.sessionId)}
+                      disabled={deletingSessionId === session.sessionId}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-600 bg-rose-50 dark:bg-rose-900/20 hover:bg-rose-100 dark:hover:bg-rose-900/30 disabled:opacity-60 transition-colors"
+                    >
+                      {deletingSessionId === session.sessionId ? (
+                        <span className="material-icons-round animate-spin text-sm">refresh</span>
+                      ) : (
+                        <span className="material-icons-round text-sm">delete</span>
+                      )}
+                      إزالة
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </Card>
+
+      {closeModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !closeBusy && setCloseModalOpen(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-black mb-1">تأكيد إنهاء أمر الشغل</h3>
+            <p className="text-xs text-slate-500 mb-4">{workOrder.workOrderNumber} — {productName}</p>
+
+            <div className="space-y-3">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3">
+                <p className="text-xs text-slate-500 font-bold mb-1">كمية الاسكان الحالية (لحظي)</p>
+                <p className="text-xl font-black text-emerald-600">{formatNumber(summary.completedUnits)}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">الكمية المؤكدة (اختياري لو في اختلاف)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={closeConfirmedQty}
+                  onChange={(e) => setCloseConfirmedQty(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">كمية الاسكان ستظل كما هي، وسيتم فقط تسجيل الاختلاف كملاحظة.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">عدد العمالة الفعلية</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={closeWorkers}
+                  onChange={(e) => setCloseWorkers(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mt-5">
+              <Button variant="outline" onClick={() => setCloseModalOpen(false)} disabled={closeBusy}>إلغاء</Button>
+              <Button variant="primary" onClick={handleCloseWorkOrder} disabled={closeBusy}>
+                {closeBusy && <span className="material-icons-round animate-spin text-sm">refresh</span>}
+                تأكيد الإنهاء
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -78,6 +78,12 @@ export const WorkOrders: React.FC = () => {
   const [filterLine, setFilterLine] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [closingWorkOrder, setClosingWorkOrder] = useState<WorkOrder | null>(null);
+  const [closingProduced, setClosingProduced] = useState(0);
+  const [closingWorkers, setClosingWorkers] = useState(0);
+  const [closingNote, setClosingNote] = useState('');
+  const [closingOpenSessions, setClosingOpenSessions] = useState(0);
+  const [closingBusy, setClosingBusy] = useState(false);
 
   const [printData, setPrintData] = useState<WorkOrderPrintData | null>(null);
   const woPrintRef = useRef<HTMLDivElement>(null);
@@ -263,6 +269,51 @@ export const WorkOrders: React.FC = () => {
       scanSessionClosedAt: new Date().toISOString(),
     });
   }, [updateWorkOrder]);
+
+  const openCompleteModal = useCallback(async (wo: WorkOrder) => {
+    const scanSummary = await scanEventService.buildWorkOrderSummary(wo.id!);
+    setClosingWorkOrder(wo);
+    setClosingProduced(
+      wo.actualProducedFromScans ??
+      scanSummary.summary.completedUnits ??
+      wo.producedQuantity ??
+      0
+    );
+    setClosingWorkers(
+      wo.actualWorkersCount ??
+      scanSummary.summary.activeWorkers ??
+      wo.maxWorkers ??
+      0
+    );
+    setClosingNote(wo.notes ?? '');
+    setClosingOpenSessions(scanSummary.openSessions.length);
+  }, []);
+
+  const confirmCloseWorkOrder = useCallback(async () => {
+    if (!closingWorkOrder) return;
+    setClosingBusy(true);
+    try {
+      const scanSummary = await scanEventService.buildWorkOrderSummary(closingWorkOrder.id!);
+      await updateWorkOrder(closingWorkOrder.id!, {
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        actualWorkersCount: Number(closingWorkers) || 0,
+        actualProducedFromScans: Number(closingProduced) || 0,
+        scanSummary: {
+          ...scanSummary.summary,
+          completedUnits: Number(closingProduced) || 0,
+          activeWorkers: Number(closingWorkers) || 0,
+        },
+        scanSessionClosedAt: new Date().toISOString(),
+        notes: closingNote,
+      });
+      setClosingWorkOrder(null);
+      setClosingNote('');
+      setClosingOpenSessions(0);
+    } finally {
+      setClosingBusy(false);
+    }
+  }, [closingProduced, closingWorkers, closingWorkOrder, closingNote, updateWorkOrder]);
 
   const triggerWOPrint = useCallback(async (wo: WorkOrder) => {
     setPrintData({
@@ -469,7 +520,7 @@ export const WorkOrders: React.FC = () => {
                             </>
                           )}
                           {can('workOrders.edit') && wo.status === 'in_progress' && (
-                            <button onClick={() => handleStatusChange(wo, 'completed')} className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-600" title="اكتمل">
+                            <button onClick={() => openCompleteModal(wo)} className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-600" title="اكتمل">
                               <span className="material-icons-round text-sm">check_circle</span>
                             </button>
                           )}
@@ -667,6 +718,66 @@ export const WorkOrders: React.FC = () => {
             <div className="flex gap-3 justify-center">
               <Button variant="outline" onClick={() => setDeleteConfirm(null)}>إلغاء</Button>
               <Button variant="danger" onClick={() => handleDelete(deleteConfirm)}>حذف</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Complete Production Modal */}
+      {closingWorkOrder && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !closingBusy && setClosingWorkOrder(null)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-1">إغلاق أمر الشغل</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              {closingWorkOrder.workOrderNumber} — {shortProductName(closingWorkOrder.productId)}
+            </p>
+
+            {closingOpenSessions > 0 && (
+              <div className="mb-4 p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-sm font-bold">
+                يوجد {closingOpenSessions} قطعة ما زالت قيد التشغيل بدون تسجيل خروج.
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">الإنتاج الفعلي</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={closingProduced}
+                  onChange={(e) => setClosingProduced(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">العمالة الفعلية</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={closingWorkers}
+                  onChange={(e) => setClosingWorkers(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
+                />
+              </div>
+            </div>
+
+            <div className="mb-5">
+              <label className="block text-xs font-bold text-slate-500 mb-1">ملحوظة الإغلاق</label>
+              <textarea
+                rows={3}
+                value={closingNote}
+                onChange={(e) => setClosingNote(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold resize-none"
+                placeholder="أضف ملحوظة للتتبع (اختياري)"
+              />
+            </div>
+
+            <div className="flex justify-between">
+              <Button variant="outline" onClick={() => setClosingWorkOrder(null)} disabled={closingBusy}>إلغاء</Button>
+              <Button variant="primary" onClick={confirmCloseWorkOrder} disabled={closingBusy}>
+                {closingBusy && <span className="material-icons-round animate-spin text-sm">refresh</span>}
+                تأكيد إغلاق الإنتاج
+              </Button>
             </div>
           </div>
         </div>

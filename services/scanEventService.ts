@@ -1,6 +1,8 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
+  doc,
   getDocs,
   limit,
   onSnapshot,
@@ -67,11 +69,13 @@ const sessionsFromEvents = (events: WorkOrderScanEvent[]): WorkOrderScanSession[
 const summaryFromSessions = (sessions: WorkOrderScanSession[]): WorkOrderLiveSummary => {
   const completed = sessions.filter((s) => s.status === 'closed' && !!s.outAt);
   const active = sessions.filter((s) => s.status === 'open');
-  const workers = new Set(
+  const workersWithIds = new Set(
     sessions
       .map((s) => s.employeeId)
       .filter((id): id is string => !!id && id.trim().length > 0),
   );
+  // If scanners are used without employee identity, fallback to active sessions count.
+  const activeWorkers = workersWithIds.size > 0 ? workersWithIds.size : active.length;
   const avgCycleSeconds = completed.length > 0
     ? Math.round(completed.reduce((acc, s) => acc + (s.cycleSeconds || 0), 0) / completed.length)
     : 0;
@@ -84,7 +88,7 @@ const summaryFromSessions = (sessions: WorkOrderScanSession[]): WorkOrderLiveSum
   return {
     completedUnits: completed.length,
     inProgressUnits: active.length,
-    activeWorkers: workers.size,
+    activeWorkers,
     avgCycleSeconds,
     lastScanAt,
   };
@@ -217,6 +221,15 @@ export const scanEventService = {
     const summary = summaryFromSessions(sessions);
     const openSessions = sessions.filter((s) => s.status === 'open');
     return { summary, sessions, openSessions };
+  },
+
+  async deleteSession(workOrderId: string, sessionId: string): Promise<void> {
+    if (!isConfigured) return;
+    const events = await this.getByWorkOrder(workOrderId);
+    const related = events.filter((e) => e.sessionId === sessionId && e.id);
+    await Promise.all(
+      related.map((e) => deleteDoc(doc(db, COLLECTION, e.id!))),
+    );
   },
 
   subscribeByWorkOrder(workOrderId: string, onData: (events: WorkOrderScanEvent[]) => void): Unsubscribe {

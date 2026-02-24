@@ -236,6 +236,7 @@ interface AppState {
   // Real-time subscriptions (return unsubscribe fn)
   subscribeToDashboard: () => () => void;
   subscribeToLineStatuses: () => () => void;
+  subscribeToWorkOrders: () => () => void;
   subscribeToScanEventsToday: () => () => void;
   subscribeToWorkOrderScans: (workOrderId: string) => () => void;
   toggleBarcodeScan: (payload: {
@@ -1401,6 +1402,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   subscribeToLineStatuses: () => {
     return lineStatusService.subscribeAll((statuses) => {
       set({ lineStatuses: statuses });
+      get()._rebuildLines();
+    });
+  },
+
+  subscribeToWorkOrders: () => {
+    return workOrderService.subscribeAll((orders) => {
+      set({ workOrders: orders });
       get()._rebuildLines();
     });
   },

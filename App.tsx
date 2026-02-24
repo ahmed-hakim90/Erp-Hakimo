@@ -161,6 +161,7 @@ const App: React.FC = () => {
   const initializeApp = useAppStore((s) => s.initializeApp);
   const subscribeToDashboard = useAppStore((s) => s.subscribeToDashboard);
   const subscribeToLineStatuses = useAppStore((s) => s.subscribeToLineStatuses);
+  const subscribeToWorkOrders = useAppStore((s) => s.subscribeToWorkOrders);
   const subscribeToScanEventsToday = useAppStore((s) => s.subscribeToScanEventsToday);
   const isAuthenticated = useAppStore((s) => s.isAuthenticated);
   const isPendingApproval = useAppStore((s) => s.isPendingApproval);
@@ -178,10 +179,12 @@ const App: React.FC = () => {
           if (state.isAuthenticated) {
             const unsubReports = subscribeToDashboard();
             const unsubStatuses = subscribeToLineStatuses();
+            const unsubWorkOrders = subscribeToWorkOrders();
             const unsubScans = subscribeToScanEventsToday();
             (window as any).__cleanupSubs = () => {
               unsubReports();
               unsubStatuses();
+              unsubWorkOrders();
               unsubScans();
             };
           }
