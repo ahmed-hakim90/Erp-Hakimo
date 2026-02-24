@@ -101,7 +101,7 @@ export const ActivityLogPage: React.FC = () => {
             {logs.map((log) => {
               const info = getActionInfo(log.action);
               return (
-                <div key={log.id} className="flex items-start gap-4 py-4 px-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                <div key={log.id} className="flex items-start gap-4 py-4 px-2">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
                     info.variant === 'success' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
                     info.variant === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :

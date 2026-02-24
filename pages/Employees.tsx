@@ -519,6 +519,7 @@ export const Employees: React.FC = () => {
   const employeeColumns = useMemo<TableColumn<FirestoreEmployee>[]>(() => [
     {
       header: 'الاسم',
+      sortKey: (emp) => emp.code || emp.name,
       render: (emp) => (
         <div className="flex items-center gap-2">
           <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${emp.isActive !== false ? 'bg-primary/10' : 'bg-slate-100 dark:bg-slate-800'}`}>
@@ -535,14 +536,17 @@ export const Employees: React.FC = () => {
     },
     {
       header: 'القسم',
+      sortKey: (emp) => getDepartmentName(emp.departmentId ?? ''),
       render: (emp) => <span className="text-sm text-slate-600 dark:text-slate-400">{getDepartmentName(emp.departmentId ?? '')}</span>,
     },
     {
       header: 'المنصب',
+      sortKey: (emp) => getJobPositionTitle(emp.jobPositionId ?? ''),
       render: (emp) => <span className="text-sm text-slate-600 dark:text-slate-400">{getJobPositionTitle(emp.jobPositionId ?? '')}</span>,
     },
     {
       header: 'المستوى',
+      sortKey: (emp) => emp.level ?? 1,
       render: (emp) => <span className="text-sm font-bold">{JOB_LEVEL_LABELS[(emp.level ?? 1) as 1 | 2 | 3 | 4] ?? emp.level}</span>,
     },
     {
@@ -742,15 +746,15 @@ export const Employees: React.FC = () => {
 
       {/* 2. Stats bar */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-        <Card className="p-4">
+        <Card className={`p-4 cursor-pointer transition-all ${filterStatus === 'all' ? 'ring-2 ring-primary' : ''}`} onClick={() => setFilterStatus('all')}>
           <p className="text-xs text-slate-500 font-bold mb-1">الإجمالي</p>
           <p className="text-2xl font-black text-slate-800 dark:text-white">{summaryKpis.total}</p>
         </Card>
-        <Card className="p-4">
+        <Card className={`p-4 cursor-pointer transition-all ${filterStatus === 'active' ? 'ring-2 ring-emerald-400' : ''}`} onClick={() => setFilterStatus(filterStatus === 'active' ? 'all' : 'active')}>
           <p className="text-xs text-slate-500 font-bold mb-1">نشط</p>
           <p className="text-2xl font-black text-emerald-600">{summaryKpis.active}</p>
         </Card>
-        <Card className="p-4">
+        <Card className={`p-4 cursor-pointer transition-all ${filterStatus === 'inactive' ? 'ring-2 ring-slate-400' : ''}`} onClick={() => setFilterStatus(filterStatus === 'inactive' ? 'all' : 'inactive')}>
           <p className="text-xs text-slate-500 font-bold mb-1">غير نشط</p>
           <p className="text-2xl font-black text-slate-500">{summaryKpis.inactive}</p>
         </Card>

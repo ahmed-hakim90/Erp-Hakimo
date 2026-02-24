@@ -7,10 +7,14 @@ import type { Permission } from '../utils/permissions';
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface TableColumn<T> {
+  id?: string;
   header: string;
   render: (item: T) => React.ReactNode;
   headerClassName?: string;
   className?: string;
+  sortKey?: (item: T) => string | number;
+  hideable?: boolean;
+  defaultHidden?: boolean;
 }
 
 export interface TableBulkAction<T> {
@@ -38,6 +42,10 @@ interface SelectableTableProps<T> {
   className?: string;
   /** Number of items per page. 0 = no pagination (default) */
   pageSize?: number;
+  /** Optional per-table column visibility menu */
+  enableColumnVisibility?: boolean;
+  /** Optional row id to emphasize */
+  highlightRowId?: string | null;
 }
 
 // ─── Pagination ──────────────────────────────────────────────────────────────
@@ -76,8 +84,76 @@ export function SelectableTable<T>({
   footer,
   className = '',
   pageSize = 0,
+  enableColumnVisibility = false,
+  highlightRowId = null,
 }: SelectableTableProps<T>) {
-  const { page, totalPages, pageData, goTo, hasPagination } = usePagination(data, pageSize);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [showColumnsMenu, setShowColumnsMenu] = useState(false);
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(
+    () =>
+      new Set(
+        columns
+          .map((col, i) => ({ ...col, _id: col.id ?? `${col.header}-${i}` }))
+          .filter((col) => col.defaultHidden)
+          .map((col) => col._id)
+      )
+  );
+
+  const columnsWithId = useMemo(
+    () => columns.map((col, i) => ({ ...col, _id: col.id ?? `${col.header}-${i}` })),
+    [columns]
+  );
+
+  const visibleColumns = useMemo(
+    () => columnsWithId.filter((col) => !hiddenCols.has(col._id)),
+    [columnsWithId, hiddenCols]
+  );
+
+  const hideableColumns = useMemo(
+    () => columnsWithId.filter((col) => col.hideable),
+    [columnsWithId]
+  );
+
+  const handleSort = useCallback((colId: string) => {
+    if (sortCol === colId) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(colId);
+      setSortDir('asc');
+    }
+  }, [sortCol]);
+
+  const toggleColumn = useCallback((colId: string) => {
+    setHiddenCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(colId)) {
+        next.delete(colId);
+      } else {
+        next.add(colId);
+      }
+      return next;
+    });
+  }, []);
+
+  const sortedData = useMemo(() => {
+    if (sortCol === null) return data;
+    const col = visibleColumns.find((c) => c._id === sortCol);
+    if (!col?.sortKey) return data;
+    const fn = col.sortKey;
+    return [...data].sort((a, b) => {
+      const va = fn(a);
+      const vb = fn(b);
+      if (typeof va === 'number' && typeof vb === 'number') {
+        return sortDir === 'asc' ? va - vb : vb - va;
+      }
+      const sa = String(va);
+      const sb = String(vb);
+      return sortDir === 'asc' ? sa.localeCompare(sb, 'ar') : sb.localeCompare(sa, 'ar');
+    });
+  }, [data, sortCol, sortDir, visibleColumns]);
+
+  const { page, totalPages, pageData, goTo, hasPagination } = usePagination(sortedData, pageSize);
 
   const {
     selectedItems,
@@ -90,7 +166,7 @@ export function SelectableTable<T>({
   } = useBulkSelection(pageData, getId);
 
   const totalCols =
-    columns.length + 1 + (renderActions ? 1 : 0);
+    visibleColumns.length + 1 + (renderActions ? 1 : 0);
 
   const barActions: BulkAction[] = useMemo(
     () =>
@@ -116,6 +192,36 @@ export function SelectableTable<T>({
 
       {/* Table Card */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xl shadow-slate-200/50 dark:shadow-none">
+        {enableColumnVisibility && hideableColumns.length > 0 && (
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-end relative">
+            <button
+              type="button"
+              onClick={() => setShowColumnsMenu((v) => !v)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+            >
+              <span className="material-icons-round text-sm">view_column</span>
+              الأعمدة
+            </button>
+            {showColumnsMenu && (
+              <div className="absolute left-4 top-12 z-20 w-52 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-2 space-y-1">
+                {hideableColumns.map((col) => {
+                  const visible = !hiddenCols.has(col._id);
+                  return (
+                    <label key={col._id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm">
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        onChange={() => toggleColumn(col._id)}
+                        className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary/30 cursor-pointer"
+                      />
+                      <span className="font-medium text-slate-700 dark:text-slate-300">{col.header}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-right border-collapse">
             <thead>
@@ -132,12 +238,25 @@ export function SelectableTable<T>({
                   </label>
                 </th>
 
-                {columns.map((col, i) => (
+                {visibleColumns.map((col) => (
                   <th
-                    key={i}
-                    className={`px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em] ${col.headerClassName ?? ''}`}
+                    key={col._id}
+                    className={`px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-[0.15em] ${col.sortKey ? 'cursor-pointer select-none hover:text-primary transition-colors' : ''} ${col.headerClassName ?? ''}`}
+                    onClick={col.sortKey ? () => handleSort(col._id) : undefined}
                   >
-                    {col.header}
+                    <span className="inline-flex items-center gap-1">
+                      {col.header}
+                      {col.sortKey && sortCol === col._id && (
+                        <span className="material-icons-round text-primary text-sm">
+                          {sortDir === 'asc' ? 'arrow_upward' : 'arrow_downward'}
+                        </span>
+                      )}
+                      {col.sortKey && sortCol !== col._id && (
+                        <span className="material-icons-round text-slate-300 dark:text-slate-600 text-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                          unfold_more
+                        </span>
+                      )}
+                    </span>
                   </th>
                 ))}
 
@@ -170,7 +289,11 @@ export function SelectableTable<T>({
                 return (
                   <tr
                     key={id}
+                    data-row-id={id}
                     className={`transition-colors group ${
+                      highlightRowId === id
+                        ? 'bg-amber-50 dark:bg-amber-900/20'
+                        :
                       checked
                         ? 'bg-primary/5 dark:bg-primary/10'
                         : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/50'
@@ -187,9 +310,9 @@ export function SelectableTable<T>({
                       </label>
                     </td>
 
-                    {columns.map((col, ci) => (
+                    {visibleColumns.map((col) => (
                       <td
-                        key={ci}
+                        key={col._id}
                         className={`px-5 py-4 text-sm ${col.className ?? ''}`}
                       >
                         {col.render(item)}

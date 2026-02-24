@@ -1,14 +1,17 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, Badge, Button, KPIBox } from '../components/UI';
 import { useShallowStore } from '../store/useAppStore';
 import { usePermission } from '../utils/permissions';
 import { monthlyProductionCostService } from '../services/monthlyProductionCostService';
-import { getCurrentMonth, formatCost } from '../utils/costCalculations';
+import { reportService } from '../services/reportService';
+import { getCurrentMonth, formatCost, calculateDailyIndirectCost } from '../utils/costCalculations';
 import type { MonthlyProductionCost } from '../types';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
 export const MonthlyProductionCosts: React.FC = () => {
+  const navigate = useNavigate();
   const {
     products,
     costCenters,
@@ -29,6 +32,7 @@ export const MonthlyProductionCosts: React.FC = () => {
 
   const [month, setMonth] = useState(getCurrentMonth());
   const [records, setRecords] = useState<MonthlyProductionCost[]>([]);
+  const [breakdownMap, setBreakdownMap] = useState<Record<string, { directCost: number; indirectCost: number }>>({});
   const [loading, setLoading] = useState(false);
   const [calculating, setCalculating] = useState(false);
   const [closingMonth, setClosingMonth] = useState(false);
@@ -44,13 +48,54 @@ export const MonthlyProductionCosts: React.FC = () => {
     setLoading(true);
     try {
       const data = await monthlyProductionCostService.getByMonth(month);
-      if (mountedRef.current) setRecords(data);
+      const hourlyRate = laborSettings?.hourlyRate ?? 0;
+      const startDate = `${month}-01`;
+      const [y, m] = month.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      const endDate = `${month}-${String(lastDay).padStart(2, '0')}`;
+      const allReports = await reportService.getByDateRange(startDate, endDate);
+
+      const lineDateTotals = new Map<string, number>();
+      allReports.forEach((r) => {
+        const key = `${r.lineId}_${r.date}`;
+        lineDateTotals.set(key, (lineDateTotals.get(key) || 0) + (r.quantityProduced || 0));
+      });
+
+      const indirectCache = new Map<string, number>();
+      const nextBreakdown: Record<string, { directCost: number; indirectCost: number }> = {};
+      allReports.forEach((r) => {
+        if (!r.quantityProduced || r.quantityProduced <= 0) return;
+        const current = nextBreakdown[r.productId] || { directCost: 0, indirectCost: 0 };
+        current.directCost += (r.workersCount || 0) * (r.workHours || 0) * hourlyRate;
+
+        const reportMonth = r.date?.slice(0, 7) || month;
+        const cacheKey = `${r.lineId}_${reportMonth}`;
+        if (!indirectCache.has(cacheKey)) {
+          indirectCache.set(
+            cacheKey,
+            calculateDailyIndirectCost(r.lineId, reportMonth, costCenters, costCenterValues, costAllocations)
+          );
+        }
+        const lineIndirect = indirectCache.get(cacheKey) || 0;
+        const lineDateKey = `${r.lineId}_${r.date}`;
+        const lineDateTotal = lineDateTotals.get(lineDateKey) || 0;
+        if (lineDateTotal > 0) {
+          current.indirectCost += lineIndirect * (r.quantityProduced / lineDateTotal);
+        }
+
+        nextBreakdown[r.productId] = current;
+      });
+
+      if (mountedRef.current) {
+        setRecords(data);
+        setBreakdownMap(nextBreakdown);
+      }
     } catch {
       // silently fail
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [month]);
+  }, [month, laborSettings, costCenters, costCenterValues, costAllocations]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
@@ -97,22 +142,39 @@ export const MonthlyProductionCosts: React.FC = () => {
   const allClosed = records.length > 0 && records.every((r) => r.isClosed);
   const totalQty = records.reduce((s, r) => s + r.totalProducedQty, 0);
   const totalCost = records.reduce((s, r) => s + r.totalProductionCost, 0);
+  const totalDirect = records.reduce(
+    (s, r) => s + (breakdownMap[r.productId]?.directCost ?? r.totalProductionCost),
+    0
+  );
+  const totalIndirect = records.reduce(
+    (s, r) => s + (breakdownMap[r.productId]?.indirectCost ?? 0),
+    0
+  );
   const overallAvg = totalQty > 0 ? totalCost / totalQty : 0;
 
   const handleExport = () => {
-    const rows = records.map((r) => ({
+    const rows = records.map((r) => {
+      const directCost = breakdownMap[r.productId]?.directCost ?? r.totalProductionCost;
+      const indirectCost = breakdownMap[r.productId]?.indirectCost ?? 0;
+      const qty = r.totalProducedQty;
+      return {
       'كود المنتج': productCodeMap.get(r.productId) || '',
       'اسم المنتج': productNameMap.get(r.productId) || r.productId,
       'الشهر': r.month,
-      'الكمية المنتجة': r.totalProducedQty,
+      'الكمية المنتجة': qty,
       'إجمالي التكلفة': r.totalProductionCost,
+      'مباشر': directCost,
+      'مباشر / قطعة': qty > 0 ? directCost / qty : 0,
+      'غير مباشر': indirectCost,
+      'غير مباشر / قطعة': qty > 0 ? indirectCost / qty : 0,
       'متوسط تكلفة الوحدة': r.averageUnitCost,
       'الحالة': r.isClosed ? 'مغلق' : 'مفتوح',
-    }));
+      };
+    });
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [
       { wch: 14 }, { wch: 30 }, { wch: 12 },
-      { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 10 },
+      { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 10 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'تكلفة الإنتاج الشهرية');
@@ -223,6 +285,7 @@ export const MonthlyProductionCosts: React.FC = () => {
                   <th className="py-3 px-4 text-right font-bold">اسم المنتج</th>
                   <th className="py-3 px-4 text-right font-bold">الكمية المنتجة</th>
                   <th className="py-3 px-4 text-right font-bold">إجمالي التكلفة</th>
+                  <th className="py-3 px-4 text-right font-bold">مباشر / غير مباشر</th>
                   <th className="py-3 px-4 text-right font-bold">متوسط تكلفة الوحدة</th>
                   <th className="py-3 px-4 text-center font-bold">الحالة</th>
                 </tr>
@@ -231,7 +294,8 @@ export const MonthlyProductionCosts: React.FC = () => {
                 {records.map((r, i) => (
                   <tr
                     key={r.id}
-                    className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
+                    className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors cursor-pointer"
+                    onClick={() => navigate(`/products/${r.productId}`)}
                   >
                     <td className="py-3 px-4 text-slate-400 font-mono">{i + 1}</td>
                     <td className="py-3 px-4 font-mono text-xs text-slate-500">{productCodeMap.get(r.productId) || '—'}</td>
@@ -241,6 +305,26 @@ export const MonthlyProductionCosts: React.FC = () => {
                     <td className="py-3 px-4 font-mono">{formatCost(r.totalProducedQty)}</td>
                     <td className="py-3 px-4 font-mono font-semibold text-amber-700 dark:text-amber-400">
                       {formatCost(r.totalProductionCost)}
+                    </td>
+                    <td className="py-3 px-4">
+                      {(() => {
+                        const direct = breakdownMap[r.productId]?.directCost ?? r.totalProductionCost;
+                        const indirect = breakdownMap[r.productId]?.indirectCost ?? 0;
+                        const directPerPiece = r.totalProducedQty > 0 ? direct / r.totalProducedQty : 0;
+                        const indirectPerPiece = r.totalProducedQty > 0 ? indirect / r.totalProducedQty : 0;
+                        return (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs tabular-nums text-blue-600 dark:text-blue-400 font-bold leading-5">
+                              {formatCost(direct)} <span className="text-[10px] font-normal opacity-70">مباشر</span>
+                              <span className="text-[10px] font-medium opacity-70"> — {formatCost(directPerPiece)} / قطعة</span>
+                            </span>
+                            <span className="text-xs tabular-nums text-slate-500 font-bold leading-5">
+                              {formatCost(indirect)} <span className="text-[10px] font-normal opacity-70">غ.مباشر</span>
+                              <span className="text-[10px] font-medium opacity-70"> — {formatCost(indirectPerPiece)} / قطعة</span>
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="py-3 px-4 font-mono font-bold text-primary">
                       {formatCost(r.averageUnitCost)}
@@ -257,6 +341,18 @@ export const MonthlyProductionCosts: React.FC = () => {
                   <td className="py-3 px-4" colSpan={3}>الإجمالي</td>
                   <td className="py-3 px-4 font-mono">{formatCost(totalQty)}</td>
                   <td className="py-3 px-4 font-mono text-amber-700 dark:text-amber-400">{formatCost(totalCost)}</td>
+                  <td className="py-3 px-4">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs tabular-nums text-blue-600 dark:text-blue-400 font-bold leading-5">
+                        {formatCost(totalDirect)} <span className="text-[10px] font-normal opacity-70">مباشر</span>
+                        <span className="text-[10px] font-medium opacity-70"> — {formatCost(totalQty > 0 ? totalDirect / totalQty : 0)} / قطعة</span>
+                      </span>
+                      <span className="text-xs tabular-nums text-slate-500 font-bold leading-5">
+                        {formatCost(totalIndirect)} <span className="text-[10px] font-normal opacity-70">غ.مباشر</span>
+                        <span className="text-[10px] font-medium opacity-70"> — {formatCost(totalQty > 0 ? totalIndirect / totalQty : 0)} / قطعة</span>
+                      </span>
+                    </div>
+                  </td>
                   <td className="py-3 px-4 font-mono text-primary">{formatCost(overallAvg)}</td>
                   <td className="py-3 px-4" />
                 </tr>

@@ -253,8 +253,12 @@ export const WorkOrders: React.FC = () => {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <KPIBox label="أوامر نشطة" value={kpis.active} icon="pending_actions" color="blue" />
-        <KPIBox label="مكتملة" value={kpis.completed} icon="check_circle" color="green" />
+        <div onClick={() => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress')} className={`cursor-pointer rounded-xl transition-all ${filterStatus === 'in_progress' ? 'ring-2 ring-blue-400' : ''}`}>
+          <KPIBox label="أوامر نشطة" value={kpis.active} icon="pending_actions" color="blue" />
+        </div>
+        <div onClick={() => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed')} className={`cursor-pointer rounded-xl transition-all ${filterStatus === 'completed' ? 'ring-2 ring-emerald-400' : ''}`}>
+          <KPIBox label="مكتملة" value={kpis.completed} icon="check_circle" color="green" />
+        </div>
         {can('workOrders.viewCost') && (
           <>
             <KPIBox label="التكلفة المقدرة" value={formatCurrency(kpis.totalEstimated)} icon="request_quote" color="amber" />

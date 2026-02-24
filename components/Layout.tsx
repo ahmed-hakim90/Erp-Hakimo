@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { usePermission, useCurrentRole } from '../utils/permissions';
 import { MENU_CONFIG } from '../config/menu.config';
@@ -243,6 +243,7 @@ const Sidebar: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClo
 // ─── Header ─────────────────────────────────────────────────────────────────
 
 const Header: React.FC<{ onMenuToggle: () => void }> = ({ onMenuToggle }) => {
+  const navigate = useNavigate();
   const { isReadOnly } = useCurrentRole();
 
   return (
@@ -251,8 +252,8 @@ const Header: React.FC<{ onMenuToggle: () => void }> = ({ onMenuToggle }) => {
         <span className="material-icons-round text-2xl">menu</span>
       </button>
 
-      <div className="min-w-0">
-        <h1 className="font-bold text-xl tracking-tight text-primary">مؤسسة المغربي</h1>
+      <div className="min-w-0 cursor-pointer" onClick={() => navigate('/')}>
+        <h1 className="font-bold text-xl tracking-tight text-primary hover:opacity-80 transition-opacity">مؤسسة المغربي</h1>
         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">نظام إدارة الإنتاج</p>
       </div>
 

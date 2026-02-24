@@ -663,7 +663,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const products = buildProducts(rawProducts, allReports, configs);
     const productionLines = buildProductionLines(
       rawLines, rawProducts, rawEmployees, todayReports, lineStatuses, configs,
-      productionPlans, planReports
+      productionPlans, planReports, workOrders
     );
     const employees: Employee[] = rawEmployees.map((e) => ({
       id: e.id!,
@@ -1405,6 +1405,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       lineProductConfigs,
       productionPlans,
       planReports,
+      workOrders,
     } = get();
     const productionLines = buildProductionLines(
       _rawLines,
@@ -1414,7 +1415,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       lineStatuses,
       lineProductConfigs,
       productionPlans,
-      planReports
+      planReports,
+      workOrders
     );
     set({ productionLines });
   },

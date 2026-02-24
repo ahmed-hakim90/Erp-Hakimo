@@ -15,6 +15,7 @@ import type {
   ProductionLineStatus,
   ProductionPlan,
   SmartStatus,
+  WorkOrder,
 } from '../types';
 
 // ─── Core Metrics ───────────────────────────────────────────────────────────
@@ -240,7 +241,8 @@ export const buildProductionLines = (
   lineStatuses: LineStatus[],
   configs: LineProductConfig[],
   productionPlans: ProductionPlan[] = [],
-  planReports: Record<string, ProductionReport[]> = {}
+  planReports: Record<string, ProductionReport[]> = {},
+  workOrders: WorkOrder[] = []
 ): ProductionLine[] => {
   return rawLines.map((line) => {
     const activePlan = productionPlans.find(
@@ -293,14 +295,18 @@ export const buildProductionLines = (
       };
     }
 
-    // Fallback: no active plan — use today's data + lineStatus target
+    // Fallback: no active plan — use work order or lineStatus target
     const status = lineStatuses.find((s) => s.lineId === line.id);
     const lineReports = todayReports.filter((r) => r.lineId === line.id);
 
-    const achievement = lineReports.reduce(
-      (sum, r) => sum + (r.quantityProduced || 0), 0
+    const activeWO = workOrders.find(
+      (w) => w.lineId === line.id && (w.status === 'in_progress' || w.status === 'pending')
     );
-    const target = status?.targetTodayQty ?? 0;
+
+    const achievement = activeWO
+      ? (activeWO.producedQuantity ?? 0)
+      : lineReports.reduce((sum, r) => sum + (r.quantityProduced || 0), 0);
+    const target = activeWO ? activeWO.quantity : (status?.targetTodayQty ?? 0);
     const workersCount = lineReports.length
       ? lineReports[lineReports.length - 1].workersCount
       : 0;
@@ -308,8 +314,9 @@ export const buildProductionLines = (
       (sum, r) => sum + (r.workHours || 0), 0
     );
 
-    const currentProduct =
-      rawProducts.find((p) => p.id === status?.currentProductId)?.name ?? '—';
+    const currentProduct = activeWO
+      ? (rawProducts.find((p) => p.id === activeWO.productId)?.name ?? '—')
+      : (rawProducts.find((p) => p.id === status?.currentProductId)?.name ?? '—');
 
     const employeeId = lineReports.length
       ? lineReports[0].employeeId
@@ -324,7 +331,7 @@ export const buildProductionLines = (
       employeeName,
       status: line.status as ProductionLineStatus,
       currentProduct,
-      currentProductId: status?.currentProductId ?? '',
+      currentProductId: activeWO ? activeWO.productId : (status?.currentProductId ?? ''),
       achievement,
       target,
       workersCount,

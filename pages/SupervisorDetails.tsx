@@ -564,7 +564,7 @@ export const SupervisorDetails: React.FC = () => {
                     </tr>
                   )}
                   {reports.slice(0, 30).map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                    <tr key={r.id}>
                       <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">{r.date}</td>
                       <td className="px-5 py-3 text-sm font-medium">{getLineName(r.lineId)}</td>
                       <td className="px-5 py-3 text-sm font-medium">{getProductName(r.productId)}</td>

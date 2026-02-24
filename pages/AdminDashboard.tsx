@@ -233,6 +233,7 @@ export const AdminDashboard: React.FC = () => {
 
   // ── System metrics state ─────────────────────────────────────────────────
   const [productSearch, setProductSearch] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('all');
   const [systemUsers, setSystemUsers] = useState<SystemUsers>({ total: 0, active: 0, disabled: 0 });
   const [rolesDistribution, setRolesDistribution] = useState<{ roleName: string; color: string; count: number }[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
@@ -486,6 +487,7 @@ export const AdminDashboard: React.FC = () => {
     });
     return Array.from(prodMap.entries())
       .map(([productId, qty]) => ({
+        id: productId,
         name: _rawProducts.find((p) => p.id === productId)?.name || productId,
         production: qty,
       }))
@@ -560,15 +562,27 @@ export const AdminDashboard: React.FC = () => {
     });
 
     return Array.from(map.entries())
-      .map(([productId, d]) => ({
-        id: productId,
-        name: _rawProducts.find((p) => p.id === productId)?.name || productId,
-        code: _rawProducts.find((p) => p.id === productId)?.code || '',
-        qty: d.qty,
-        avgCost: d.qty > 0 ? (d.laborCost + d.indirectCost) / d.qty : 0,
-      }))
+      .map(([productId, d]) => {
+        const product = _rawProducts.find((p) => p.id === productId);
+        return {
+          id: productId,
+          name: product?.name || productId,
+          code: product?.code || '',
+          category: product?.model || 'غير مصنفة',
+          qty: d.qty,
+          avgCost: d.qty > 0 ? (d.laborCost + d.indirectCost) / d.qty : 0,
+        };
+      })
       .sort((a, b) => b.qty - a.qty);
   }, [reports, _rawProducts, hourlyRate, costCenters, costCenterValues, costAllocations]);
+
+  const productSummaryCategories = useMemo(() => {
+    const categories = productSummary
+      .map((p) => p.category)
+      .filter((category): category is string => category.trim().length > 0);
+    return (Array.from(new Set(categories)) as string[])
+      .sort((a, b) => a.localeCompare(b, 'ar'));
+  }, [productSummary]);
 
   // ── Alerts ────────────────────────────────────────────────────────────────
 
@@ -873,9 +887,12 @@ export const AdminDashboard: React.FC = () => {
       {/* ── Product Summary Table ──────────────────────────────────────────── */}
       {productSummary.length > 0 && (() => {
         const q = productSearch.trim().toLowerCase();
+        const byCategory = productCategoryFilter === 'all'
+          ? productSummary
+          : productSummary.filter((p) => p.category === productCategoryFilter);
         const filtered = q
-          ? productSummary.filter((p) => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
-          : productSummary;
+          ? byCategory.filter((p) => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
+          : byCategory;
         return (
           <Card>
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
@@ -885,15 +902,7 @@ export const AdminDashboard: React.FC = () => {
                 <Badge variant="info">{productSummary.length} منتج</Badge>
               </div>
               <div className="flex items-center gap-2 sm:mr-auto">
-                <button
-                  onClick={() => exportProductSummary(filtered, canViewCosts)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 hover:bg-primary/5 hover:border-primary/30 hover:text-primary transition-all"
-                  title="تصدير Excel"
-                >
-                  <span className="material-icons-round text-sm">download</span>
-                  <span className="hidden sm:inline">Excel</span>
-                </button>
-                <div className="relative">
+              <div className="relative">
                   <span className="material-icons-round text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 text-sm">search</span>
                   <input
                     type="text"
@@ -903,6 +912,28 @@ export const AdminDashboard: React.FC = () => {
                     className="pr-9 pl-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold w-full sm:w-56 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
                   />
                 </div>
+               
+                <div className="relative">
+                  <span className="material-icons-round text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 text-sm">category</span>
+                  <select
+                    value={productCategoryFilter}
+                    onChange={(e) => setProductCategoryFilter(e.target.value)}
+                    className="pr-9 pl-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold w-full sm:w-44 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all appearance-none"
+                  >
+                    <option value="all">كل الفئات</option>
+                    {productSummaryCategories.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => exportProductSummary(filtered, canViewCosts)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 hover:bg-primary/5 hover:border-primary/30 hover:text-primary transition-all"
+                  title="تصدير Excel"
+                >
+                  <span className="material-icons-round text-sm">download</span>
+                  <span className="hidden sm:inline">Excel</span>
+                </button>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -922,7 +953,7 @@ export const AdminDashboard: React.FC = () => {
                   {filtered.length === 0 ? (
                     <tr>
                       <td colSpan={canViewCosts ? 5 : 4} className="py-8 text-center text-slate-400 text-sm">
-                        لا توجد نتائج للبحث "{productSearch}"
+                        لا توجد نتائج مطابقة للفلاتر الحالية
                       </td>
                     </tr>
                   ) : (
@@ -1192,7 +1223,8 @@ export const AdminDashboard: React.FC = () => {
               {recentActivity.map((log, i) => (
                 <div
                   key={log.id || i}
-                  className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group"
+                  onClick={() => navigate('/activity-log')}
+                  className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group cursor-pointer"
                 >
                   <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 mt-0.5">
                     <span className="material-icons-round text-sm text-slate-500">
@@ -1245,7 +1277,7 @@ export const AdminDashboard: React.FC = () => {
                   </thead>
                   <tbody>
                     {costCentersSummary.map((cc, i) => (
-                      <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                      <tr key={i} onClick={() => navigate('/cost-centers')} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer">
                         <td className="py-2.5 px-3 font-bold text-sm">{cc.name}</td>
                         <td className="py-2.5 px-3">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
@@ -1352,8 +1384,8 @@ export const AdminDashboard: React.FC = () => {
               </thead>
               <tbody>
                 {topProducts.map((p, i) => (
-                  <tr key={i} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                    <td className="py-3 px-4 font-bold">{p.name}</td>
+                  <tr key={i} onClick={() => navigate(`/products/${p.id}`)} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer">
+                    <td className="py-3 px-4 font-bold text-primary">{p.name}</td>
                     <td className="py-3 px-4">{formatNumber(p.production)}</td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">

@@ -6,8 +6,6 @@ import { formatCost } from '../utils/costCalculations';
 export const CostSettings: React.FC = () => {
   const laborSettings = useAppStore((s) => s.laborSettings);
   const updateLaborSettings = useAppStore((s) => s.updateLaborSettings);
-  const todayReports = useAppStore((s) => s.todayReports);
-
   const [hourlyRate, setHourlyRate] = useState<number>(0);
   const [cnyToEgpRate, setCnyToEgpRate] = useState<number>(0);
   const [saving, setSaving] = useState(false);
@@ -35,11 +33,6 @@ export const CostSettings: React.FC = () => {
     setSavedCny(true);
     setTimeout(() => setSavedCny(false), 2000);
   };
-
-  const todayLaborHours = todayReports.reduce(
-    (sum, r) => sum + (r.workersCount || 0) * (r.workHours || 0), 0
-  );
-  const todayLaborCost = todayLaborHours * hourlyRate;
 
   return (
     <div className="space-y-6">
@@ -145,28 +138,6 @@ export const CostSettings: React.FC = () => {
         </div>
       </Card>
 
-      {/* <Card title="ملخص تكاليف اليوم">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-          <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-5 text-center">
-            <span className="material-icons-round text-blue-500 text-3xl mb-2 block">schedule</span>
-            <p className="text-xs text-slate-400 font-bold mb-1">إجمالي ساعات العمل</p>
-            <p className="text-2xl font-black text-slate-800 dark:text-white">{todayLaborHours.toLocaleString('en-US')}</p>
-            <span className="text-[10px] font-medium text-slate-400">عامل × ساعة</span>
-          </div>
-          <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-5 text-center">
-            <span className="material-icons-round text-emerald-500 text-3xl mb-2 block">payments</span>
-            <p className="text-xs text-slate-400 font-bold mb-1">سعر الساعة</p>
-            <p className="text-2xl font-black text-slate-800 dark:text-white">{formatCost(hourlyRate)}</p>
-            <span className="text-[10px] font-medium text-slate-400">ج.م / ساعة</span>
-          </div>
-          <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-5 text-center">
-            <span className="material-icons-round text-primary text-3xl mb-2 block">account_balance_wallet</span>
-            <p className="text-xs text-slate-400 font-bold mb-1">تكلفة عمالة اليوم</p>
-            <p className="text-2xl font-black text-primary">{formatCost(todayLaborCost)}</p>
-            <span className="text-[10px] font-medium text-slate-400">ج.م</span>
-          </div>
-        </div>
-      </Card> */}
     </div>
   );
 };

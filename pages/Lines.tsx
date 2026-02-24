@@ -1,10 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, Badge } from '../components/UI';
-import { formatNumber, getTodayDateString } from '../utils/calculations';
-import { ProductionLineStatus, FirestoreProductionLine, WorkOrder } from '../types';
+import { formatNumber, getTodayDateString, calculatePlanProgress, calculateSmartStatus, calculateTimeRatio, calculateProgressRatio } from '../utils/calculations';
+import { formatCost } from '../utils/costCalculations';
+import { ProductionLineStatus, FirestoreProductionLine, WorkOrder, ProductionPlan } from '../types';
 import type { LineWorkerAssignment } from '../types';
 import { usePermission } from '../utils/permissions';
 import { lineAssignmentService } from '../services/lineAssignmentService';
@@ -35,6 +36,8 @@ export const Lines: React.FC = () => {
   const createLineStatus = useAppStore((s) => s.createLineStatus);
   const updateLineStatus = useAppStore((s) => s.updateLineStatus);
   const workOrders = useAppStore((s) => s.workOrders);
+  const productionPlans = useAppStore((s) => s.productionPlans);
+  const _rawEmployees = useAppStore((s) => s._rawEmployees);
 
   const { can } = usePermission();
   const navigate = useNavigate();
@@ -143,6 +146,21 @@ export const Lines: React.FC = () => {
     setDeleteConfirmId(null);
   };
 
+  const sortedLines = useMemo(() => {
+    return [...productionLines].sort((a, b) => {
+      const aIsActive = a.status === ProductionLineStatus.ACTIVE ? 1 : 0;
+      const bIsActive = b.status === ProductionLineStatus.ACTIVE ? 1 : 0;
+      const aHasWO = workOrders.some((w) => w.lineId === a.id && (w.status === 'pending' || w.status === 'in_progress')) ? 1 : 0;
+      const bHasWO = workOrders.some((w) => w.lineId === b.id && (w.status === 'pending' || w.status === 'in_progress')) ? 1 : 0;
+
+      const aScore = aIsActive * 2 + aHasWO;
+      const bScore = bIsActive * 2 + bHasWO;
+
+      if (bScore !== aScore) return bScore - aScore;
+      return a.name.localeCompare(b.name, 'ar');
+    });
+  }, [productionLines, workOrders]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -157,6 +175,259 @@ export const Lines: React.FC = () => {
           </Button>
         )}
       </div>
+
+      {/* Active Production Plans Summary */}
+      {(() => {
+        const activePlans = productionPlans.filter((p) => p.status === 'planned' || p.status === 'in_progress');
+        if (activePlans.length === 0) return null;
+        const totalPlanned = activePlans.reduce((s, p) => s + p.plannedQuantity, 0);
+        const totalProduced = activePlans.reduce((s, p) => s + p.producedQuantity, 0);
+        const overallProgress = totalPlanned > 0 ? Math.round((totalProduced / totalPlanned) * 100) : 0;
+
+        const getPriorityConfig = (priority: ProductionPlan['priority']) => {
+          switch (priority) {
+            case 'urgent': return { label: 'عاجل', color: 'text-rose-600 bg-rose-50 dark:bg-rose-900/20 dark:text-rose-400' };
+            case 'high': return { label: 'مرتفع', color: 'text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400' };
+            case 'medium': return { label: 'متوسط', color: 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400' };
+            default: return { label: 'منخفض', color: 'text-slate-500 bg-slate-50 dark:bg-slate-800 dark:text-slate-400' };
+          }
+        };
+
+        const getSmartStatusConfig = (plan: ProductionPlan) => {
+          const progressRatio = calculateProgressRatio(plan.producedQuantity, plan.plannedQuantity);
+          const timeRatio = calculateTimeRatio(plan.plannedStartDate, plan.plannedEndDate);
+          const smart = calculateSmartStatus(progressRatio, timeRatio, plan.status);
+          switch (smart) {
+            case 'on_track': return { label: 'على المسار', icon: 'check_circle', color: 'text-emerald-600' };
+            case 'at_risk': return { label: 'معرض للخطر', icon: 'warning', color: 'text-amber-500' };
+            case 'delayed': return { label: 'متأخر', icon: 'schedule', color: 'text-orange-500' };
+            case 'critical': return { label: 'حرج', icon: 'error', color: 'text-rose-500' };
+            case 'completed': return { label: 'مكتمل', icon: 'task_alt', color: 'text-emerald-600' };
+            default: return { label: '—', icon: 'help', color: 'text-slate-400' };
+          }
+        };
+
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-icons-round text-blue-500">event_note</span>
+                <h3 className="text-base font-black text-slate-800 dark:text-white">خطط الإنتاج النشطة</h3>
+                <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs font-black px-2 py-0.5 rounded-full">{activePlans.length}</span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-500">
+                <span className="font-bold">الإجمالي: {formatNumber(totalProduced)} / {formatNumber(totalPlanned)}</span>
+                <span className={`font-black ${overallProgress >= 80 ? 'text-emerald-600' : overallProgress >= 50 ? 'text-amber-600' : 'text-slate-500'}`}>{overallProgress}%</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {activePlans.map((plan) => {
+                const product = _rawProducts.find((p) => p.id === plan.productId);
+                const lineName = productionLines.find((l) => l.id === plan.lineId)?.name ?? '—';
+                const progress = calculatePlanProgress(plan.producedQuantity, plan.plannedQuantity);
+                const remaining = plan.plannedQuantity - plan.producedQuantity;
+                const priorityConf = getPriorityConfig(plan.priority);
+                const smartStatus = getSmartStatusConfig(plan);
+
+                return (
+                  <div
+                    key={plan.id}
+                    onClick={() => navigate('/production-plans')}
+                    className={`rounded-2xl border p-5 space-y-4 transition-all cursor-pointer hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800 ${plan.status === 'in_progress' ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/40' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="material-icons-round text-blue-500 text-lg">event_note</span>
+                        <span className="text-sm font-black text-blue-700 dark:text-blue-400">خطة إنتاج</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${priorityConf.color}`}>{priorityConf.label}</span>
+                        <Badge variant={plan.status === 'in_progress' ? 'warning' : 'neutral'}>
+                          {plan.status === 'in_progress' ? 'قيد التنفيذ' : 'مخطط'}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="material-icons-round text-slate-400 text-base">inventory_2</span>
+                      <p className="text-base font-bold text-slate-700 dark:text-slate-200 truncate">{product?.name ?? '—'}</p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`material-icons-round text-base ${smartStatus.color}`}>{smartStatus.icon}</span>
+                        <span className={`text-sm font-bold ${smartStatus.color}`}>{smartStatus.label}</span>
+                      </div>
+                      {can('costs.view') && plan.estimatedCost > 0 && (
+                        <div className="flex items-center gap-1.5 bg-white dark:bg-slate-800 rounded-lg px-3 py-1">
+                          <span className="material-icons-round text-emerald-500 text-sm">payments</span>
+                          <span className="text-sm font-black text-emerald-600">{formatCost(plan.estimatedCost)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3">
+                        <p className="text-xs text-slate-400 font-medium mb-1">المخطط</p>
+                        <p className="text-lg font-black text-slate-700 dark:text-white">{formatNumber(plan.plannedQuantity)}</p>
+                      </div>
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3">
+                        <p className="text-xs text-slate-400 font-medium mb-1">تم إنتاجه</p>
+                        <p className="text-lg font-black text-emerald-600">{formatNumber(plan.producedQuantity)}</p>
+                      </div>
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3">
+                        <p className="text-xs text-slate-400 font-medium mb-1">المتبقي</p>
+                        <p className="text-lg font-black text-rose-500">{formatNumber(remaining)}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-bold">
+                        <span className="text-slate-500">التقدم</span>
+                        <span className={progress >= 80 ? 'text-emerald-600' : progress >= 50 ? 'text-amber-600' : 'text-slate-500'}>{progress}%</span>
+                      </div>
+                      <div className="w-full h-2.5 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-1000 ${progress >= 80 ? 'bg-emerald-500' : progress >= 50 ? 'bg-amber-500' : 'bg-blue-500'}`}
+                          style={{ width: `${Math.min(progress, 100)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-5 text-xs text-slate-500 pt-1">
+                      <div className="flex items-center gap-1">
+                        <span className="material-icons-round text-sm">precision_manufacturing</span>
+                        <span className="font-bold">{lineName}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="material-icons-round text-sm">today</span>
+                        <span className="font-bold">{plan.plannedStartDate}</span>
+                      </div>
+                      <div className="flex items-center gap-1 mr-auto">
+                        <span className="material-icons-round text-sm">event</span>
+                        <span className="font-bold">{plan.plannedEndDate}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Active Work Orders Summary */}
+      {(() => {
+        const activeWOs = workOrders.filter((w) => w.status === 'pending' || w.status === 'in_progress');
+        if (activeWOs.length === 0) return null;
+        const totalQty = activeWOs.reduce((s, w) => s + w.quantity, 0);
+        const totalProduced = activeWOs.reduce((s, w) => s + (w.producedQuantity ?? 0), 0);
+        const totalRemaining = totalQty - totalProduced;
+        const overallProgress = totalQty > 0 ? Math.round((totalProduced / totalQty) * 100) : 0;
+
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-icons-round text-amber-500">assignment</span>
+                <h3 className="text-base font-black text-slate-800 dark:text-white">أوامر الشغل النشطة</h3>
+                <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs font-black px-2 py-0.5 rounded-full">{activeWOs.length}</span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-500">
+                <span className="font-bold">الإجمالي: {formatNumber(totalProduced)} / {formatNumber(totalQty)}</span>
+                <span className={`font-black ${overallProgress >= 80 ? 'text-emerald-600' : overallProgress >= 50 ? 'text-amber-600' : 'text-slate-500'}`}>{overallProgress}%</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {activeWOs.map((wo) => {
+                const product = _rawProducts.find((p) => p.id === wo.productId);
+                const lineName = productionLines.find((l) => l.id === wo.lineId)?.name ?? '—';
+                const supervisor = _rawEmployees.find((e) => e.id === wo.supervisorId);
+                const progress = wo.quantity > 0 ? Math.round(((wo.producedQuantity ?? 0) / wo.quantity) * 100) : 0;
+                const remaining = wo.quantity - (wo.producedQuantity ?? 0);
+                const estCostPerUnit = wo.quantity > 0 ? wo.estimatedCost / wo.quantity : 0;
+
+                return (
+                  <div key={wo.id} onClick={() => navigate('/work-orders')} className={`rounded-2xl border p-5 space-y-4 transition-all cursor-pointer hover:ring-2 hover:ring-amber-200 dark:hover:ring-amber-800 ${wo.status === 'in_progress' ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/40' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="material-icons-round text-amber-500 text-lg">assignment</span>
+                        <span className="text-sm font-black text-amber-700 dark:text-amber-400">أمر شغل #{wo.workOrderNumber}</span>
+                      </div>
+                      <Badge variant={wo.status === 'in_progress' ? 'warning' : 'neutral'}>
+                        {wo.status === 'in_progress' ? 'قيد التنفيذ' : 'في الانتظار'}
+                      </Badge>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="material-icons-round text-slate-400 text-base">inventory_2</span>
+                      <p className="text-base font-bold text-slate-700 dark:text-slate-200 truncate">{product?.name ?? '—'}</p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="material-icons-round text-indigo-400 text-base">person</span>
+                        <span className="text-sm font-bold text-slate-600 dark:text-slate-300">{supervisor?.name ?? '—'}</span>
+                      </div>
+                      {can('costs.view') && estCostPerUnit > 0 && (
+                        <div className="flex items-center gap-1.5 bg-white dark:bg-slate-800 rounded-lg px-3 py-1">
+                          <span className="material-icons-round text-emerald-500 text-sm">payments</span>
+                          <span className="text-[10px] text-slate-400">التكلفة المتوقعة</span>
+                          <span className="text-sm font-black text-emerald-600">{formatCost(estCostPerUnit)}</span>
+                          <span className="text-[10px] text-slate-400">/قطعة</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3">
+                        <p className="text-xs text-slate-400 font-medium mb-1">المطلوب</p>
+                        <p className="text-lg font-black text-slate-700 dark:text-white">{formatNumber(wo.quantity)}</p>
+                      </div>
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3">
+                        <p className="text-xs text-slate-400 font-medium mb-1">تم إنتاجه</p>
+                        <p className="text-lg font-black text-emerald-600">{formatNumber(wo.producedQuantity ?? 0)}</p>
+                      </div>
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3">
+                        <p className="text-xs text-slate-400 font-medium mb-1">المتبقي</p>
+                        <p className="text-lg font-black text-rose-500">{formatNumber(remaining)}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-bold">
+                        <span className="text-slate-500">التقدم</span>
+                        <span className={progress >= 80 ? 'text-emerald-600' : progress >= 50 ? 'text-amber-600' : 'text-slate-500'}>{progress}%</span>
+                      </div>
+                      <div className="w-full h-2.5 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-1000 ${progress >= 80 ? 'bg-emerald-500' : progress >= 50 ? 'bg-amber-500' : 'bg-primary'}`}
+                          style={{ width: `${Math.min(progress, 100)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-5 text-xs text-slate-500 pt-1">
+                      <div className="flex items-center gap-1">
+                        <span className="material-icons-round text-sm">precision_manufacturing</span>
+                        <span className="font-bold">{lineName}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="material-icons-round text-sm">groups</span>
+                        <span className="font-bold">{wo.maxWorkers} عامل</span>
+                      </div>
+                      <div className="flex items-center gap-1 mr-auto">
+                        <span className="material-icons-round text-sm">event</span>
+                        <span className="font-bold">{wo.targetDate}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Lines Grid */}
       {productionLines.length === 0 ? (
@@ -173,23 +444,63 @@ export const Lines: React.FC = () => {
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {productionLines.map((line) => {
+          {sortedLines.map((line) => {
             const raw = _rawLines.find((l) => l.id === line.id);
+            const activeWOs = workOrders.filter((w) => w.lineId === line.id && (w.status === 'pending' || w.status === 'in_progress'));
+            const activeWO: WorkOrder | undefined = activeWOs.find((w) => w.status === 'in_progress') ?? activeWOs[0];
+            const woProduct = activeWO ? _rawProducts.find((p) => p.id === activeWO.productId) : null;
+            const woProgress = activeWO && activeWO.quantity > 0 ? Math.round((activeWO.producedQuantity / activeWO.quantity) * 100) : 0;
+            const woRemaining = activeWO ? activeWO.quantity - (activeWO.producedQuantity ?? 0) : 0;
+            const woSupervisor = activeWO ? _rawEmployees.find((e) => e.id === activeWO.supervisorId) : null;
+            const woEstCostPerUnit = activeWO && activeWO.quantity > 0 ? activeWO.estimatedCost / activeWO.quantity : 0;
+
             return (
               <Card key={line.id} className="transition-all hover:ring-2 hover:ring-primary/10">
-                <div className="flex justify-between items-start mb-5">
+                <div className="flex justify-between items-start mb-4">
                   <div>
                     <h4 className="font-bold text-lg text-slate-800 dark:text-white">{line.name}</h4>
-                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">{line.employeeName}</span>
+                    {activeWO && (
+                      <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">أمر شغل #{activeWO.workOrderNumber}</span>
+                    )}
                   </div>
                   <Badge variant={getVariant(line.status)} pulse={line.status === ProductionLineStatus.ACTIVE}>
                     {getStatusLabel(line.status)}
                   </Badge>
                 </div>
 
-                <div className="mb-4">
-                  <p className="text-xs text-slate-400 font-bold mb-1">المنتج الحالي</p>
-                  <p className="text-base font-bold text-slate-700 dark:text-slate-200">{line.currentProduct}</p>
+                <div className="space-y-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="material-icons-round text-slate-400 text-sm">person</span>
+                    <p className="text-xs text-slate-400 font-bold">المشرف</p>
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200 mr-auto">{woSupervisor?.name ?? line.employeeName ?? '—'}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="material-icons-round text-slate-400 text-sm">inventory_2</span>
+                    <p className="text-xs text-slate-400 font-bold">المنتج</p>
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200 mr-auto truncate max-w-[200px]">{woProduct?.name ?? line.currentProduct ?? '—'}</p>
+                  </div>
+                  {can('costs.view') && woEstCostPerUnit > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="material-icons-round text-emerald-500 text-sm">payments</span>
+                      <p className="text-xs text-slate-400 font-bold">التكلفة المتوقعة</p>
+                      <p className="text-sm font-black text-emerald-600 mr-auto">{formatCost(woEstCostPerUnit)} <span className="text-[10px] text-slate-400 font-medium">/قطعة</span></p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                    <p className="text-xs text-slate-400 mb-1">المطلوب</p>
+                    <p className={`text-lg font-black ${activeWO ? 'text-slate-700 dark:text-white' : 'text-slate-400'}`}>{activeWO ? formatNumber(activeWO.quantity) : '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                    <p className="text-xs text-slate-400 mb-1">تم إنتاجه</p>
+                    <p className={`text-lg font-black ${(activeWO?.producedQuantity ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>{activeWO ? formatNumber(activeWO.producedQuantity ?? 0) : '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                    <p className="text-xs text-slate-400 mb-1">المتبقي</p>
+                    <p className={`text-lg font-black ${woRemaining > 0 ? 'text-rose-500' : 'text-slate-400'}`}>{activeWO ? formatNumber(woRemaining) : '—'}</p>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3 mb-4 text-center">
@@ -208,17 +519,10 @@ export const Lines: React.FC = () => {
                       );
                     })()}
                   </div>
-                  {can('workOrders.view') && (() => {
-                    const woCount = workOrders.filter((w) => w.lineId === line.id && (w.status === 'pending' || w.status === 'in_progress')).length;
-                    return (
-                      <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
-                        <p className="text-xs text-slate-400 mb-1">أوامر شغل</p>
-                        <p className={`text-lg font-black ${woCount > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
-                          {woCount > 0 ? woCount : '—'}
-                        </p>
-                      </div>
-                    );
-                  })()}
+                  <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                    <p className="text-xs text-slate-400 mb-1">التاريخ المستهدف</p>
+                    <p className="text-sm font-black text-slate-600 dark:text-slate-300">{activeWO?.targetDate ?? '—'}</p>
+                  </div>
                 </div>
 
                 <div className="space-y-3 mb-5">
@@ -234,7 +538,7 @@ export const Lines: React.FC = () => {
                   </div>
                 </div>
 
-                {can("lineStatus.edit") && (
+                {can("lineStatus.edit") && !activeWO && (
                   <button
                     onClick={() => openTargetModal(line.id, line.name)}
                     className="mb-4 w-full flex items-center justify-center gap-2 py-2 text-xs font-bold text-primary bg-primary/5 hover:bg-primary/10 border border-primary/20 rounded-lg transition-all"

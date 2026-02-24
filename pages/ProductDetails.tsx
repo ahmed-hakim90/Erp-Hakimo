@@ -1031,7 +1031,7 @@ export const ProductDetails: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {costByLine.map((lc) => (
-                      <tr key={lc.lineId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                      <tr key={lc.lineId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer" onClick={() => navigate(`/lines/${lc.lineId}`)}>
                         <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">{lc.lineName}</td>
                         <td className="px-5 py-3 text-center text-sm font-bold">{formatNumber(lc.totalProduced)}</td>
                         <td className="px-5 py-3 text-center text-sm font-bold text-slate-600">{formatCost(lc.totalCost)} ج.م</td>
@@ -1167,7 +1167,7 @@ export const ProductDetails: React.FC = () => {
                   </tr>
                 )}
                 {reports.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={r.id}>
                     <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">{r.date}</td>
                     <td className="px-5 py-3 text-sm font-medium text-slate-600 dark:text-slate-400">{getLineName(r.lineId)}</td>
                     <td className="px-5 py-3 text-sm font-medium text-slate-600 dark:text-slate-400">{getEmployeeName(r.employeeId)}</td>

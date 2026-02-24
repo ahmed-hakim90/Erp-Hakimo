@@ -163,6 +163,7 @@ export interface ProductionReport {
   quantityWaste: number;
   workersCount: number;
   workHours: number;
+  notes?: string;
   workOrderId?: string;
   createdAt?: any;
 }

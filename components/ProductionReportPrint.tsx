@@ -9,6 +9,7 @@ import type { ProductionReport, PrintTemplateSettings } from '../types';
 import { DEFAULT_PRINT_TEMPLATE } from '../utils/dashboardConfig';
 
 export interface ReportPrintRow {
+  reportId?: string;
   date: string;
   lineName: string;
   productName: string;
@@ -17,6 +18,7 @@ export interface ReportPrintRow {
   quantityWaste: number;
   workersCount: number;
   workHours: number;
+  notes?: string;
   costPerUnit?: number;
   workOrderNumber?: string;
 }
@@ -55,6 +57,7 @@ export const mapReportsToPrintRows = (
     const wo = r.workOrderId && lookups.getWorkOrder ? lookups.getWorkOrder(r.workOrderId) : undefined;
     return {
       date: r.date,
+      reportId: r.id,
       lineName: lookups.getLineName(r.lineId),
       productName: lookups.getProductName(r.productId),
       employeeName: lookups.getEmployeeName(r.employeeId),
@@ -62,6 +65,7 @@ export const mapReportsToPrintRows = (
       quantityWaste: r.quantityWaste || 0,
       workersCount: r.workersCount || 0,
       workHours: r.workHours || 0,
+      notes: r.notes,
       costPerUnit: r.id && costMap ? costMap.get(r.id) : undefined,
       workOrderNumber: wo?.workOrderNumber,
     };
@@ -113,6 +117,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
     const showEmployee = ps.showEmployee;
     const showCosts = ps.showCosts && rows.some((r) => r.costPerUnit != null && r.costPerUnit > 0);
     const showWO = ps.showWorkOrder && rows.some((r) => !!r.workOrderNumber);
+    const showNotes = rows.some((r) => !!r.notes?.trim());
 
     return (
       <div
@@ -184,6 +189,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
               <Th>المنتج</Th>
               {showEmployee && <Th>الموظف</Th>}
               {showWO && <Th>أمر شغل</Th>}
+              {showNotes && <Th>ملحوظة</Th>}
               <Th align="center">الكمية المنتجة</Th>
               {showWaste && <Th align="center">الهالك</Th>}
               <Th align="center">عدد العمال</Th>
@@ -200,6 +206,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
                 <Td>{shortProductName(row.productName)}</Td>
                 {showEmployee && <Td>{row.employeeName}</Td>}
                 {showWO && <Td>{row.workOrderNumber || '—'}</Td>}
+                {showNotes && <Td>{row.notes?.trim() || '—'}</Td>}
                 <Td align="center" bold color="#059669">{fmtNum(row.quantityProduced, dp)}</Td>
                 {showWaste && <Td align="center" bold>{fmtNum(row.quantityWaste, dp)}</Td>}
                 <Td align="center">{row.workersCount}</Td>
@@ -209,7 +216,7 @@ export const ProductionReportPrint = React.forwardRef<HTMLDivElement, ReportPrin
             ))}
             {/* Totals Row */}
             <tr style={{ background: '#e2e8f0', fontWeight: 800 }}>
-              <Td colSpan={(showEmployee ? 5 : 4) + (showWO ? 1 : 0)}>الإجمالي</Td>
+              <Td colSpan={(showEmployee ? 5 : 4) + (showWO ? 1 : 0) + (showNotes ? 1 : 0)}>الإجمالي</Td>
               <Td align="center" bold color="#059669">{fmtNum(t.totalProduced, dp)}</Td>
               {showWaste && <Td align="center" bold color="#f43f5e">{fmtNum(t.totalWaste, dp)}</Td>}
               <Td align="center">{fmtNum(t.totalWorkers, dp)}</Td>
@@ -275,6 +282,11 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
     const wasteRatio = total > 0 ? ((report.quantityWaste / total) * 100).toFixed(dp) : '0';
     const paper = PAPER_DIMENSIONS[ps.paperSize] || PAPER_DIMENSIONS.a4;
 
+    const reportLink =
+      report.reportId && typeof window !== 'undefined'
+        ? `${window.location.origin}${window.location.pathname}#/reports?reportId=${encodeURIComponent(report.reportId)}`
+        : `report|${report.date}|${report.lineName}|${report.productName}|qty:${report.quantityProduced}`;
+
     return (
       <div
         ref={ref}
@@ -303,22 +315,19 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
           <h1 style={{ margin: 0, fontSize: ps.paperSize === 'thermal' ? '12pt' : '20pt', fontWeight: 900, color: ps.primaryColor }}>
             {ps.headerText}
           </h1>
-          <p style={{ margin: '2mm 0 0', fontSize: ps.paperSize === 'thermal' ? '7pt' : '10pt', color: '#64748b', fontWeight: 600 }}>
-            تقرير انتاج
-          </p>
+          <h2 style={{ margin: 0, fontSize: ps.paperSize === 'thermal' ? '9pt' : '15pt', fontWeight: 800, color: '#0f172a' }}>تقرير إنتاج</h2>
+
+          
         </div>
 
         {/* Report Title */}
         <div style={{ marginBottom: ps.paperSize === 'thermal' ? '3mm' : '8mm', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: ps.paperSize === 'thermal' ? '9pt' : '15pt', fontWeight: 800, color: '#0f172a' }}>تقرير إنتاج</h2>
-            <p style={{ margin: '1mm 0 0', fontSize: ps.paperSize === 'thermal' ? '7pt' : '10pt', color: '#64748b' }}>
-              {report.lineName} — {report.date}
-            </p>
+            
           </div>
-          <div style={{ textAlign: 'left', fontSize: ps.paperSize === 'thermal' ? '6pt' : '9pt', color: '#94a3b8' }}>
+          {/* <div style={{ textAlign: 'left', fontSize: ps.paperSize === 'thermal' ? '6pt' : '9pt', color: '#94a3b8' }}>
             تاريخ الطباعة: {now}
-          </div>
+          </div> */}
         </div>
 
         {/* Report Details */}
@@ -348,6 +357,7 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
             {ps.showCosts && report.costPerUnit != null && report.costPerUnit > 0 && (
               <DetailRow label="تكلفة الوحدة" value={`${fmtNum(report.costPerUnit, 2)} ج.م`} highlight={ps.primaryColor} />
             )}
+            {report.notes?.trim() && <DetailRow label="ملحوظة" value={report.notes} even />}
           </tbody>
         </table>
 
@@ -365,7 +375,7 @@ export const SingleReportPrint = React.forwardRef<HTMLDivElement, SingleReportPr
           {ps.showQRCode && (
             <div style={{ marginBottom: '3mm' }}>
               <QRCodeSVG
-                value={`report|${report.date}|${report.lineName}|${report.productName}|qty:${report.quantityProduced}`}
+                value={reportLink}
                 size={ps.paperSize === 'thermal' ? 40 : 64}
                 level="L"
               />

@@ -1000,7 +1000,7 @@ export const EmployeeProfile: React.FC = () => {
             {[...managerChain].reverse().map((m) => (
               <div key={m.id} className="flex items-center gap-3 py-2 border-r-2 border-slate-200 dark:border-slate-700 pr-4 ml-4">
                 <span className="material-icons-round text-slate-400">person</span>
-                <span>{m.name}</span>
+                <span className="cursor-pointer text-primary hover:underline" onClick={() => navigate(`/employees/${m.id}`)}>{m.name}</span>
                 <Badge variant="neutral">{getDepartmentName(m.departmentId)}</Badge>
               </div>
             ))}
@@ -1012,7 +1012,7 @@ export const EmployeeProfile: React.FC = () => {
             {directReports.map((r) => (
               <div key={r.id} className="flex items-center gap-3 py-2 border-r-2 border-slate-200 dark:border-slate-700 pr-4 ml-4">
                 <span className="material-icons-round text-slate-400">person</span>
-                <span>{r.name}</span>
+                <span className="cursor-pointer text-primary hover:underline" onClick={() => navigate(`/employees/${r.id}`)}>{r.name}</span>
                 <Badge variant="neutral">{getDepartmentName(r.departmentId)}</Badge>
               </div>
             ))}

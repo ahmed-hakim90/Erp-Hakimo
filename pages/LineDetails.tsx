@@ -876,7 +876,7 @@ export const LineDetails: React.FC = () => {
               const supervisor = employees.find((e) => e.id === wo.supervisorId);
               const prog = wo.quantity > 0 ? Math.min((wo.producedQuantity / wo.quantity) * 100, 100) : 0;
               return (
-                <div key={wo.id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                <div key={wo.id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-4 cursor-pointer hover:ring-2 hover:ring-amber-200 dark:hover:ring-amber-800" onClick={() => navigate('/work-orders')}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-mono text-xs font-bold text-primary">{wo.workOrderNumber}</span>
@@ -938,7 +938,7 @@ export const LineDetails: React.FC = () => {
               {reports.slice(0, 20).map((r) => {
                 const productName = _rawProducts.find((p) => p.id === r.productId)?.name ?? '—';
                 return (
-                  <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={r.id}>
                     <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">{r.date}</td>
                     <td className="px-5 py-3 text-sm font-medium">{productName}</td>
                     <td className="px-5 py-3 text-center">

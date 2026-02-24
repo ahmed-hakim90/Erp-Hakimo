@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Badge, Button } from '../components/UI';
-import { BarcodeScanner } from '../components/BarcodeScanner';
 import { lineAssignmentService } from '../services/lineAssignmentService';
 import { getDocs } from 'firebase/firestore';
 import { departmentsRef, jobPositionsRef } from '../modules/hr/collections';
@@ -24,7 +23,6 @@ export const LineWorkerAssignment: React.FC = () => {
   const [jobPositions, setJobPositions] = useState<FirestoreJobPosition[]>([]);
   const [loading, setLoading] = useState(false);
   const [scanInput, setScanInput] = useState('');
-  const [showCamera, setShowCamera] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [copying, setCopying] = useState(false);
   const [showCopyConfirm, setShowCopyConfirm] = useState(false);
@@ -415,14 +413,6 @@ export const LineWorkerAssignment: React.FC = () => {
                   </div>
                 )}
               </div>
-              {/* <button
-                onClick={() => setShowCamera(true)}
-                className="px-4 py-3 bg-primary/10 text-primary rounded-xl hover:bg-primary/20 transition-colors shrink-0 flex items-center gap-1.5"
-                title="مسح بالكاميرا"
-              >
-                <span className="material-icons-round text-xl">photo_camera</span>
-                <span className="text-sm font-bold hidden sm:inline">كاميرا</span>
-              </button> */}
               <button
                 onClick={() => handleScan(scanInput)}
                 disabled={!scanInput.trim()}
@@ -604,14 +594,6 @@ export const LineWorkerAssignment: React.FC = () => {
           </>
         )}
       </Card>
-
-      {/* Camera Scanner Modal */}
-      {showCamera && (
-        <BarcodeScanner
-          onScan={handleScan}
-          onClose={() => setShowCamera(false)}
-        />
-      )}
 
       {/* Copy Confirm Modal */}
       {showCopyConfirm && (

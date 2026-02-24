@@ -432,8 +432,8 @@ export const Dashboard: React.FC = () => {
                         </tr>
                       );
                       return (
-                        <tr key={pid} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                          <td className="px-4 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">{p?.name || '—'}</td>
+                        <tr key={pid} onClick={() => navigate(`/products/${pid}`)} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer">
+                          <td className="px-4 py-3 text-sm font-bold text-primary">{p?.name || '—'}</td>
                           <td className="px-4 py-3 text-center">
                             <span className="px-2.5 py-1 rounded-lg bg-violet-50 dark:bg-violet-900/20 text-violet-600 text-sm font-black ring-1 ring-violet-500/20">
                               {formatCost(data.costPerUnit)} ج.م

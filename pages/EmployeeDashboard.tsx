@@ -349,6 +349,25 @@ export const EmployeeDashboard: React.FC = () => {
         <DashboardPeriodFilter period={period} onChange={setPeriod} />
       </div>
 
+      {/* ── Alerts ─────────────────────────────────────────────────── */}
+      {alerts.length > 0 && (
+        <div className="space-y-2">
+          {alerts.map((alert, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-medium ${
+                alert.type === 'danger'
+                  ? 'bg-rose-50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400'
+                  : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400'
+              }`}
+            >
+              <span className="material-icons-round text-lg">{alert.icon}</span>
+              <span>{alert.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {periodLoading ? (
         <LoadingSkeleton type="card" rows={4} />
       ) : (
@@ -426,9 +445,8 @@ export const EmployeeDashboard: React.FC = () => {
             )}
           </div>
 
-          {/* ── Main Grid: Plan + Performance | Alerts ────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
+          {/* ── Main Content ─────────────────────────────────────── */}
+          <div className="space-y-6">
               {/* Active Plan Card */}
               {activePlan ? (
                 <Card>
@@ -493,6 +511,132 @@ export const EmployeeDashboard: React.FC = () => {
                 </Card>
               )}
 
+              {/* Employee Work Orders */}
+              {employee && can('workOrders.view') && (() => {
+                const myWOs = workOrders.filter((w) => {
+                  if (w.status !== 'pending' && w.status !== 'in_progress') return false;
+                  if (w.supervisorId === employee.id) return true;
+                  const employeeLineIds = [...new Set(
+                    [...todayReports, ...monthlyReports]
+                      .filter((r) => r.employeeId === employee.id)
+                      .map((r) => r.lineId)
+                  )];
+                  return employeeLineIds.includes(w.lineId);
+                });
+                if (myWOs.length === 0) return null;
+                return (
+                  <Card className="!p-0 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                      <span className="material-icons-round text-amber-500">assignment</span>
+                      <h3 className="text-base font-bold text-slate-800 dark:text-white">أوامر الشغل الخاصة بك</h3>
+                      <Badge variant="warning">{myWOs.length}</Badge>
+                    </div>
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {myWOs.map((wo) => {
+                        const product = _rawProducts.find((p) => p.id === wo.productId);
+                        const line = _rawLines.find((l) => l.id === wo.lineId);
+                        const prog = wo.quantity > 0 ? Math.min((wo.producedQuantity / wo.quantity) * 100, 100) : 0;
+                        const isSupervisor = wo.supervisorId === employee.id;
+                        return (
+                          <div key={wo.id} className="px-6 py-4 space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-bold text-amber-600">#{wo.workOrderNumber}</span>
+                                <Badge variant={wo.status === 'in_progress' ? 'warning' : 'info'}>
+                                  {wo.status === 'in_progress' ? 'قيد التنفيذ' : 'قيد الانتظار'}
+                                </Badge>
+                                {isSupervisor && (
+                                  <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 px-2 py-0.5 rounded-full">مشرف</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {can('print') && (
+                                  <button
+                                    onClick={() => triggerWOPrint(wo)}
+                                    className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                                    title="طباعة"
+                                  >
+                                    <span className="material-icons-round text-base">print</span>
+                                  </button>
+                                )}
+                                {isSupervisor && can('workOrders.edit') && wo.status === 'pending' && (
+                                  <button
+                                    onClick={() => updateWorkOrder(wo.id!, { status: 'in_progress' })}
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 hover:bg-emerald-100 text-xs font-bold transition-colors"
+                                  >
+                                    <span className="material-icons-round text-sm">play_arrow</span>
+                                    بدء
+                                  </button>
+                                )}
+                                {isSupervisor && can('workOrders.edit') && wo.status === 'in_progress' && (
+                                  <button
+                                    onClick={() => updateWorkOrder(wo.id!, { status: 'completed', completedAt: new Date().toISOString() })}
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 hover:bg-blue-100 text-xs font-bold transition-colors"
+                                  >
+                                    <span className="material-icons-round text-sm">check_circle</span>
+                                    اكتمل
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className="material-icons-round text-slate-400 text-base">inventory_2</span>
+                              <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{product?.name ?? '—'}</p>
+                              <span className="text-slate-300 dark:text-slate-600">·</span>
+                              <span className="material-icons-round text-slate-400 text-sm">precision_manufacturing</span>
+                              <span className="text-xs font-bold text-slate-500">{line?.name ?? '—'}</span>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-3 text-center">
+                              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2.5">
+                                <p className="text-[10px] text-slate-400 font-medium mb-0.5">المطلوب</p>
+                                <p className="text-sm font-black text-slate-700 dark:text-white">{formatNumber(wo.quantity)}</p>
+                              </div>
+                              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2.5">
+                                <p className="text-[10px] text-slate-400 font-medium mb-0.5">تم إنتاجه</p>
+                                <p className="text-sm font-black text-emerald-600">{formatNumber(wo.producedQuantity)}</p>
+                              </div>
+                              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2.5">
+                                <p className="text-[10px] text-slate-400 font-medium mb-0.5">المتبقي</p>
+                                <p className="text-sm font-black text-rose-500">{formatNumber(wo.quantity - wo.producedQuantity)}</p>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between text-xs font-bold">
+                                <span className="text-slate-500">التقدم</span>
+                                <span className={prog >= 80 ? 'text-emerald-600' : prog >= 50 ? 'text-amber-600' : 'text-slate-500'}>{prog.toFixed(0)}%</span>
+                              </div>
+                              <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all duration-1000 ${prog >= 80 ? 'bg-emerald-500' : prog >= 50 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${Math.min(prog, 100)}%` }} />
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-4 text-xs text-slate-400">
+                              <div className="flex items-center gap-1">
+                                <span className="material-icons-round text-sm">groups</span>
+                                <span className="font-bold">{wo.maxWorkers} عامل</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="material-icons-round text-sm">event</span>
+                                <span className="font-bold">{wo.targetDate}</span>
+                              </div>
+                              {can('workOrders.viewCost') && wo.estimatedCost > 0 && (
+                                <div className="flex items-center gap-1 mr-auto">
+                                  <span className="material-icons-round text-sm text-emerald-500">payments</span>
+                                  <span className="font-bold text-emerald-600">{formatCurrency(wo.estimatedCost)}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                );
+              })()}
+
               {/* Personal Performance */}
               <Card>
                 <div className="flex items-center gap-3 mb-5">
@@ -523,165 +667,10 @@ export const EmployeeDashboard: React.FC = () => {
                   </div>
                 </div>
               </Card>
-            </div>
-
-            {/* Sidebar: Alerts + Quick Summary */}
-            <div className="lg:col-span-1">
-              <Card className="sticky top-24">
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="w-10 h-10 bg-amber-50 dark:bg-amber-900/20 rounded-lg flex items-center justify-center">
-                    <span className="material-icons-round text-amber-600 dark:text-amber-400">notifications</span>
-                  </div>
-                  <h3 className="text-base font-bold text-slate-800 dark:text-white">تنبيهات</h3>
-                </div>
-
-                {alerts.length === 0 ? (
-                  <div className="flex items-start gap-3 bg-emerald-50 dark:bg-emerald-900/10 p-4 rounded-xl border border-emerald-100 dark:border-emerald-900/20">
-                    <span className="material-icons-round text-emerald-500 text-lg mt-0.5">check_circle</span>
-                    <div>
-                      <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400">كل شيء على ما يرام</p>
-                      <p className="text-xs text-slate-500 dark:text-emerald-200/60 mt-0.5">لا توجد تنبيهات حالياً. استمر في العمل الجيد!</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {alerts.map((alert, i) => (
-                      <div
-                        key={i}
-                        className={`flex items-start gap-3 p-4 rounded-xl border ${
-                          alert.type === 'danger'
-                            ? 'bg-rose-50 dark:bg-rose-900/10 border-rose-100 dark:border-rose-900/20'
-                            : 'bg-amber-50 dark:bg-amber-900/10 border-amber-100 dark:border-amber-900/20'
-                        }`}
-                      >
-                        <span className={`material-icons-round text-lg mt-0.5 ${
-                          alert.type === 'danger' ? 'text-rose-500' : 'text-amber-500'
-                        }`}>{alert.icon}</span>
-                        <p className={`text-xs leading-relaxed font-medium ${
-                          alert.type === 'danger' ? 'text-rose-700 dark:text-rose-300' : 'text-amber-700 dark:text-amber-300'
-                        }`}>{alert.message}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Quick Stats */}
-                <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">ملخص سريع</h4>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-500">التقارير المرسلة</span>
-                    <span className="text-sm font-black text-primary">{performance.reportsCount}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-500">إجمالي الإنتاج</span>
-                    <span className="text-sm font-black text-blue-600">{formatNumber(kpis.totalProduction)} وحدة</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-500">الهالك</span>
-                    <span className={`text-sm font-black ${kpis.wasteRatio > 5 ? 'text-rose-600' : 'text-slate-600 dark:text-slate-400'}`}>
-                      {formatNumber(kpis.totalWaste)} وحدة ({kpis.wasteRatio}%)
-                    </span>
-                  </div>
-                  {activePlan && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-500">تقدم الخطة</span>
-                      <span className={`text-sm font-black ${
-                        activePlan.progress >= 80 ? 'text-emerald-600' : 'text-amber-600'
-                      }`}>{activePlan.progress}%</span>
-                    </div>
-                  )}
-                </div>
-              </Card>
-            </div>
           </div>
         </>
       )}
 
-      {/* ── Supervisor Work Orders ─────────────────────────────────────── */}
-      {employee && employee.level === 2 && can('workOrders.view') && (() => {
-        const myWOs = workOrders.filter(
-          (w) => w.supervisorId === employee.id && (w.status === 'pending' || w.status === 'in_progress'),
-        );
-        if (myWOs.length === 0) return null;
-        return (
-          <Card className="!p-0 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
-              <span className="material-icons-round text-primary">assignment</span>
-              <h3 className="text-lg font-bold">أوامر الشغل</h3>
-              <Badge variant="warning">{myWOs.length}</Badge>
-            </div>
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {myWOs.map((wo) => {
-                const product = _rawProducts.find((p) => p.id === wo.productId);
-                const line = _rawLines.find((l) => l.id === wo.lineId);
-                const prog = wo.quantity > 0 ? Math.min((wo.producedQuantity / wo.quantity) * 100, 100) : 0;
-                return (
-                  <div key={wo.id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-mono text-xs font-bold text-primary">{wo.workOrderNumber}</span>
-                        <Badge variant={wo.status === 'in_progress' ? 'warning' : 'info'}>
-                          {wo.status === 'in_progress' ? 'قيد التنفيذ' : 'قيد الانتظار'}
-                        </Badge>
-                      </div>
-                      <p className="text-sm font-bold text-slate-800 dark:text-white">{product?.name ?? '—'}</p>
-                      <p className="text-xs text-slate-500">
-                        {line?.name ?? '—'} · {wo.maxWorkers} عامل كحد أقصى · التسليم: {wo.targetDate}
-                      </p>
-                    </div>
-                    <div className="sm:w-48 space-y-1">
-                      <div className="flex justify-between text-xs font-bold">
-                        <span className="text-slate-500">{formatNumber(wo.producedQuantity)} / {formatNumber(wo.quantity)}</span>
-                        <span className="text-primary">{prog.toFixed(0)}%</span>
-                      </div>
-                      <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${prog >= 100 ? 'bg-emerald-500' : 'bg-primary'}`} style={{ width: `${prog}%` }} />
-                      </div>
-                    </div>
-                    {can('workOrders.viewCost') && (
-                      <div className="sm:w-28 text-left">
-                        <p className="text-[10px] text-slate-400 font-bold">التكلفة</p>
-                        <p className="text-sm font-bold">{formatCurrency(wo.actualCost)}</p>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 shrink-0">
-                      {can('print') && (
-                        <button
-                          onClick={() => triggerWOPrint(wo)}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold transition-colors"
-                          title="طباعة"
-                        >
-                          <span className="material-icons-round text-base">print</span>
-                        </button>
-                      )}
-                      {can('workOrders.edit') && wo.status === 'pending' && (
-                        <button
-                          onClick={() => updateWorkOrder(wo.id!, { status: 'in_progress' })}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-xs font-bold transition-colors"
-                          title="بدء التنفيذ"
-                        >
-                          <span className="material-icons-round text-base">play_arrow</span>
-                          بدء
-                        </button>
-                      )}
-                      {can('workOrders.edit') && wo.status === 'in_progress' && (
-                        <button
-                          onClick={() => updateWorkOrder(wo.id!, { status: 'completed', completedAt: new Date().toISOString() })}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-xs font-bold transition-colors"
-                          title="اكتمل"
-                        >
-                          <span className="material-icons-round text-base">check_circle</span>
-                          اكتمل
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-        );
-      })()}
 
       {/* Hidden print component */}
       <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>

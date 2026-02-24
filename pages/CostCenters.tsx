@@ -122,7 +122,7 @@ export const CostCenters: React.FC = () => {
                 {canManage && (
                   <>
                     <button
-                      onClick={() => navigate(`/cost-centers/${cc.id}`)}
+                      onClick={() => openEdit(cc)}
                       className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold text-primary bg-primary/5 hover:bg-primary/10 border border-primary/20 rounded-lg transition-all"
                     >
                       <span className="material-icons-round text-sm">edit</span>

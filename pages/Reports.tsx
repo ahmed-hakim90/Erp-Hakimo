@@ -12,6 +12,8 @@ import { exportToPDF, shareToWhatsApp, ShareResult } from '../utils/reportExport
 import { parseExcelFile, toReportData, ImportResult, ParsedReportRow } from '../utils/importExcel';
 import { downloadReportsTemplate, ReportsTemplateLookups } from '../utils/downloadTemplates';
 import { lineAssignmentService } from '../services/lineAssignmentService';
+import { reportService } from '../services/reportService';
+import { useLocation } from 'react-router-dom';
 import {
   ProductionReportPrint,
   SingleReportPrint,
@@ -31,9 +33,13 @@ const emptyForm = {
   quantityWaste: 0,
   workersCount: 0,
   workHours: 0,
+  notes: '',
 };
+const NOTE_PREVIEW_LENGTH = 10;
 
 export const Reports: React.FC = () => {
+  const location = useLocation();
+  const isMobilePrint = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const todayReports = useAppStore((s) => s.todayReports);
   const productionReports = useAppStore((s) => s.productionReports);
   const employees = useAppStore((s) => s.employees);
@@ -68,6 +74,7 @@ export const Reports: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [shareToast, setShareToast] = useState<string | null>(null);
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [expandedNoteRows, setExpandedNoteRows] = useState<Set<string>>(new Set());
 
   // Import from Excel state
   const [showImportModal, setShowImportModal] = useState(false);
@@ -103,6 +110,7 @@ export const Reports: React.FC = () => {
   // Line & supervisor filters
   const [filterLineId, setFilterLineId] = useState('');
   const [filterEmployeeId, setFilterEmployeeId] = useState('');
+  const [highlightReportId, setHighlightReportId] = useState<string | null>(null);
 
   // Employee-only filter: basic employees see only their own reports
   const myEmployeeId = useMemo(() => {
@@ -130,6 +138,52 @@ export const Reports: React.FC = () => {
     if (filterEmployeeId) list = list.filter((r) => r.employeeId === filterEmployeeId);
     return list;
   }, [allReports, myEmployeeId, filterLineId, filterEmployeeId]);
+
+  const linkedReportId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('reportId');
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!linkedReportId) return;
+    let cancelled = false;
+
+    const loadLinkedReport = async () => {
+      const existsNow = displayedReports.some((r) => r.id === linkedReportId);
+      if (existsNow) return;
+
+      const linkedReport = await reportService.getById(linkedReportId);
+      if (!linkedReport || cancelled) return;
+
+      setStartDate(linkedReport.date);
+      setEndDate(linkedReport.date);
+      setFilterLineId('');
+      setFilterEmployeeId('');
+      await fetchReports(linkedReport.date, linkedReport.date);
+      if (cancelled) return;
+      setViewMode('range');
+    };
+
+    loadLinkedReport().catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [linkedReportId, displayedReports, fetchReports]);
+
+  useEffect(() => {
+    if (!linkedReportId) return;
+    const existsNow = displayedReports.some((r) => r.id === linkedReportId);
+    if (!existsNow) return;
+
+    setHighlightReportId(linkedReportId);
+    const rowEl = document.querySelector(`[data-row-id="${linkedReportId}"]`) as HTMLElement | null;
+    if (rowEl) {
+      rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    const timer = setTimeout(() => setHighlightReportId(null), 5000);
+    return () => clearTimeout(timer);
+  }, [linkedReportId, displayedReports]);
 
   const reportCosts = useMemo(() => {
     if (!canViewCosts) return new Map<string, number>();
@@ -195,6 +249,7 @@ export const Reports: React.FC = () => {
       const wo = woId ? woMap.get(woId) : undefined;
       const rid = (report as ProductionReport).id;
       return {
+        reportId: rid,
         date: report.date,
         lineName: getLineName(report.lineId),
         productName: getProductName(report.productId),
@@ -203,6 +258,7 @@ export const Reports: React.FC = () => {
         quantityWaste: report.quantityWaste || 0,
         workersCount: report.workersCount || 0,
         workHours: report.workHours || 0,
+        notes: report.notes,
         costPerUnit: rid && canViewCosts ? reportCosts.get(rid) : undefined,
         workOrderNumber: wo?.workOrderNumber,
       };
@@ -212,13 +268,46 @@ export const Reports: React.FC = () => {
 
   const triggerSinglePrint = useCallback(
     async (report: ProductionReport) => {
-      setPrintReport(buildReportRow(report));
+      const row = buildReportRow(report);
+      setPrintReport(row);
       await new Promise((r) => setTimeout(r, 300));
-      handleSinglePrint();
+      if (!singlePrintRef.current) return;
+      if (isMobilePrint) {
+        setExporting(true);
+        try {
+          await exportToPDF(singlePrintRef.current, `تقرير-إنتاج-${row.lineName}-${row.date}`, {
+            paperSize: printTemplate?.paperSize,
+            orientation: printTemplate?.orientation,
+            copies: 1,
+          });
+        } finally {
+          setExporting(false);
+        }
+      } else {
+        handleSinglePrint();
+      }
       setTimeout(() => setPrintReport(null), 1000);
     },
-    [buildReportRow, handleSinglePrint]
+    [buildReportRow, handleSinglePrint, isMobilePrint, printTemplate?.orientation, printTemplate?.paperSize]
   );
+
+  const triggerBulkPrint = useCallback(async () => {
+    if (!bulkPrintRef.current) return;
+    if (isMobilePrint) {
+      setExporting(true);
+      try {
+        await exportToPDF(bulkPrintRef.current, `تقارير-الإنتاج-${startDate}`, {
+          paperSize: printTemplate?.paperSize,
+          orientation: printTemplate?.orientation,
+          copies: 1,
+        });
+      } finally {
+        setExporting(false);
+      }
+      return;
+    }
+    handleBulkPrint();
+  }, [handleBulkPrint, isMobilePrint, printTemplate?.orientation, printTemplate?.paperSize, startDate]);
 
   const showShareFeedback = useCallback((result: ShareResult) => {
     if (result.method === 'native_share' || result.method === 'cancelled') return;
@@ -286,11 +375,12 @@ export const Reports: React.FC = () => {
       quantityWaste: report.quantityWaste,
       workersCount: report.workersCount,
       workHours: report.workHours,
+      notes: report.notes ?? '',
     });
     setShowModal(true);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (printAfterSave = false) => {
     if (!form.lineId || !form.productId || !form.employeeId) return;
     setSaving(true);
 
@@ -299,12 +389,21 @@ export const Reports: React.FC = () => {
       setSaving(false);
       setShowModal(false);
       setEditId(null);
+      if (printAfterSave && can('print')) {
+        await triggerSinglePrint({ ...form, id: editId });
+      }
     } else {
-      await createReport(form);
+      const createdId = await createReport(form);
       setSaving(false);
       setForm({ ...emptyForm, date: form.date, lineId: form.lineId });
       setSaveToast('تم حفظ التقرير بنجاح');
       setTimeout(() => setSaveToast(null), 3000);
+      if (printAfterSave && can('print')) {
+        await triggerSinglePrint({
+          ...form,
+          id: typeof createdId === 'string' ? createdId : undefined,
+        });
+      }
     }
   };
 
@@ -402,6 +501,9 @@ export const Reports: React.FC = () => {
   // ── SelectableTable config ──────────────────────────────────────────────────
 
   const reportColumns = useMemo<TableColumn<ProductionReport>[]>(() => {
+    const getNoteRowKey = (r: ProductionReport) =>
+      r.id ?? `${r.date}-${r.lineId}-${r.productId}-${r.employeeId}`;
+
     const cols: TableColumn<ProductionReport>[] = [
       { header: 'التاريخ', render: (r) => <span className="font-bold text-slate-700 dark:text-slate-300">{r.date}</span> },
       { header: 'خط الإنتاج', render: (r) => <span className="font-medium">{getLineName(r.lineId)}</span> },
@@ -418,6 +520,41 @@ export const Reports: React.FC = () => {
         ),
       },
       { header: 'الهالك', headerClassName: 'text-center', className: 'text-center text-rose-500 font-bold', render: (r) => <>{formatNumber(r.quantityWaste)}</> },
+      {
+        id: 'notes',
+        header: 'الملحوظة',
+        hideable: true,
+        render: (r) => {
+          const note = r.notes?.trim() || '';
+          if (!note) return <span className="text-slate-300">—</span>;
+
+          const rowKey = getNoteRowKey(r);
+          const isExpanded = expandedNoteRows.has(rowKey);
+          const shouldTruncate = note.length > NOTE_PREVIEW_LENGTH;
+          const preview = shouldTruncate ? `${note.slice(0, NOTE_PREVIEW_LENGTH)} ...` : note;
+
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!shouldTruncate) return;
+                setExpandedNoteRows((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(rowKey)) next.delete(rowKey);
+                  else next.add(rowKey);
+                  return next;
+                });
+              }}
+              className={`text-sm text-right block max-w-[260px] ${shouldTruncate ? 'text-primary hover:underline cursor-pointer' : 'text-slate-600 dark:text-slate-300 cursor-default'}`}
+              title={shouldTruncate ? (isExpanded ? 'اضغط للإخفاء' : 'اضغط للعرض') : note}
+            >
+              {isExpanded ? note : preview}
+            </button>
+          );
+        },
+        sortKey: (r) => r.notes ?? '',
+      },
       {
         header: 'عمال',
         headerClassName: 'text-center',
@@ -469,14 +606,14 @@ export const Reports: React.FC = () => {
       });
     }
     return cols;
-  }, [canViewCosts, getLineName, getProductName, getEmployeeName, reportCosts, woMap]);
+  }, [canViewCosts, expandedNoteRows, getLineName, getProductName, getEmployeeName, reportCosts, woMap]);
 
   const handleBulkPrintSelected = useCallback(async (items: ProductionReport[]) => {
     setBulkPrintSource(items);
     await new Promise((r) => setTimeout(r, 300));
-    handleBulkPrint();
+    await triggerBulkPrint();
     setTimeout(() => setBulkPrintSource(null), 1000);
-  }, [handleBulkPrint]);
+  }, [triggerBulkPrint]);
 
   const handleBulkDeleteConfirmed = useCallback(async () => {
     if (!bulkDeleteItems) return;
@@ -571,7 +708,7 @@ export const Reports: React.FC = () => {
                   <span className="hidden sm:inline">أوامر الشغل Excel</span>
                 </Button>
               )}
-              <Button variant="outline" onClick={() => handleBulkPrint()}>
+              <Button variant="outline" disabled={exporting} onClick={() => triggerBulkPrint()}>
                 <span className="material-icons-round text-sm">print</span>
                 <span className="hidden sm:inline">طباعة</span>
               </Button>
@@ -717,6 +854,8 @@ export const Reports: React.FC = () => {
       <SelectableTable<ProductionReport>
         data={displayedReports}
         columns={reportColumns}
+        enableColumnVisibility
+        highlightRowId={highlightReportId}
         getId={(r) => r.id!}
         bulkActions={reportBulkActions}
         renderActions={renderReportActions}
@@ -742,14 +881,14 @@ export const Reports: React.FC = () => {
       {/* ══ Create / Edit Report Modal ══ */}
       {showModal && (can("reports.create") || can("reports.edit")) && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowModal(false); setEditId(null); setSaveToast(null); }}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
               <h3 className="text-lg font-bold">{editId ? 'تعديل تقرير إنتاج' : 'إنشاء تقرير إنتاج'}</h3>
               <button onClick={() => { setShowModal(false); setEditId(null); setSaveToast(null); }} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
-            <div className="p-4 sm:p-6 space-y-5">
+            <div className="p-4 sm:p-6 space-y-5 overflow-y-auto">
               {saveToast && (
                 <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 flex items-center gap-2 animate-in fade-in duration-300">
                   <span className="material-icons-round text-emerald-500 text-lg">check_circle</span>
@@ -897,6 +1036,16 @@ export const Reports: React.FC = () => {
                   />
                 </div>
               </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">ملحوظة</label>
+                <textarea
+                  rows={3}
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-xl text-sm focus:border-primary focus:ring-primary/20 p-3.5 outline-none font-medium transition-all resize-y"
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="اكتب أي ملاحظة إضافية للتقرير..."
+                />
+              </div>
             </div>
             {canViewCosts && form.workersCount > 0 && form.workHours > 0 && form.quantityProduced > 0 && form.lineId && (
               (() => {
@@ -958,11 +1107,22 @@ export const Reports: React.FC = () => {
                 </>
               );
             })()}
-            <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
+            <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3 shrink-0">
               <Button variant="outline" onClick={() => { setShowModal(false); setEditId(null); setSaveToast(null); }}>إلغاء</Button>
+              {can('print') && (
+                <Button
+                  variant="outline"
+                  onClick={() => handleSave(true)}
+                  disabled={saving || !form.lineId || !form.productId || !form.employeeId || !form.quantityProduced || !form.workersCount || !form.workHours}
+                >
+                  {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
+                  <span className="material-icons-round text-sm">print</span>
+                  حفظ وطباعة
+                </Button>
+              )}
               <Button
                 variant="primary"
-                onClick={handleSave}
+                onClick={() => handleSave(false)}
                 disabled={saving || !form.lineId || !form.productId || !form.employeeId || !form.quantityProduced || !form.workersCount || !form.workHours}
               >
                 {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
