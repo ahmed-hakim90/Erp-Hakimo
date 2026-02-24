@@ -1408,7 +1408,28 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   subscribeToWorkOrders: () => {
     return workOrderService.subscribeAll((orders) => {
-      set({ workOrders: orders });
+      const validWorkOrderIds = new Set(
+        orders
+          .map((order) => order.id)
+          .filter((id): id is string => !!id),
+      );
+
+      set((state) => {
+        const liveProduction = Object.fromEntries(
+          Object.entries(state.liveProduction).filter(([workOrderId]) =>
+            validWorkOrderIds.has(workOrderId),
+          ),
+        );
+        const scanEventsToday = state.scanEventsToday.filter((event) =>
+          validWorkOrderIds.has(event.workOrderId),
+        );
+
+        return {
+          workOrders: orders,
+          liveProduction,
+          scanEventsToday,
+        };
+      });
       get()._rebuildLines();
     });
   },
