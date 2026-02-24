@@ -1450,6 +1450,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   toggleBarcodeScan: async (payload) => {
     const result = await scanEventService.toggleScan(payload);
+    // Persist live scan summary on the work order itself so dashboards
+    // can render produced quantity without opening scanner page first.
+    try {
+      const latest = await scanEventService.buildWorkOrderSummary(payload.workOrderId);
+      await workOrderService.update(payload.workOrderId, {
+        actualProducedFromScans: latest.summary.completedUnits || 0,
+        actualWorkersCount: latest.summary.activeWorkers || 0,
+        scanSummary: latest.summary,
+      });
+    } catch (summaryError) {
+      console.error('toggleBarcodeScan summary sync failed:', summaryError);
+    }
     return {
       action: result.action,
       cycleSeconds: result.cycleSeconds,

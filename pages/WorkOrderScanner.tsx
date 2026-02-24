@@ -166,6 +166,12 @@ export const WorkOrderScanner: React.FC = () => {
     setDeletingSessionId(sessionId);
     try {
       await scanEventService.deleteSession(workOrderId, sessionId);
+      const latest = await scanEventService.buildWorkOrderSummary(workOrderId);
+      await updateWorkOrder(workOrderId, {
+        actualProducedFromScans: latest.summary.completedUnits || 0,
+        actualWorkersCount: latest.summary.activeWorkers || 0,
+        scanSummary: latest.summary,
+      });
       setScanMsg('تم حذف الجلسة بنجاح');
       playFeedbackTone('success');
     } catch (error: any) {
@@ -174,7 +180,7 @@ export const WorkOrderScanner: React.FC = () => {
     } finally {
       setDeletingSessionId(null);
     }
-  }, [playFeedbackTone, workOrderId]);
+  }, [playFeedbackTone, updateWorkOrder, workOrderId]);
 
   const handleCloseWorkOrder = useCallback(async () => {
     if (!workOrder || !workOrderId) return;

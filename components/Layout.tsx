@@ -6,6 +6,11 @@ import { MENU_CONFIG } from '../config/menu.config';
 import { useBadgeCounts, useActiveRoute, useSidebarCollapse } from '../hooks/useNavigation';
 import { NotificationBell } from './NotificationBell';
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
 const Sidebar: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
@@ -245,6 +250,43 @@ const Sidebar: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClo
 const Header: React.FC<{ onMenuToggle: () => void }> = ({ onMenuToggle }) => {
   const navigate = useNavigate();
   const { isReadOnly } = useCurrentRole();
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    const isStandalone = () =>
+      window.matchMedia('(display-mode: standalone)').matches ||
+      ((window.navigator as Navigator & { standalone?: boolean }).standalone === true);
+
+    setIsInstalled(isStandalone());
+
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredPrompt(event as BeforeInstallPromptEvent);
+    };
+    const onAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+    window.addEventListener('appinstalled', onAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', onAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    await deferredPrompt.prompt();
+    const choice = await deferredPrompt.userChoice;
+    if (choice.outcome === 'accepted') {
+      setIsInstalled(true);
+    }
+    setDeferredPrompt(null);
+  };
 
   return (
     <header className="h-16 sm:h-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-30 px-4 sm:px-8 flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800">
@@ -258,6 +300,17 @@ const Header: React.FC<{ onMenuToggle: () => void }> = ({ onMenuToggle }) => {
       </div>
 
       <div className="flex items-center gap-2 sm:gap-5 shrink-0">
+        {!isInstalled && deferredPrompt && (
+          <button
+            onClick={handleInstallClick}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:hover:bg-emerald-900/50 transition-colors"
+            title="تثبيت التطبيق"
+          >
+            <span className="material-icons-round text-sm">download</span>
+            <span className="hidden sm:inline">Install App</span>
+            <span className="sm:hidden">تثبيت</span>
+          </button>
+        )}
         {isReadOnly && (
           <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
             <span className="material-icons-round text-sm">lock</span>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Hakim ERP icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8f2424" />
+      <stop offset="100%" stop-color="#6d1b1b" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#bg)" />
+  <rect x="120" y="104" width="272" height="304" rx="36" fill="#ffffff" opacity="0.16" />
+  <path d="M154 292h55v66h32v-66h68l-77-138h-36l-77 138h35zm77-83 38 69h-75z" fill="#fff" />
+  <circle cx="342" cy="350" r="38" fill="#fff" opacity="0.9" />
+  <path d="M329 350h26M342 337v26" stroke="#8f2424" stroke-width="10" stroke-linecap="round" />
+</svg>
