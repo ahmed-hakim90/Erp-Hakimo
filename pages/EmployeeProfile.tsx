@@ -122,6 +122,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
   const [alRecurring, setAlRecurring] = useState(true);
   const [alMonth, setAlMonth] = useState(currentMonth);
   const [alError, setAlError] = useState('');
+  const [alSuccess, setAlSuccess] = useState('');
 
   // Deduction form state
   const [dedName, setDedName] = useState('');
@@ -131,6 +132,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
   const [dedReason, setDedReason] = useState('');
   const [dedCategory, setDedCategory] = useState<DeductionCategory>('manual');
   const [dedError, setDedError] = useState('');
+  const [dedSuccess, setDedSuccess] = useState('');
 
   const handleAddAllowance = async () => {
     if (!alType || alAmount <= 0) {
@@ -138,6 +140,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
       return;
     }
     setAlError('');
+    setAlSuccess('');
     setFinancialSaving(true);
     try {
       const typeObj = allowanceTypes.find((t) => t.id === alType);
@@ -152,7 +155,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
         status: 'active',
         createdBy: uid,
       });
-      setShowAllowanceModal(false);
+      setAlSuccess('تم حفظ البدل بنجاح');
       setAlType('');
       setAlAmount(0);
       setAlRecurring(true);
@@ -171,6 +174,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
       return;
     }
     setDedError('');
+    setDedSuccess('');
     setFinancialSaving(true);
     try {
       await employeeDeductionService.create({
@@ -186,7 +190,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
         status: 'active',
         createdBy: uid,
       });
-      setShowDeductionModal(false);
+      setDedSuccess('تم حفظ الخصم بنجاح');
       setDedName('');
       setDedAmount(0);
       setDedRecurring(true);
@@ -255,7 +259,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
               <span>البدلات المخصصة</span>
             </div>
             {canEdit && (
-              <Button onClick={() => setShowAllowanceModal(true)} disabled={financialSaving}>
+              <Button onClick={() => { setAlError(''); setAlSuccess(''); setShowAllowanceModal(true); }} disabled={financialSaving}>
                 <span className="material-icons-round text-lg">add</span>
                 إضافة بدل
               </Button>
@@ -342,6 +346,8 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
                 <Button
                   variant="outline"
                   onClick={() => {
+                    setDedError('');
+                    setDedSuccess('');
                     setDedCategory('disciplinary');
                     setDedName('جزاء تأديبي');
                     setDedRecurring(false);
@@ -352,7 +358,7 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
                   <span className="material-icons-round text-lg text-amber-500">gavel</span>
                   جزاء تأديبي
                 </Button>
-                <Button onClick={() => setShowDeductionModal(true)} disabled={financialSaving}>
+                <Button onClick={() => { setDedError(''); setDedSuccess(''); setShowDeductionModal(true); }} disabled={financialSaving}>
                   <span className="material-icons-round text-lg">add</span>
                   إضافة خصم
                 </Button>
@@ -437,14 +443,14 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
 
       {/* Add Allowance Modal */}
       {showAllowanceModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowAllowanceModal(false)}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowAllowanceModal(false); setAlError(''); setAlSuccess(''); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold flex items-center gap-2">
                 <span className="material-icons-round text-emerald-500">add_circle</span>
                 إضافة بدل للموظف
               </h3>
-              <button onClick={() => setShowAllowanceModal(false)} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
+              <button onClick={() => { setShowAllowanceModal(false); setAlError(''); setAlSuccess(''); }} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
@@ -481,12 +487,13 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
                   <input type="month" value={alMonth} onChange={(e) => setAlMonth(e.target.value)} className={inputCls} />
                 </div>
               )}
+              {alSuccess && <p className="text-sm text-emerald-600 font-bold">{alSuccess}</p>}
               {alError && <p className="text-sm text-rose-600">{alError}</p>}
               <div className="flex items-center gap-2 pt-2">
                 <Button onClick={handleAddAllowance} disabled={financialSaving}>
                   {financialSaving ? 'جاري الحفظ...' : 'حفظ'}
                 </Button>
-                <Button variant="outline" onClick={() => setShowAllowanceModal(false)}>إلغاء</Button>
+                <Button variant="outline" onClick={() => { setShowAllowanceModal(false); setAlError(''); setAlSuccess(''); }}>إلغاء</Button>
               </div>
             </div>
           </div>
@@ -495,14 +502,14 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
 
       {/* Add Deduction Modal */}
       {showDeductionModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowDeductionModal(false)}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowDeductionModal(false); setDedError(''); setDedSuccess(''); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold flex items-center gap-2">
                 <span className="material-icons-round text-rose-500">remove_circle</span>
                 إضافة خصم للموظف
               </h3>
-              <button onClick={() => setShowDeductionModal(false)} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
+              <button onClick={() => { setShowDeductionModal(false); setDedError(''); setDedSuccess(''); }} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
@@ -546,12 +553,13 @@ const FinancialsTab: React.FC<FinancialsTabProps> = ({
                 <label className={labelCls}>السبب (اختياري)</label>
                 <textarea value={dedReason} onChange={(e) => setDedReason(e.target.value)} rows={2} className={`${inputCls} resize-none`} placeholder="سبب الخصم" />
               </div>
+              {dedSuccess && <p className="text-sm text-emerald-600 font-bold">{dedSuccess}</p>}
               {dedError && <p className="text-sm text-rose-600">{dedError}</p>}
               <div className="flex items-center gap-2 pt-2">
                 <Button onClick={handleAddDeduction} disabled={financialSaving}>
                   {financialSaving ? 'جاري الحفظ...' : 'حفظ'}
                 </Button>
-                <Button variant="outline" onClick={() => setShowDeductionModal(false)}>إلغاء</Button>
+                <Button variant="outline" onClick={() => { setShowDeductionModal(false); setDedError(''); setDedSuccess(''); }}>إلغاء</Button>
               </div>
             </div>
           </div>

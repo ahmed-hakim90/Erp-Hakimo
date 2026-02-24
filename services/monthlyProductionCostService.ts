@@ -94,7 +94,8 @@ export const monthlyProductionCostService = {
     hourlyRate: number,
     costCenters: CostCenter[],
     costCenterValues: CostCenterValue[],
-    costAllocations: CostAllocation[]
+    costAllocations: CostAllocation[],
+    supervisorHourlyRates?: Map<string, number>
   ): Promise<MonthlyProductionCost | null> {
     if (!isConfigured) return null;
 
@@ -154,6 +155,7 @@ export const monthlyProductionCostService = {
       if (lineDateTotal > 0) {
         totalIndirect += lineIndirect * (r.quantityProduced / lineDateTotal);
       }
+      totalIndirect += (supervisorHourlyRates?.get(r.employeeId) || 0) * (r.workHours || 0);
     }
 
     const totalCost = totalLabor + totalIndirect;
@@ -182,11 +184,20 @@ export const monthlyProductionCostService = {
     hourlyRate: number,
     costCenters: CostCenter[],
     costCenterValues: CostCenterValue[],
-    costAllocations: CostAllocation[]
+    costAllocations: CostAllocation[],
+    supervisorHourlyRates?: Map<string, number>
   ): Promise<MonthlyProductionCost[]> {
     const results: MonthlyProductionCost[] = [];
     for (const pid of productIds) {
-      const result = await this.calculate(pid, month, hourlyRate, costCenters, costCenterValues, costAllocations);
+      const result = await this.calculate(
+        pid,
+        month,
+        hourlyRate,
+        costCenters,
+        costCenterValues,
+        costAllocations,
+        supervisorHourlyRates
+      );
       if (result) results.push(result);
     }
     return results;

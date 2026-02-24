@@ -1023,9 +1023,9 @@ export const AdminDashboard: React.FC = () => {
             colorClass={systemUsers.disabled > 0 ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'}
           />
           <KPIBox
-            label="خطط نشطة"
+            label="أوامر الشغل النشطة"
             value={productionPlans.filter((p) => p.status === 'in_progress' || p.status === 'planned').length}
-            icon="event_note"
+            icon="assignment"
             colorClass="bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400"
           />
           {canViewCosts && (() => {

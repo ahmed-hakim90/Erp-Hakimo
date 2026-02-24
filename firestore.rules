@@ -139,6 +139,14 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Work Orders Collection ───────────────────────────────────────────
+    match /work_orders/{docId} {
+      allow read: if hasPermission('workOrders.view');
+      allow create: if hasPermission('workOrders.create');
+      allow update: if hasPermission('workOrders.edit');
+      allow delete: if hasPermission('workOrders.delete') || isAdmin();
+    }
+
     // ── Activity Logs Collection ──────────────────────────────────────────
     // Any authenticated user can create logs. Only admin can read/delete.
     match /activity_logs/{docId} {

@@ -55,6 +55,7 @@ export const Lines: React.FC = () => {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // ── Set Target Modal ──
@@ -113,6 +114,7 @@ export const Lines: React.FC = () => {
   const openCreate = () => {
     setEditId(null);
     setForm(emptyForm);
+    setSaveMsg(null);
     setShowModal(true);
   };
 
@@ -126,19 +128,28 @@ export const Lines: React.FC = () => {
       maxWorkers: raw.maxWorkers,
       status: raw.status,
     });
+    setSaveMsg(null);
     setShowModal(true);
   };
 
   const handleSave = async () => {
     if (!form.name) return;
     setSaving(true);
-    if (editId) {
-      await updateLine(editId, form);
-    } else {
-      await createLine(form);
+    setSaveMsg(null);
+    try {
+      if (editId) {
+        await updateLine(editId, form);
+        setSaveMsg({ type: 'success', text: 'تم حفظ تعديلات الخط بنجاح' });
+      } else {
+        await createLine(form);
+        setSaveMsg({ type: 'success', text: 'تم إضافة خط الإنتاج بنجاح' });
+        setForm(emptyForm);
+      }
+    } catch {
+      setSaveMsg({ type: 'error', text: 'تعذر حفظ بيانات الخط. حاول مرة أخرى.' });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setShowModal(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -576,15 +587,25 @@ export const Lines: React.FC = () => {
 
       {/* ── Add / Edit Modal ── */}
       {showModal && (can("lines.create") || can("lines.edit")) && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowModal(false); setSaveMsg(null); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <h3 className="text-lg font-bold">{editId ? 'تعديل خط الإنتاج' : 'إضافة خط إنتاج جديد'}</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button onClick={() => { setShowModal(false); setSaveMsg(null); }} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
             <div className="p-6 space-y-5">
+              {saveMsg && (
+                <div className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold ${saveMsg.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'}`}>
+                  <span className="material-icons-round text-base">{saveMsg.type === 'success' ? 'check_circle' : 'error'}</span>
+                  <p className="flex-1">{saveMsg.text}</p>
+                  <button onClick={() => setSaveMsg(null)} className="text-current/70 hover:text-current transition-colors">
+                    <span className="material-icons-round text-base">close</span>
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">اسم الخط *</label>
                 <input
@@ -631,7 +652,7 @@ export const Lines: React.FC = () => {
               </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
-              <Button variant="outline" onClick={() => setShowModal(false)}>إلغاء</Button>
+              <Button variant="outline" onClick={() => { setShowModal(false); setSaveMsg(null); }}>إلغاء</Button>
               <Button variant="primary" onClick={handleSave} disabled={saving || !form.name}>
                 {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
                 <span className="material-icons-round text-sm">{editId ? 'save' : 'add'}</span>

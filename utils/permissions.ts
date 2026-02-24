@@ -17,7 +17,7 @@ export type Permission =
   | 'dashboard.view'
   | 'products.view' | 'products.create' | 'products.edit' | 'products.delete' | 'products.createRawMaterial'
   | 'lines.view' | 'lines.create' | 'lines.edit' | 'lines.delete'
-  | 'employees.view' | 'employees.create' | 'employees.edit' | 'employees.delete'
+  | 'employees.view' | 'employees.viewDetails' | 'employees.create' | 'employees.edit' | 'employees.delete'
   | 'supervisors.view'
   | 'productionWorkers.view'
   | 'lineWorkers.view'
@@ -92,6 +92,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     label: 'الموظفين',
     permissions: [
       { key: 'employees.view', label: 'عرض' },
+      { key: 'employees.viewDetails', label: 'عرض ملف الموظف' },
       { key: 'employees.create', label: 'إنشاء' },
       { key: 'employees.edit', label: 'تعديل' },
       { key: 'employees.delete', label: 'حذف' },
@@ -412,7 +413,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   '/lines/:id': 'lines.view',
   '/employees': 'employees.view',
   '/employees/import': 'employees.create',
-  '/employees/:id': 'employees.view',
+  '/employees/:id': 'employees.viewDetails',
   '/supervisors': 'supervisors.view',
   '/supervisors/:id': 'supervisors.view',
   '/production-workers': 'productionWorkers.view',
@@ -470,7 +471,15 @@ export function checkPermission(
   permissions: Record<string, boolean>,
   permission: Permission,
 ): boolean {
-  return permissions[permission] === true;
+  const explicit = permissions[permission];
+  if (explicit !== undefined) return explicit === true;
+
+  // Backward compatibility for old role docs created before this permission existed.
+  if (permission === 'employees.viewDetails') {
+    return permissions['employees.view'] === true;
+  }
+
+  return false;
 }
 
 /** Derive read-only status from a permissions map */
@@ -499,7 +508,7 @@ export interface PermissionGuards {
 export function usePermission(): PermissionGuards {
   const permissions = useAppStore((s) => s.userPermissions);
   return useMemo(() => {
-    const can = (permission: Permission) => permissions[permission] === true;
+    const can = (permission: Permission) => checkPermission(permissions, permission);
     return {
       can,
       canCreateReport: can('reports.create'),

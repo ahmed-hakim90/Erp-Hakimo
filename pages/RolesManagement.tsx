@@ -38,6 +38,7 @@ export const RolesManagement: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState(COLOR_OPTIONS[0].value);
   const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -46,6 +47,7 @@ export const RolesManagement: React.FC = () => {
     setEditPerms({ ...buildEmptyPerms(), ...role.permissions });
     setEditName(role.name);
     setEditColor(role.color);
+    setSaveMsg(null);
   }, []);
 
   const openCreate = useCallback(() => {
@@ -53,6 +55,7 @@ export const RolesManagement: React.FC = () => {
     setEditPerms(buildEmptyPerms());
     setEditName('');
     setEditColor(COLOR_OPTIONS[0].value);
+    setSaveMsg(null);
     setShowCreateModal(true);
   }, []);
 
@@ -74,15 +77,21 @@ export const RolesManagement: React.FC = () => {
   const handleSave = async () => {
     if (!editName.trim()) return;
     setSaving(true);
-    const data = { name: editName.trim(), color: editColor, permissions: editPerms };
-    if (editingRole?.id) {
-      await updateRole(editingRole.id, data);
-    } else {
-      await createRole(data);
+    setSaveMsg(null);
+    try {
+      const data = { name: editName.trim(), color: editColor, permissions: editPerms };
+      if (editingRole?.id) {
+        await updateRole(editingRole.id, data);
+        setSaveMsg({ type: 'success', text: 'تم حفظ تعديلات الدور بنجاح' });
+      } else {
+        await createRole(data);
+        setSaveMsg({ type: 'success', text: 'تم إنشاء الدور بنجاح' });
+      }
+    } catch {
+      setSaveMsg({ type: 'error', text: 'تعذر حفظ الدور. حاول مرة أخرى.' });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setEditingRole(null);
-    setShowCreateModal(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -177,7 +186,7 @@ export const RolesManagement: React.FC = () => {
                   {editingRole ? `تعديل: ${editingRole.name}` : 'إنشاء دور جديد'}
                 </h3>
                 <button
-                  onClick={() => { setEditingRole(null); setShowCreateModal(false); }}
+                  onClick={() => { setEditingRole(null); setShowCreateModal(false); setSaveMsg(null); }}
                   className="text-slate-400 hover:text-slate-600 transition-colors"
                 >
                   <span className="material-icons-round">close</span>
@@ -211,6 +220,16 @@ export const RolesManagement: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {saveMsg && (
+                <div className={`mb-4 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold ${saveMsg.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'}`}>
+                  <span className="material-icons-round text-base">{saveMsg.type === 'success' ? 'check_circle' : 'error'}</span>
+                  <p className="flex-1">{saveMsg.text}</p>
+                  <button onClick={() => setSaveMsg(null)} className="text-current/70 hover:text-current transition-colors">
+                    <span className="material-icons-round text-base">close</span>
+                  </button>
+                </div>
+              )}
 
               <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                 {PERMISSION_GROUPS.map((group) => {
@@ -263,7 +282,7 @@ export const RolesManagement: React.FC = () => {
                   {enabledCount(editPerms)} / {ALL_PERMISSIONS.length} صلاحية مفعلة
                 </span>
                 <div className="flex items-center gap-3">
-                  <Button variant="outline" onClick={() => { setEditingRole(null); setShowCreateModal(false); }}>
+                  <Button variant="outline" onClick={() => { setEditingRole(null); setShowCreateModal(false); setSaveMsg(null); }}>
                     إلغاء
                   </Button>
                   <Button variant="primary" onClick={handleSave} disabled={saving || !editName.trim()}>

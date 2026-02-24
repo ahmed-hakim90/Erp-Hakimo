@@ -69,6 +69,8 @@ export const WorkOrders: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<WorkOrderStatus | 'all'>('all');
   const [filterLine, setFilterLine] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -92,6 +94,12 @@ export const WorkOrders: React.FC = () => {
   const productName = useCallback((id: string) => _rawProducts.find((p) => p.id === id)?.name ?? '—', [_rawProducts]);
   const lineName = useCallback((id: string) => _rawLines.find((l) => l.id === id)?.name ?? '—', [_rawLines]);
   const supervisorName = useCallback((id: string) => _rawEmployees.find((e) => e.id === id)?.name ?? '—', [_rawEmployees]);
+  const shortProductName = useCallback((id: string) => {
+    const fullName = productName(id);
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length <= 2) return fullName;
+    return `${parts[0]} ${parts[1]}`;
+  }, [productName]);
 
   const filtered = useMemo(() => {
     let list = [...workOrders];
@@ -132,6 +140,8 @@ export const WorkOrders: React.FC = () => {
   const openCreate = useCallback(() => {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setSaveToast(null);
+    setSaveError(null);
     setShowModal(true);
   }, []);
 
@@ -148,12 +158,16 @@ export const WorkOrders: React.FC = () => {
       targetDate: wo.targetDate,
       notes: wo.notes || '',
     });
+    setSaveToast(null);
+    setSaveError(null);
     setShowModal(true);
   }, []);
 
   const handleSave = useCallback(async () => {
     if (!form.productId || !form.lineId || !form.supervisorId || form.quantity <= 0) return;
     setSaving(true);
+    setSaveToast(null);
+    setSaveError(null);
     try {
       if (editingId) {
         await updateWorkOrder(editingId, {
@@ -164,18 +178,21 @@ export const WorkOrders: React.FC = () => {
           maxWorkers: form.maxWorkers,
           targetDate: form.targetDate,
           notes: form.notes,
-          planId: form.planId || undefined,
+          ...(form.planId ? { planId: form.planId } : {}),
         });
+        setSaveToast('تم حفظ تعديلات أمر الشغل بنجاح');
       } else {
         const woNumber = await workOrderService.generateNextNumber();
         const est = estimateReportCost(
           form.maxWorkers, form.workHours, form.quantity,
-          laborSettings?.hourlyRate ?? 0, form.lineId,
+          laborSettings?.hourlyRate ?? 0,
+          (_rawEmployees.find((e) => e.id === form.supervisorId)?.hourlyRate ?? 0),
+          form.lineId,
           costCenters, costCenterValues, costAllocations
         );
-        await createWorkOrder({
+        const createdId = await createWorkOrder({
           workOrderNumber: woNumber,
-          planId: form.planId || undefined,
+          ...(form.planId ? { planId: form.planId } : {}),
           productId: form.productId,
           lineId: form.lineId,
           supervisorId: form.supervisorId,
@@ -189,13 +206,31 @@ export const WorkOrders: React.FC = () => {
           notes: form.notes,
           createdBy: uid || '',
         });
+        if (!createdId) {
+          throw new Error('تعذر إنشاء أمر الشغل');
+        }
+        setSaveToast('تم إنشاء أمر الشغل بنجاح');
+        setForm(EMPTY_FORM);
       }
-      setShowModal(false);
-      setForm(EMPTY_FORM);
+      setTimeout(() => setSaveToast(null), 3000);
+    } catch (error) {
+      console.error('Work order save error:', error);
+      setSaveError('تعذر حفظ أمر الشغل. تأكد من الاتصال والصلاحيات ثم حاول مرة أخرى.');
     } finally {
       setSaving(false);
     }
-  }, [form, editingId, uid, laborSettings, createWorkOrder, updateWorkOrder]);
+  }, [
+    form,
+    editingId,
+    uid,
+    laborSettings,
+    _rawEmployees,
+    costCenters,
+    costCenterValues,
+    costAllocations,
+    createWorkOrder,
+    updateWorkOrder,
+  ]);
 
   const handleDelete = useCallback(async (id: string) => {
     await deleteWorkOrder(id);
@@ -344,7 +379,7 @@ export const WorkOrders: React.FC = () => {
                       }`}
                     >
                       <td className="py-3 px-3 font-mono font-bold text-primary text-xs">{wo.workOrderNumber}</td>
-                      <td className="py-3 px-3 font-bold">{productName(wo.productId)}</td>
+                      <td className="py-3 px-3 font-bold">{shortProductName(wo.productId)}</td>
                       <td className="py-3 px-3 text-slate-600 dark:text-slate-400">{lineName(wo.lineId)}</td>
                       <td className="py-3 px-3 text-slate-600 dark:text-slate-400">{supervisorName(wo.supervisorId)}</td>
                       <td className="py-3 px-3 font-mono">
@@ -429,12 +464,32 @@ export const WorkOrders: React.FC = () => {
 
       {/* Create / Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !saving && setShowModal(false)}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !saving && (setShowModal(false), setSaveError(null), setSaveToast(null))}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800">
               <h3 className="text-lg font-bold">{editingId ? 'تعديل أمر شغل' : 'أمر شغل جديد'}</h3>
             </div>
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {saveToast && (
+                <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3">
+                  <span className="material-icons-round text-emerald-500 text-base">check_circle</span>
+                  <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300 flex-1">{saveToast}</p>
+                  <button onClick={() => setSaveToast(null)} className="text-emerald-400 hover:text-emerald-600 transition-colors">
+                    <span className="material-icons-round text-base">close</span>
+                  </button>
+                </div>
+              )}
+
+              {saveError && (
+                <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl p-3">
+                  <span className="material-icons-round text-rose-500 text-base">error</span>
+                  <p className="text-sm font-bold text-rose-700 dark:text-rose-300 flex-1">{saveError}</p>
+                  <button onClick={() => setSaveError(null)} className="text-rose-400 hover:text-rose-600 transition-colors">
+                    <span className="material-icons-round text-base">close</span>
+                  </button>
+                </div>
+              )}
+
               {/* Plan (optional) */}
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">خطة الإنتاج (اختياري)</label>
@@ -449,7 +504,7 @@ export const WorkOrders: React.FC = () => {
                   <option value="">بدون خطة</option>
                   {productionPlans.filter((p) => p.status === 'planned' || p.status === 'in_progress').map((p) => (
                     <option key={p.id} value={p.id!}>
-                      {productName(p.productId)} — {formatNumber(p.plannedQuantity)} وحدة
+                      {shortProductName(p.productId)} — {formatNumber(p.plannedQuantity)} وحدة
                     </option>
                   ))}
                 </select>
@@ -472,7 +527,9 @@ export const WorkOrders: React.FC = () => {
                 (() => {
                   const est = estimateReportCost(
                     form.maxWorkers, form.workHours, form.quantity,
-                    laborSettings?.hourlyRate ?? 0, form.lineId,
+                    laborSettings?.hourlyRate ?? 0,
+                    (_rawEmployees.find((e) => e.id === form.supervisorId)?.hourlyRate ?? 0),
+                    form.lineId,
                     costCenters, costCenterValues, costAllocations
                   );
                   return (
@@ -553,7 +610,7 @@ export const WorkOrders: React.FC = () => {
               </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex justify-between">
-              <Button variant="outline" onClick={() => setShowModal(false)} disabled={saving}>إلغاء</Button>
+              <Button variant="outline" onClick={() => { setShowModal(false); setSaveError(null); setSaveToast(null); }} disabled={saving}>إلغاء</Button>
               <Button variant="primary" onClick={handleSave} disabled={saving || !form.productId || !form.lineId || !form.supervisorId || form.quantity <= 0}>
                 {saving ? <span className="material-icons-round animate-spin text-sm">refresh</span> : null}
                 {editingId ? 'حفظ التعديلات' : 'إنشاء أمر الشغل'}

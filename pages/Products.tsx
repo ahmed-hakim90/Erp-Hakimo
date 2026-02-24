@@ -13,6 +13,45 @@ import { exportAllProducts, PRODUCT_EXPORT_DEFAULTS } from '../utils/exportExcel
 import type { ProductExportOptions } from '../utils/exportExcel';
 import { calculateProductCostBreakdown } from '../utils/productCostBreakdown';
 
+type ProductTableColumnKey =
+  | 'openingStock'
+  | 'totalProduction'
+  | 'wasteUnits'
+  | 'stockLevel'
+  | 'totalCost'
+  | 'directIndirect'
+  | 'costPerUnit'
+  | 'sellingPrice'
+  | 'chineseUnitCost'
+  | 'chinesePriceCny'
+  | 'innerBoxCost'
+  | 'outerCartonCost'
+  | 'unitsPerCarton';
+
+const COLUMN_PREFS_KEY = 'products_table_visible_columns_v1';
+
+const DEFAULT_VISIBLE_COLUMNS: Record<ProductTableColumnKey, boolean> = {
+  openingStock: true,
+  totalProduction: true,
+  wasteUnits: true,
+  stockLevel: true,
+  totalCost: true,
+  directIndirect: true,
+  costPerUnit: true,
+  sellingPrice: true,
+  chineseUnitCost: true,
+  chinesePriceCny: true,
+  innerBoxCost: true,
+  outerCartonCost: true,
+  unitsPerCarton: true,
+};
+
+const shortProductName = (name: string): string => {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length <= 2) return name;
+  return `${parts[0]} ${parts[1]}`;
+};
+
 const emptyForm: Omit<FirestoreProduct, 'id'> = {
   name: '',
   model: '',
@@ -47,11 +86,22 @@ export const Products: React.FC = () => {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Export customization
-  const [showExportModal, setShowExportModal] = useState(false);
+  const [showColumnsModal, setShowColumnsModal] = useState(false);
   const [exportOptions, setExportOptions] = useState<ProductExportOptions>({ ...PRODUCT_EXPORT_DEFAULTS });
+  const [visibleColumns, setVisibleColumns] = useState<Record<ProductTableColumnKey, boolean>>(() => {
+    if (typeof window === 'undefined') return DEFAULT_VISIBLE_COLUMNS;
+    try {
+      const raw = window.localStorage.getItem(COLUMN_PREFS_KEY);
+      if (!raw) return DEFAULT_VISIBLE_COLUMNS;
+      return { ...DEFAULT_VISIBLE_COLUMNS, ...(JSON.parse(raw) as Partial<Record<ProductTableColumnKey, boolean>>) };
+    } catch {
+      return DEFAULT_VISIBLE_COLUMNS;
+    }
+  });
 
   // Import from Excel
   const [showImportModal, setShowImportModal] = useState(false);
@@ -92,6 +142,7 @@ export const Products: React.FC = () => {
   const openCreate = () => {
     setEditId(null);
     setForm(emptyForm);
+    setSaveMsg(null);
     setShowModal(true);
   };
 
@@ -111,6 +162,7 @@ export const Products: React.FC = () => {
       unitsPerCarton: raw?.unitsPerCarton ?? 0,
       sellingPrice: raw?.sellingPrice ?? 0,
     });
+    setSaveMsg(null);
     setShowModal(true);
   };
 
@@ -118,13 +170,21 @@ export const Products: React.FC = () => {
     if (!form.name || !form.code) return;
     if (!form.model) return;
     setSaving(true);
-    if (editId) {
-      await updateProduct(editId, form);
-    } else {
-      await createProduct(form);
+    setSaveMsg(null);
+    try {
+      if (editId) {
+        await updateProduct(editId, form);
+        setSaveMsg({ type: 'success', text: 'تم حفظ تعديلات المنتج بنجاح' });
+      } else {
+        await createProduct(form);
+        setSaveMsg({ type: 'success', text: 'تم إضافة المنتج بنجاح' });
+        setForm(emptyForm);
+      }
+    } catch {
+      setSaveMsg({ type: 'error', text: 'تعذر حفظ المنتج. حاول مرة أخرى.' });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setShowModal(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -185,7 +245,34 @@ export const Products: React.FC = () => {
       const breakdown = raw ? calculateProductCostBreakdown(raw, [], productCosts[p.id]?.costPerUnit ?? 0) : null;
       return { product: p, raw: raw || { name: p.name, model: p.category, code: p.code, openingBalance: p.openingStock }, costBreakdown: breakdown };
     });
-    exportAllProducts(data, canViewCosts, opts);
+    const columnLabels: string[] = ['الكود', 'اسم المنتج', 'الفئة'];
+    if (visibleColumns.openingStock) columnLabels.push('الرصيد الافتتاحي');
+    if (visibleColumns.totalProduction) columnLabels.push('إجمالي الإنتاج');
+    if (visibleColumns.wasteUnits) columnLabels.push('إجمالي الهالك');
+    if (visibleColumns.stockLevel) columnLabels.push('الرصيد الحالي');
+
+    if (canViewCosts && visibleColumns.chineseUnitCost) columnLabels.push('تكلفة الوحدة الصينية');
+    if (canViewCosts && visibleColumns.chinesePriceCny) columnLabels.push('السعر باليوان');
+    if (canViewCosts && visibleColumns.innerBoxCost) columnLabels.push('تكلفة العلبة الداخلية');
+    if (canViewCosts && visibleColumns.outerCartonCost) columnLabels.push('تكلفة الكرتونة');
+    if (canViewCosts && visibleColumns.unitsPerCarton) columnLabels.push('وحدات/كرتونة');
+    if (canViewCosts && visibleColumns.totalCost) columnLabels.push('إجمالي التكلفة المحسوبة');
+    if (canViewCosts && visibleColumns.costPerUnit) columnLabels.push('نصيب المصاريف الصناعية (م. وغ.م)');
+    if (visibleColumns.sellingPrice) columnLabels.push('سعر البيع');
+    if (canViewCosts && visibleColumns.sellingPrice) {
+      columnLabels.push('هامش الربح (ج.م)');
+      columnLabels.push('نسبة هامش الربح %');
+    }
+
+    exportAllProducts(data, canViewCosts, opts, laborSettings?.cnyToEgpRate ?? 0, columnLabels);
+  };
+
+  const toggleColumn = (key: ProductTableColumnKey, checked: boolean) => {
+    const next = { ...visibleColumns, [key]: checked };
+    setVisibleColumns(next);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(COLUMN_PREFS_KEY, JSON.stringify(next));
+    }
   };
 
   return (
@@ -200,10 +287,27 @@ export const Products: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           {products.length > 0 && (
-            <Button variant="secondary" onClick={() => { setExportOptions({ ...PRODUCT_EXPORT_DEFAULTS }); setShowExportModal(true); }} className="shrink-0">
-              <span className="material-icons-round text-sm">download</span>
-              <span className="hidden sm:inline">تصدير Excel</span>
-            </Button>
+            <>
+              <Button variant="secondary" onClick={() => {
+                const opts: ProductExportOptions = {
+                  stock: visibleColumns.openingStock || visibleColumns.totalProduction || visibleColumns.wasteUnits || visibleColumns.stockLevel,
+                  productCosts: visibleColumns.chineseUnitCost || visibleColumns.innerBoxCost || visibleColumns.outerCartonCost || visibleColumns.unitsPerCarton || visibleColumns.totalCost || visibleColumns.chinesePriceCny,
+                  manufacturingCosts: visibleColumns.costPerUnit,
+                  sellingPrice: visibleColumns.sellingPrice,
+                  profitMargin: visibleColumns.sellingPrice,
+                  chinesePriceCny: visibleColumns.chinesePriceCny,
+                };
+                setExportOptions(opts);
+                doExportProducts(opts);
+              }} className="shrink-0">
+                <span className="material-icons-round text-sm">download</span>
+                <span className="hidden sm:inline">تصدير Excel</span>
+              </Button>
+              <Button variant="outline" onClick={() => setShowColumnsModal(true)} className="shrink-0">
+                <span className="material-icons-round text-sm">view_column</span>
+                <span className="hidden sm:inline">الأعمدة</span>
+              </Button>
+            </>
           )}
           {can("products.create") && (
             <>
@@ -272,15 +376,21 @@ export const Products: React.FC = () => {
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
                 <th className="px-5 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400">المنتج</th>
-                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الرصيد الافتتاحي</th>
-                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الإنتاج</th>
-                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الهالك</th>
-                <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الرصيد الحالي</th>
+                {visibleColumns.openingStock && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الرصيد الافتتاحي</th>}
+                {visibleColumns.totalProduction && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الإنتاج</th>}
+                {visibleColumns.wasteUnits && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الهالك</th>}
+                {visibleColumns.stockLevel && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">الرصيد الحالي</th>}
+                {visibleColumns.sellingPrice && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">سعر البيع</th>}
                 {canViewCosts && (
                   <>
-                    <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">إجمالي التكلفة</th>
-                    <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">مباشر / غير مباشر</th>
-                    <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">تكلفة الوحدة</th>
+                    {visibleColumns.totalCost && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">إجمالي التكلفة</th>}
+                    {visibleColumns.directIndirect && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">مباشر / غير مباشر</th>}
+                    {visibleColumns.costPerUnit && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">تكلفة الوحدة</th>}
+                    {visibleColumns.chineseUnitCost && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">تكلفة الوحدة الصينية</th>}
+                    {visibleColumns.chinesePriceCny && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">السعر باليوان</th>}
+                    {visibleColumns.innerBoxCost && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">تكلفة العلبة الداخلية</th>}
+                    {visibleColumns.outerCartonCost && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">تكلفة الكرتونة الخارجية</th>}
+                    {visibleColumns.unitsPerCarton && <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center">عدد الوحدات/كرتونة</th>}
                   </>
                 )}
                 <th className="px-4 py-3.5 text-xs font-black text-slate-500 dark:text-slate-400 text-center w-28">الإجراءات</th>
@@ -289,7 +399,7 @@ export const Products: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={canViewCosts ? 9 : 6} className="px-6 py-16 text-center text-slate-400">
+                  <td colSpan={99} className="px-6 py-16 text-center text-slate-400">
                     <span className="material-icons-round text-5xl mb-3 block opacity-30">inventory_2</span>
                     <p className="font-bold text-lg">لا توجد منتجات{search || categoryFilter || stockFilter ? ' مطابقة للبحث' : ' بعد'}</p>
                     <p className="text-sm mt-1">
@@ -308,7 +418,13 @@ export const Products: React.FC = () => {
                         <span className="material-icons-round text-primary text-lg">inventory_2</span>
                       </div>
                       <div className="min-w-0">
-                        <span className="font-bold text-sm text-slate-700 dark:text-slate-200 hover:text-primary cursor-pointer transition-colors block truncate max-w-[280px]" onClick={() => navigate(`/products/${product.id}`)}>{product.name}</span>
+                        <span
+                          className="font-bold text-sm text-slate-700 dark:text-slate-200 hover:text-primary cursor-pointer transition-colors block truncate max-w-[280px]"
+                          onClick={() => navigate(`/products/${product.id}`)}
+                          title={product.name}
+                        >
+                          {shortProductName(product.name)}
+                        </span>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="font-mono text-[11px] text-slate-400">{product.code}</span>
                           {product.category && (
@@ -318,37 +434,45 @@ export const Products: React.FC = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-center font-bold text-slate-700 dark:text-slate-300 tabular-nums">{formatNumber(product.openingStock)}</td>
-                  <td className="px-4 py-4 text-center">
+                  {visibleColumns.openingStock && <td className="px-4 py-4 text-center font-bold text-slate-700 dark:text-slate-300 tabular-nums">{formatNumber(product.openingStock)}</td>}
+                  {visibleColumns.totalProduction && <td className="px-4 py-4 text-center">
                     <span className="inline-block px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 text-sm font-black tabular-nums">
                       {formatNumber(product.totalProduction)}
                     </span>
-                  </td>
-                  <td className="px-4 py-4 text-center">
+                  </td>}
+                  {visibleColumns.wasteUnits && <td className="px-4 py-4 text-center">
                     {product.wasteUnits > 0 ? (
                       <span className="text-sm font-bold text-rose-500 tabular-nums">{formatNumber(product.wasteUnits)}</span>
                     ) : (
                       <span className="text-sm text-slate-300">0</span>
                     )}
-                  </td>
-                  <td className="px-4 py-4 text-center">
+                  </td>}
+                  {visibleColumns.stockLevel && <td className="px-4 py-4 text-center">
                     <span className={`text-sm font-black tabular-nums ${product.stockLevel > 100 ? 'text-slate-700 dark:text-slate-200' : product.stockLevel > 0 ? 'text-amber-600' : 'text-rose-500'}`}>
                       {formatNumber(product.stockLevel)}
                     </span>
-                  </td>
+                  </td>}
+                  {visibleColumns.sellingPrice && (
+                    <td className="px-4 py-4 text-center text-sm font-black tabular-nums">
+                      {formatCost((_rawProducts.find((r) => r.id === product.id)?.sellingPrice ?? 0))} ج.م
+                    </td>
+                  )}
                   {canViewCosts && (() => {
                     const c = productCosts[product.id];
                     const hasCost = c && c.totalCost > 0;
+                    const raw = _rawProducts.find((r) => r.id === product.id);
+                    const cnyRate = laborSettings?.cnyToEgpRate ?? 0;
+                    const chineseUnitCost = raw?.chineseUnitCost ?? 0;
                     return (
                       <>
-                        <td className="px-4 py-4 text-center">
+                        {visibleColumns.totalCost && <td className="px-4 py-4 text-center">
                           {hasCost ? (
                             <span className="text-sm font-black text-amber-700 dark:text-amber-400 tabular-nums">{formatCost(c.totalCost)} <span className="text-[10px] font-medium opacity-70">ج.م</span></span>
                           ) : (
                             <span className="text-sm text-slate-300">—</span>
                           )}
-                        </td>
-                        <td className="px-4 py-4 text-center">
+                        </td>}
+                        {visibleColumns.directIndirect && <td className="px-4 py-4 text-center">
                           {hasCost ? (
                             <div className="flex flex-col items-center gap-0.5">
                               <span className="text-xs tabular-nums text-blue-600 dark:text-blue-400 font-bold">{formatCost(c.laborCost)} <span className="text-[10px] font-normal opacity-70">مباشر</span></span>
@@ -357,8 +481,8 @@ export const Products: React.FC = () => {
                           ) : (
                             <span className="text-sm text-slate-300">—</span>
                           )}
-                        </td>
-                        <td className="px-4 py-4 text-center">
+                        </td>}
+                        {visibleColumns.costPerUnit && <td className="px-4 py-4 text-center">
                           {hasCost ? (
                             <span className="inline-block px-2.5 py-1 rounded-md bg-primary/5 text-primary text-sm font-black tabular-nums ring-1 ring-primary/10">
                               {formatCost(c.costPerUnit)} <span className="text-[10px] font-medium opacity-70">ج.م</span>
@@ -366,7 +490,32 @@ export const Products: React.FC = () => {
                           ) : (
                             <span className="text-sm text-slate-300">—</span>
                           )}
-                        </td>
+                        </td>}
+                        {visibleColumns.chineseUnitCost && (
+                          <td className="px-4 py-4 text-center text-sm font-black tabular-nums">
+                            {formatCost(chineseUnitCost)} ج.م
+                          </td>
+                        )}
+                        {visibleColumns.chinesePriceCny && (
+                          <td className="px-4 py-4 text-center text-sm font-black tabular-nums">
+                            {cnyRate > 0 ? `¥ ${formatCost(chineseUnitCost / cnyRate)}` : '—'}
+                          </td>
+                        )}
+                        {visibleColumns.innerBoxCost && (
+                          <td className="px-4 py-4 text-center text-sm font-black tabular-nums">
+                            {formatCost(raw?.innerBoxCost ?? 0)} ج.م
+                          </td>
+                        )}
+                        {visibleColumns.outerCartonCost && (
+                          <td className="px-4 py-4 text-center text-sm font-black tabular-nums">
+                            {formatCost(raw?.outerCartonCost ?? 0)} ج.م
+                          </td>
+                        )}
+                        {visibleColumns.unitsPerCarton && (
+                          <td className="px-4 py-4 text-center text-sm font-black tabular-nums">
+                            {raw?.unitsPerCarton ?? 0}
+                          </td>
+                        )}
                       </>
                     );
                   })()}
@@ -401,15 +550,25 @@ export const Products: React.FC = () => {
 
       {/* ── Add / Edit Modal ── */}
       {showModal && (can("products.create") || can("products.edit")) && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowModal(false); setSaveMsg(null); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
               <h3 className="text-lg font-bold">{editId ? 'تعديل المنتج' : 'إضافة منتج جديد'}</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button onClick={() => { setShowModal(false); setSaveMsg(null); }} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
             <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {saveMsg && (
+                <div className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold ${saveMsg.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'}`}>
+                  <span className="material-icons-round text-base">{saveMsg.type === 'success' ? 'check_circle' : 'error'}</span>
+                  <p className="flex-1">{saveMsg.text}</p>
+                  <button onClick={() => setSaveMsg(null)} className="text-current/70 hover:text-current transition-colors">
+                    <span className="material-icons-round text-base">close</span>
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">اسم المنتج *</label>
                 <input
@@ -517,7 +676,7 @@ export const Products: React.FC = () => {
               )}
             </div>
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
-              <Button variant="outline" onClick={() => setShowModal(false)}>إلغاء</Button>
+              <Button variant="outline" onClick={() => { setShowModal(false); setSaveMsg(null); }}>إلغاء</Button>
               <Button variant="primary" onClick={handleSave} disabled={saving || !form.name || !form.code}>
                 {saving ? (
                   <span className="material-icons-round animate-spin text-sm">refresh</span>
@@ -709,62 +868,69 @@ export const Products: React.FC = () => {
         </div>
       )}
 
-      {/* ── Export Customization Modal ── */}
-      {showExportModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowExportModal(false)}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
+      {/* ── Column Control Modal ── */}
+      {showColumnsModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowColumnsModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="material-icons-round text-primary">tune</span>
-                <h3 className="text-lg font-bold">تخصيص التصدير</h3>
+                <h3 className="text-lg font-bold">إدارة الأعمدة</h3>
               </div>
-              <button onClick={() => setShowExportModal(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setShowColumnsModal(false)} className="text-slate-400 hover:text-slate-600">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
-            <div className="p-6 space-y-3">
+            <div className="p-6 space-y-3 overflow-y-auto flex-1 min-h-0">
               {[
-                { key: 'stock' as const, label: 'بيانات المخزون', desc: 'الرصيد الافتتاحي، الإنتاج، الهالك، الحالي', icon: 'inventory' },
-                { key: 'productCosts' as const, label: 'تكاليف المنتج', desc: 'تكلفة صينية، مواد خام، تغليف، كرتونة', icon: 'receipt_long' },
-                { key: 'manufacturingCosts' as const, label: 'تكاليف صناعية (م. وغ.م)', desc: 'نصيب المصاريف الصناعية من تقارير الإنتاج', icon: 'precision_manufacturing' },
-                { key: 'sellingPrice' as const, label: 'سعر البيع', desc: 'سعر بيع الوحدة', icon: 'sell' },
-                { key: 'profitMargin' as const, label: 'هامش الربح', desc: 'هامش الربح بالجنيه والنسبة المئوية', icon: 'trending_up' },
+                { key: 'openingStock' as const, label: 'الرصيد الافتتاحي', icon: 'inventory' },
+                { key: 'totalProduction' as const, label: 'الإنتاج', icon: 'precision_manufacturing' },
+                { key: 'wasteUnits' as const, label: 'الهالك', icon: 'delete_sweep' },
+                { key: 'stockLevel' as const, label: 'الرصيد الحالي', icon: 'inventory_2' },
+                { key: 'sellingPrice' as const, label: 'سعر البيع', icon: 'sell' },
+                { key: 'totalCost' as const, label: 'إجمالي التكلفة', icon: 'payments' },
+                { key: 'directIndirect' as const, label: 'مباشر / غير مباشر', icon: 'compare_arrows' },
+                { key: 'costPerUnit' as const, label: 'تكلفة الوحدة', icon: 'price_check' },
+                { key: 'chineseUnitCost' as const, label: 'تكلفة الوحدة الصينية (ج.م)', icon: 'local_shipping' },
+                { key: 'chinesePriceCny' as const, label: 'السعر باليوان', icon: 'currency_yuan' },
+                { key: 'innerBoxCost' as const, label: 'تكلفة العلبة الداخلية', icon: 'inventory' },
+                { key: 'outerCartonCost' as const, label: 'تكلفة الكرتونة الخارجية', icon: 'package_2' },
+                { key: 'unitsPerCarton' as const, label: 'عدد الوحدات/كرتونة', icon: 'view_in_ar' },
               ].map((opt) => (
                 <label
                   key={opt.key}
                   className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                    exportOptions[opt.key]
+                    visibleColumns[opt.key]
                       ? 'border-primary/30 bg-primary/5 dark:bg-primary/10'
                       : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                   }`}
                 >
                   <input
                     type="checkbox"
-                    checked={exportOptions[opt.key]}
-                    onChange={(e) => setExportOptions({ ...exportOptions, [opt.key]: e.target.checked })}
+                    checked={visibleColumns[opt.key]}
+                    onChange={(e) => toggleColumn(opt.key, e.target.checked)}
                     className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/20"
                   />
-                  <span className={`material-icons-round text-lg ${exportOptions[opt.key] ? 'text-primary' : 'text-slate-400'}`}>{opt.icon}</span>
+                  <span className={`material-icons-round text-lg ${visibleColumns[opt.key] ? 'text-primary' : 'text-slate-400'}`}>{opt.icon}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-slate-700 dark:text-white">{opt.label}</p>
-                    <p className="text-[10px] text-slate-400">{opt.desc}</p>
                   </div>
                 </label>
               ))}
             </div>
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <button
-                onClick={() => setExportOptions({ stock: false, productCosts: false, manufacturingCosts: false, sellingPrice: false, profitMargin: false })}
+                onClick={() => {
+                  const empty = Object.keys(DEFAULT_VISIBLE_COLUMNS).reduce((acc, key) => ({ ...acc, [key]: false }), {} as Record<ProductTableColumnKey, boolean>);
+                  setVisibleColumns(empty);
+                  if (typeof window !== 'undefined') window.localStorage.setItem(COLUMN_PREFS_KEY, JSON.stringify(empty));
+                }}
                 className="text-xs font-bold text-slate-400 hover:text-slate-600"
               >
                 إلغاء تحديد الكل
               </button>
               <div className="flex items-center gap-3">
-                <Button variant="outline" onClick={() => setShowExportModal(false)}>إلغاء</Button>
-                <Button variant="primary" onClick={() => { doExportProducts(exportOptions); setShowExportModal(false); }}>
-                  <span className="material-icons-round text-sm">download</span>
-                  تصدير
-                </Button>
+                <Button variant="outline" onClick={() => setShowColumnsModal(false)}>إغلاق</Button>
               </div>
             </div>
           </div>

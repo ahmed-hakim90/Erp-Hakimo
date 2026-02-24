@@ -4,6 +4,7 @@ import type {
   CostCenterValue,
   CostAllocation,
   LaborSettings,
+  FirestoreEmployee,
 } from '../types';
 
 export interface LineCostData {
@@ -109,6 +110,24 @@ export interface ProductCostData {
   costPerUnit: number;
 }
 
+const getSupervisorHourlyRate = (
+  report: ProductionReport,
+  supervisorHourlyRates?: Map<string, number>
+): number => {
+  if (!report.employeeId || !supervisorHourlyRates) return 0;
+  return supervisorHourlyRates.get(report.employeeId) || 0;
+};
+
+export const buildSupervisorHourlyRatesMap = (
+  employees: FirestoreEmployee[]
+): Map<string, number> => {
+  const result = new Map<string, number>();
+  employees
+    .filter((e) => e.id && e.level === 2 && e.isActive)
+    .forEach((e) => result.set(e.id!, Math.max(0, e.hourlyRate || 0)));
+  return result;
+};
+
 /**
  * Build cost data for every product.
  * Indirect cost is split proportionally by the product's share
@@ -182,7 +201,8 @@ export const buildReportsCosts = (
   hourlyRate: number,
   costCenters: CostCenter[],
   costCenterValues: CostCenterValue[],
-  costAllocations: CostAllocation[]
+  costAllocations: CostAllocation[],
+  supervisorHourlyRates?: Map<string, number>
 ): Map<string, number> => {
   const result = new Map<string, number>();
   if (hourlyRate <= 0 && costCenters.length === 0) return result;
@@ -199,6 +219,7 @@ export const buildReportsCosts = (
     if (!r.id || !r.quantityProduced || r.quantityProduced <= 0) continue;
 
     const laborCost = (r.workersCount || 0) * (r.workHours || 0) * hourlyRate;
+    const supervisorIndirectCost = getSupervisorHourlyRate(r, supervisorHourlyRates) * (r.workHours || 0);
 
     const month = r.date?.slice(0, 7) || getCurrentMonth();
     if (!indirectCache.has(`${r.lineId}_${month}`)) {
@@ -214,7 +235,7 @@ export const buildReportsCosts = (
       ? lineIndirect * (r.quantityProduced / lineDateTotal)
       : 0;
 
-    result.set(r.id, (laborCost + indirectShare) / r.quantityProduced);
+    result.set(r.id, (laborCost + indirectShare + supervisorIndirectCost) / r.quantityProduced);
   }
 
   return result;
@@ -405,6 +426,7 @@ export const estimateReportCost = (
   workHours: number,
   quantityProduced: number,
   hourlyRate: number,
+  supervisorHourlyRate: number,
   lineId: string,
   costCenters: CostCenter[],
   costCenterValues: CostCenterValue[],
@@ -413,10 +435,12 @@ export const estimateReportCost = (
   if (quantityProduced <= 0) return { laborCost: 0, indirectCost: 0, totalCost: 0, costPerUnit: 0 };
 
   const laborCost = workersCount * workHours * hourlyRate;
+  const supervisorIndirectCost = Math.max(0, supervisorHourlyRate || 0) * workHours;
   const month = getCurrentMonth();
-  const indirectCost = lineId
+  const sharedIndirectCost = lineId
     ? calculateDailyIndirectCost(lineId, month, costCenters, costCenterValues, costAllocations)
     : 0;
+  const indirectCost = sharedIndirectCost + supervisorIndirectCost;
   const totalCost = laborCost + indirectCost;
   return { laborCost, indirectCost, totalCost, costPerUnit: totalCost / quantityProduced };
 };

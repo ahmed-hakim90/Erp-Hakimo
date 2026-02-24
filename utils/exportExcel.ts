@@ -116,6 +116,19 @@ const appendSummary = (rows: ReportRow[]): ReportRow[] => {
  * Generate and download an Excel file.
  */
 const downloadExcel = (rows: Record<string, any>[], sheetName: string, fileName: string) => {
+  const safeSheetName = (() => {
+    const cleaned = (sheetName || 'Sheet1').replace(/[\[\]\:\*\?\/\\]/g, ' ').trim();
+    const compact = cleaned.replace(/\s+/g, ' ');
+    return (compact || 'Sheet1').slice(0, 31);
+  })();
+  const safeFileName = (() => {
+    const cleaned = (fileName || 'export')
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned || 'export';
+  })();
+
   const ws = XLSX.utils.json_to_sheet(rows);
 
   // Auto-fit column widths
@@ -133,13 +146,13 @@ const downloadExcel = (rows: Record<string, any>[], sheetName: string, fileName:
   (ws['!views'] as any[]).push({ rightToLeft: true });
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
 
   const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
-  saveAs(blob, `${fileName}.xlsx`);
+  saveAs(blob, `${safeFileName}.xlsx`);
 };
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -252,6 +265,7 @@ export interface ProductExportOptions {
   manufacturingCosts: boolean;
   sellingPrice: boolean;
   profitMargin: boolean;
+  chinesePriceCny: boolean;
 }
 
 export const PRODUCT_EXPORT_DEFAULTS: ProductExportOptions = {
@@ -260,12 +274,15 @@ export const PRODUCT_EXPORT_DEFAULTS: ProductExportOptions = {
   manufacturingCosts: true,
   sellingPrice: true,
   profitMargin: true,
+  chinesePriceCny: false,
 };
 
 export const exportAllProducts = (
   data: ProductExportData[],
   includeCosts: boolean,
-  options: ProductExportOptions = PRODUCT_EXPORT_DEFAULTS
+  options: ProductExportOptions = PRODUCT_EXPORT_DEFAULTS,
+  cnyToEgpRate: number = 0,
+  columnOrder?: string[]
 ) => {
   const rows = data.map((d) => {
     const base: Record<string, any> = {
@@ -282,6 +299,9 @@ export const exportAllProducts = (
     }
     if (includeCosts && d.costBreakdown && options.productCosts) {
       base['تكلفة الوحدة الصينية'] = fmtCost(d.costBreakdown.chineseUnitCost);
+      if (options.chinesePriceCny && cnyToEgpRate > 0) {
+        base['السعر باليوان'] = fmtCost(d.costBreakdown.chineseUnitCost / cnyToEgpRate);
+      }
       base['تكلفة المواد الخام'] = fmtCost(d.costBreakdown.rawMaterialCost);
       base['تكلفة العلبة الداخلية'] = fmtCost(d.costBreakdown.innerBoxCost);
       base['تكلفة الكرتونة'] = fmtCost(d.costBreakdown.outerCartonCost);
@@ -305,7 +325,11 @@ export const exportAllProducts = (
       base['هامش الربح (ج.م)'] = sp > 0 ? fmtCost(profit) : '—';
       base['نسبة هامش الربح %'] = sp > 0 ? `${margin.toFixed(1)}%` : '—';
     }
-    return base;
+    if (!columnOrder || columnOrder.length === 0) return base;
+    return columnOrder.reduce<Record<string, any>>((acc, key) => {
+      if (key in base) acc[key] = base[key];
+      return acc;
+    }, {});
   });
   const date = new Date().toISOString().slice(0, 10);
   downloadExcel(rows, 'المنتجات', `المنتجات-${date}`);

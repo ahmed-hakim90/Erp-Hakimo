@@ -76,6 +76,7 @@ export const ProductDetails: React.FC = () => {
   const [editingMaterial, setEditingMaterial] = useState<ProductMaterial | null>(null);
   const [materialForm, setMaterialForm] = useState({ materialName: '', quantityUsed: 0, unitCost: 0 });
   const [savingMaterial, setSavingMaterial] = useState(false);
+  const [materialSaveMsg, setMaterialSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const printComponentRef = useRef<HTMLDivElement>(null);
 
   const product = products.find((p) => p.id === id);
@@ -122,9 +123,16 @@ export const ProductDetails: React.FC = () => {
     return calculateProductCostBreakdown(rawProduct, materials, avgCost);
   }, [rawProduct, materials, currentMonthCost]);
 
+  const chineseRate = laborSettings?.cnyToEgpRate ?? 0;
+  const chineseUnitCostInCny = useMemo(() => {
+    if (!costBreakdown || chineseRate <= 0) return null;
+    return costBreakdown.chineseUnitCost / chineseRate;
+  }, [costBreakdown, chineseRate]);
+
   const handleSaveMaterial = useCallback(async () => {
     if (!id || !materialForm.materialName || savingMaterial) return;
     setSavingMaterial(true);
+    setMaterialSaveMsg(null);
     try {
       if (editingMaterial?.id) {
         await productMaterialService.update(editingMaterial.id, {
@@ -141,11 +149,13 @@ export const ProductDetails: React.FC = () => {
         });
       }
       await loadMaterials();
-      setShowMaterialModal(false);
-      setEditingMaterial(null);
-      setMaterialForm({ materialName: '', quantityUsed: 0, unitCost: 0 });
+      setMaterialSaveMsg({ type: 'success', text: editingMaterial ? 'تم حفظ تعديلات المادة بنجاح' : 'تمت إضافة المادة بنجاح' });
+      if (!editingMaterial) {
+        setMaterialForm({ materialName: '', quantityUsed: 0, unitCost: 0 });
+      }
     } catch (err) {
       console.error('Save material error:', err);
+      setMaterialSaveMsg({ type: 'error', text: 'تعذر حفظ المادة الخام. حاول مرة أخرى.' });
     } finally {
       setSavingMaterial(false);
     }
@@ -163,12 +173,14 @@ export const ProductDetails: React.FC = () => {
   const openEditMaterial = (m: ProductMaterial) => {
     setEditingMaterial(m);
     setMaterialForm({ materialName: m.materialName, quantityUsed: m.quantityUsed, unitCost: m.unitCost });
+    setMaterialSaveMsg(null);
     setShowMaterialModal(true);
   };
 
   const openAddMaterial = () => {
     setEditingMaterial(null);
     setMaterialForm({ materialName: '', quantityUsed: 0, unitCost: 0 });
+    setMaterialSaveMsg(null);
     setShowMaterialModal(true);
   };
 
@@ -481,6 +493,7 @@ export const ProductDetails: React.FC = () => {
                 </thead>
                 <tbody>
                   <tr><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>تكلفة الوحدة الصينية</td><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 600 }}>{formatCost(costBreakdown.chineseUnitCost)}</td></tr>
+                  <tr style={{ background: '#f8fafc' }}><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>السعر باليوان الصيني</td><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 600 }}>{chineseUnitCostInCny != null ? `¥ ${formatCost(chineseUnitCostInCny)}` : '—'}</td></tr>
                   <tr style={{ background: '#f8fafc' }}><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>تكلفة المواد الخام ({materials.length} مادة)</td><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 600 }}>{formatCost(costBreakdown.rawMaterialCost)}</td></tr>
                   <tr><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>تكلفة العلبة الداخلية</td><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 600 }}>{formatCost(costBreakdown.innerBoxCost)}</td></tr>
                   <tr style={{ background: '#f8fafc' }}><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>نصيب الكرتونة ({costBreakdown.unitsPerCarton > 0 ? `${formatCost(costBreakdown.outerCartonCost)} ÷ ${costBreakdown.unitsPerCarton}` : '—'})</td><td style={{ padding: '2.5mm 4mm', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 600 }}>{formatCost(costBreakdown.cartonShare)}</td></tr>
@@ -806,6 +819,22 @@ export const ProductDetails: React.FC = () => {
                     </div>
                   </td>
                   <td className="px-5 py-3 text-center text-sm font-bold">{formatCost(costBreakdown?.chineseUnitCost ?? 0)} ج.م</td>
+                </tr>
+                <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                  <td className="px-5 py-3 pr-10 text-sm font-bold text-slate-700 dark:text-slate-300">
+                    <div className="flex items-center gap-2">
+                      <span className="material-icons-round text-amber-500 text-base">currency_yuan</span>
+                      السعر باليوان الصيني
+                      {chineseRate > 0 && (
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          ({formatCost(costBreakdown?.chineseUnitCost ?? 0)} ÷ {chineseRate})
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-center text-sm font-bold">
+                    {chineseUnitCostInCny != null ? `¥ ${formatCost(chineseUnitCostInCny)}` : '—'}
+                  </td>
                 </tr>
                 <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
                   <td className="px-5 py-3 pr-10 text-sm font-bold text-slate-700 dark:text-slate-300">
@@ -1204,15 +1233,25 @@ export const ProductDetails: React.FC = () => {
 
       {/* ── Material Add/Edit Modal ── */}
       {showMaterialModal && can('costs.manage') && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowMaterialModal(false)}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowMaterialModal(false); setMaterialSaveMsg(null); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <h3 className="text-lg font-bold">{editingMaterial ? 'تعديل مادة خام' : 'إضافة مادة خام'}</h3>
-              <button onClick={() => setShowMaterialModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button onClick={() => { setShowMaterialModal(false); setMaterialSaveMsg(null); }} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
             <div className="p-6 space-y-5">
+              {materialSaveMsg && (
+                <div className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold ${materialSaveMsg.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'}`}>
+                  <span className="material-icons-round text-base">{materialSaveMsg.type === 'success' ? 'check_circle' : 'error'}</span>
+                  <p className="flex-1">{materialSaveMsg.text}</p>
+                  <button onClick={() => setMaterialSaveMsg(null)} className="text-current/70 hover:text-current transition-colors">
+                    <span className="material-icons-round text-base">close</span>
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">اسم المادة *</label>
                 <input
@@ -1254,7 +1293,7 @@ export const ProductDetails: React.FC = () => {
               )}
             </div>
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
-              <Button variant="outline" onClick={() => setShowMaterialModal(false)}>إلغاء</Button>
+              <Button variant="outline" onClick={() => { setShowMaterialModal(false); setMaterialSaveMsg(null); }}>إلغاء</Button>
               <Button variant="primary" onClick={handleSaveMaterial} disabled={savingMaterial || !materialForm.materialName}>
                 {savingMaterial ? (
                   <span className="material-icons-round animate-spin text-sm">refresh</span>

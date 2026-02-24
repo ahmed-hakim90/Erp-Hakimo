@@ -75,6 +75,7 @@ export const Organization: React.FC = () => {
   const [lateRuleForm, setLateRuleForm] = useState(emptyLateRule);
   const [allowanceForm, setAllowanceForm] = useState(emptyAllowance);
   const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
@@ -120,6 +121,7 @@ export const Organization: React.FC = () => {
 
   const openCreate = () => {
     setEditId(null);
+    setSaveMsg(null);
     if (tab === 'departments') setDeptForm({ ...emptyDept });
     else if (tab === 'positions') setPosForm({ ...emptyPos });
     else if (tab === 'shifts') setShiftForm({ ...emptyShift });
@@ -129,12 +131,12 @@ export const Organization: React.FC = () => {
     setShowModal(true);
   };
 
-  const openEditDept = (d: FirestoreDepartment) => { setEditId(d.id!); setDeptForm({ name: d.name, code: d.code, managerId: d.managerId || '', isActive: d.isActive }); setTab('departments'); setShowModal(true); };
-  const openEditPos = (p: FirestoreJobPosition) => { setEditId(p.id!); setPosForm({ title: p.title, departmentId: p.departmentId, level: p.level, hasSystemAccessDefault: p.hasSystemAccessDefault, isActive: p.isActive }); setTab('positions'); setShowModal(true); };
-  const openEditShift = (s: FirestoreShift) => { setEditId(s.id!); setShiftForm({ name: s.name, startTime: s.startTime, endTime: s.endTime, breakMinutes: s.breakMinutes, lateGraceMinutes: s.lateGraceMinutes, crossesMidnight: s.crossesMidnight, isActive: s.isActive }); setTab('shifts'); setShowModal(true); };
-  const openEditPenalty = (p: FirestorePenaltyRule) => { setEditId(p.id!); setPenaltyForm({ name: p.name, type: p.type, valueType: p.valueType, value: p.value, isActive: p.isActive }); setTab('penalties'); setShowModal(true); };
-  const openEditLateRule = (r: FirestoreLateRule) => { setEditId(r.id!); setLateRuleForm({ minutesFrom: r.minutesFrom, minutesTo: r.minutesTo, penaltyType: r.penaltyType, penaltyValue: r.penaltyValue }); setTab('lateRules'); setShowModal(true); };
-  const openEditAllowance = (a: FirestoreAllowanceType) => { setEditId(a.id!); setAllowanceForm({ name: a.name, calculationType: a.calculationType, value: a.value, isActive: a.isActive }); setTab('allowances'); setShowModal(true); };
+  const openEditDept = (d: FirestoreDepartment) => { setEditId(d.id!); setSaveMsg(null); setDeptForm({ name: d.name, code: d.code, managerId: d.managerId || '', isActive: d.isActive }); setTab('departments'); setShowModal(true); };
+  const openEditPos = (p: FirestoreJobPosition) => { setEditId(p.id!); setSaveMsg(null); setPosForm({ title: p.title, departmentId: p.departmentId, level: p.level, hasSystemAccessDefault: p.hasSystemAccessDefault, isActive: p.isActive }); setTab('positions'); setShowModal(true); };
+  const openEditShift = (s: FirestoreShift) => { setEditId(s.id!); setSaveMsg(null); setShiftForm({ name: s.name, startTime: s.startTime, endTime: s.endTime, breakMinutes: s.breakMinutes, lateGraceMinutes: s.lateGraceMinutes, crossesMidnight: s.crossesMidnight, isActive: s.isActive }); setTab('shifts'); setShowModal(true); };
+  const openEditPenalty = (p: FirestorePenaltyRule) => { setEditId(p.id!); setSaveMsg(null); setPenaltyForm({ name: p.name, type: p.type, valueType: p.valueType, value: p.value, isActive: p.isActive }); setTab('penalties'); setShowModal(true); };
+  const openEditLateRule = (r: FirestoreLateRule) => { setEditId(r.id!); setSaveMsg(null); setLateRuleForm({ minutesFrom: r.minutesFrom, minutesTo: r.minutesTo, penaltyType: r.penaltyType, penaltyValue: r.penaltyValue }); setTab('lateRules'); setShowModal(true); };
+  const openEditAllowance = (a: FirestoreAllowanceType) => { setEditId(a.id!); setSaveMsg(null); setAllowanceForm({ name: a.name, calculationType: a.calculationType, value: a.value, isActive: a.isActive }); setTab('allowances'); setShowModal(true); };
 
   const getCollectionName = (): string => {
     const map: Record<OrgTab, string> = {
@@ -150,6 +152,7 @@ export const Organization: React.FC = () => {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveMsg(null);
     try {
       if (tab === 'departments') {
         if (!deptForm.name.trim()) return;
@@ -181,10 +184,11 @@ export const Organization: React.FC = () => {
         if (editId) await updateDoc(doc(db, HR_COLLECTIONS.ALLOWANCE_TYPES, editId), data);
         else await addDoc(allowanceTypesRef(), data);
       }
-      setShowModal(false);
       await loadData();
+      setSaveMsg({ type: 'success', text: editId ? 'تم حفظ التعديلات بنجاح' : 'تمت الإضافة بنجاح' });
     } catch (e) {
       console.error('Organization save error:', e);
+      setSaveMsg({ type: 'error', text: 'تعذر الحفظ. حاول مرة أخرى.' });
     } finally {
       setSaving(false);
     }
@@ -400,15 +404,25 @@ export const Organization: React.FC = () => {
 
       {/* ── Create/Edit Modal ── */}
       {showModal && canEdit && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowModal(false); setSaveMsg(null); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <h3 className="text-lg font-bold">{editId ? 'تعديل' : 'إضافة'} {MODAL_LABELS[tab]}</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button onClick={() => { setShowModal(false); setSaveMsg(null); }} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
             <div className="p-6 space-y-4">
+              {saveMsg && (
+                <div className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold ${saveMsg.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'}`}>
+                  <span className="material-icons-round text-base">{saveMsg.type === 'success' ? 'check_circle' : 'error'}</span>
+                  <p className="flex-1">{saveMsg.text}</p>
+                  <button onClick={() => setSaveMsg(null)} className="text-current/70 hover:text-current transition-colors">
+                    <span className="material-icons-round text-base">close</span>
+                  </button>
+                </div>
+              )}
+
               {tab === 'departments' && (
                 <>
                   <Field label="اسم القسم *"><input className={inputClass} value={deptForm.name} onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })} placeholder="مثال: قسم التجميع" autoFocus /></Field>
@@ -516,7 +530,7 @@ export const Organization: React.FC = () => {
               )}
             </div>
             <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
-              <Button variant="outline" onClick={() => setShowModal(false)}>إلغاء</Button>
+              <Button variant="outline" onClick={() => { setShowModal(false); setSaveMsg(null); }}>إلغاء</Button>
               <Button variant="primary" onClick={handleSave} disabled={saving}>
                 {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
                 {editId ? 'حفظ التعديلات' : 'إضافة'}

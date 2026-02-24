@@ -27,6 +27,7 @@ export const QuickAction: React.FC = () => {
   const [waste, setWaste] = useState('');
   const [workers, setWorkers] = useState('');
   const [hours, setHours] = useState('');
+  const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -73,6 +74,7 @@ export const QuickAction: React.FC = () => {
       quantityWaste: Number(waste) || 0,
       workersCount: Number(workers),
       workHours: Number(hours),
+      notes: notes.trim(),
     };
 
     const id = await createReport(data);
@@ -87,6 +89,7 @@ export const QuickAction: React.FC = () => {
         quantityWaste: data.quantityWaste,
         workersCount: data.workersCount,
         workHours: data.workHours,
+        notes: data.notes,
       };
       setPrintReport(row);
       setSaved(true);
@@ -102,6 +105,7 @@ export const QuickAction: React.FC = () => {
     setWaste('');
     setWorkers('');
     setHours('');
+    setNotes('');
     setSaved(false);
     setPrintReport(null);
   };
@@ -312,6 +316,16 @@ export const QuickAction: React.FC = () => {
                 step="0.5"
               />
             </div>
+            <div className="md:col-span-2">
+              <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 block">ملحوظة</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary/20 focus:border-primary resize-y"
+                placeholder="اكتب أي ملحوظة إضافية للتقرير..."
+              />
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
@@ -419,6 +433,12 @@ export const QuickAction: React.FC = () => {
                     <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{printReport.workHours}</p>
                   </div>
                 </div>
+                {printReport.notes?.trim() && (
+                  <div className="bg-amber-50 dark:bg-amber-900/10 rounded-xl p-3 border border-amber-100 dark:border-amber-900/20">
+                    <p className="text-[10px] font-bold text-slate-400 mb-1">ملحوظة</p>
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{printReport.notes}</p>
+                  </div>
+                )}
               </div>
             </Card>
           )}

@@ -4,7 +4,7 @@ import { useReactToPrint } from 'react-to-print';
 import { useAppStore } from '../store/useAppStore';
 import { Card, Button, Badge, SearchableSelect } from '../components/UI';
 import { formatNumber, getTodayDateString } from '../utils/calculations';
-import { buildReportsCosts, estimateReportCost, formatCost } from '../utils/costCalculations';
+import { buildReportsCosts, buildSupervisorHourlyRatesMap, estimateReportCost, formatCost } from '../utils/costCalculations';
 import { ProductionReport, LineWorkerAssignment, WorkOrder } from '../types';
 import { usePermission } from '../utils/permissions';
 import { exportReportsByDateRange, exportWorkOrders } from '../utils/exportExcel';
@@ -188,8 +188,9 @@ export const Reports: React.FC = () => {
   const reportCosts = useMemo(() => {
     if (!canViewCosts) return new Map<string, number>();
     const hourlyRate = laborSettings?.hourlyRate ?? 0;
-    return buildReportsCosts(displayedReports, hourlyRate, costCenters, costCenterValues, costAllocations);
-  }, [canViewCosts, displayedReports, laborSettings, costCenters, costCenterValues, costAllocations]);
+    const supervisorHourlyRates = buildSupervisorHourlyRatesMap(_rawEmployees);
+    return buildReportsCosts(displayedReports, hourlyRate, costCenters, costCenterValues, costAllocations, supervisorHourlyRates);
+  }, [canViewCosts, displayedReports, laborSettings, costCenters, costCenterValues, costAllocations, _rawEmployees]);
 
   // ── Template lookups (for dynamic Excel template) ──────────────────────────
 
@@ -360,12 +361,14 @@ export const Reports: React.FC = () => {
 
   const openCreate = () => {
     setEditId(null);
+    setSaveToast(null);
     setForm({ ...emptyForm, date: getTodayDateString() });
     setShowModal(true);
   };
 
   const openEdit = (report: ProductionReport) => {
     setEditId(report.id!);
+    setSaveToast(null);
     setForm({
       employeeId: report.employeeId,
       productId: report.productId,
@@ -383,12 +386,13 @@ export const Reports: React.FC = () => {
   const handleSave = async (printAfterSave = false) => {
     if (!form.lineId || !form.productId || !form.employeeId) return;
     setSaving(true);
+    setSaveToast(null);
 
     if (editId) {
       await updateReport(editId, form);
       setSaving(false);
-      setShowModal(false);
-      setEditId(null);
+      setSaveToast('تم حفظ التعديلات بنجاح');
+      setTimeout(() => setSaveToast(null), 3000);
       if (printAfterSave && can('print')) {
         await triggerSinglePrint({ ...form, id: editId });
       }
@@ -1051,7 +1055,9 @@ export const Reports: React.FC = () => {
               (() => {
                 const est = estimateReportCost(
                   form.workersCount, form.workHours, form.quantityProduced,
-                  laborSettings?.hourlyRate ?? 0, form.lineId,
+                  laborSettings?.hourlyRate ?? 0,
+                  (_rawEmployees.find((e) => e.id === form.employeeId)?.hourlyRate ?? 0),
+                  form.lineId,
                   costCenters, costCenterValues, costAllocations
                 );
                 return (

@@ -7,6 +7,7 @@ import {
   getDocs,
   getDoc,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   onSnapshot,
@@ -47,7 +48,7 @@ function getDefaultRoles(): Omit<FirestoreRole, 'id'>[] {
         permissions: permsFrom([
           'dashboard.view',
           'employeeDashboard.view',
-          'products.view', 'lines.view', 'employees.view',
+          'products.view', 'lines.view', 'employees.view', 'employees.viewDetails',
           'reports.view', 'lineStatus.view', 'lineProductConfig.view',
           'settings.view',
           'plans.view',
@@ -61,7 +62,7 @@ function getDefaultRoles(): Omit<FirestoreRole, 'id'>[] {
         permissions: permsFrom([
           'dashboard.view',
           'employeeDashboard.view',
-          'products.view', 'lines.view', 'employees.view',
+          'products.view', 'lines.view', 'employees.view', 'employees.viewDetails',
           'reports.view', 'reports.create', 'reports.edit',
           'lineStatus.view', 'lineStatus.edit',
           'lineProductConfig.view',
@@ -86,6 +87,15 @@ function getDefaultRoles(): Omit<FirestoreRole, 'id'>[] {
   }
   return _defaultRoles;
 }
+
+const DEFAULT_ROLE_DOC_IDS = [
+  'default_admin',
+  'default_factory_manager',
+  'default_floor_supervisor',
+  'default_supervisor',
+] as const;
+
+let seedIfEmptyInFlight: Promise<FirestoreRole[]> | null = null;
 
 export const roleService = {
   async getAll(): Promise<FirestoreRole[]> {
@@ -157,14 +167,31 @@ export const roleService = {
    */
   async seedIfEmpty(): Promise<FirestoreRole[]> {
     if (!isConfigured) return [];
-    const existing = await this.getAll();
-    if (existing.length > 0) return existing;
+    if (seedIfEmptyInFlight) return seedIfEmptyInFlight;
 
-    const created: FirestoreRole[] = [];
-    for (const role of getDefaultRoles()) {
-      const id = await this.create(role);
-      if (id) created.push({ ...role, id });
+    seedIfEmptyInFlight = (async () => {
+      const existing = await this.getAll();
+      if (existing.length > 0) return existing;
+
+      const defaults = getDefaultRoles();
+      await Promise.all(
+        defaults.map(async (role, idx) => {
+          const roleDocId = DEFAULT_ROLE_DOC_IDS[idx] ?? `default_role_${idx}`;
+          const roleRef = doc(db, COLLECTION, roleDocId);
+          const roleSnap = await getDoc(roleRef);
+          if (!roleSnap.exists()) {
+            await setDoc(roleRef, role);
+          }
+        })
+      );
+
+      return this.getAll();
+    })();
+
+    try {
+      return await seedIfEmptyInFlight;
+    } finally {
+      seedIfEmptyInFlight = null;
     }
-    return created;
   },
 };

@@ -272,7 +272,6 @@ export const Employees: React.FC = () => {
               setSaveMsg({ type: 'success', text: recreateAccount ? `تم إعادة إنشاء حساب الدخول بنجاح (${formEmail.trim()})` : `تم حفظ البيانات وإنشاء حساب دخول بنجاح (${formEmail.trim()})` });
               setRecreateAccount(false);
               await loadUsers();
-              setTimeout(() => setShowModal(false), 1500);
             }
           } catch (authErr: any) {
             console.error('Create user error:', authErr);
@@ -294,12 +293,11 @@ export const Employees: React.FC = () => {
           if (updates.length > 0) {
             setSaveMsg({ type: 'success', text: `تم تحديث ${updates.join(' و ')} بنجاح` });
             await loadUsers();
-            setTimeout(() => setShowModal(false), 1500);
           } else {
-            setShowModal(false);
+            setSaveMsg({ type: 'success', text: 'تم حفظ بيانات الموظف بنجاح' });
           }
         } else {
-          setShowModal(false);
+          setSaveMsg({ type: 'success', text: 'تم حفظ بيانات الموظف بنجاح' });
         }
       } else {
         const id = await createEmployee(payload);
@@ -314,14 +312,13 @@ export const Employees: React.FC = () => {
             if (newUid) {
               await updateEmployee(id, { userId: newUid, email: formEmail.trim() });
               setSaveMsg({ type: 'success', text: `تم إضافة الموظف وإنشاء حساب دخول بنجاح (${formEmail.trim()})` });
-              setTimeout(() => setShowModal(false), 1500);
             }
           } catch (authErr: any) {
             console.error('Create user error:', authErr);
             setSaveMsg({ type: 'error', text: `تم إضافة الموظف، لكن فشل إنشاء الحساب: ${getAuthErrorMsg(authErr)}` });
           }
         } else {
-          setShowModal(false);
+          setSaveMsg({ type: 'success', text: 'تم إضافة الموظف بنجاح' });
         }
       }
     } catch (err: any) {
@@ -584,13 +581,15 @@ export const Employees: React.FC = () => {
   // ── SelectableTable: row actions ──
   const renderEmployeeActions = useCallback((emp: FirestoreEmployee) => (
     <div className="flex items-center gap-1 justify-end sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-      <button
-        onClick={() => navigate(`/employees/${emp.id}`)}
-        className="p-2 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
-        title="عرض الملف"
-      >
-        <span className="material-icons-round text-lg">person</span>
-      </button>
+      {can('employees.viewDetails') && (
+        <button
+          onClick={() => navigate(`/employees/${emp.id}`)}
+          className="p-2 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+          title="عرض الملف"
+        >
+          <span className="material-icons-round text-lg">person</span>
+        </button>
+      )}
       {can('employees.edit') && (
         <button
           onClick={() => openEdit(emp.id!)}
@@ -894,7 +893,7 @@ export const Employees: React.FC = () => {
 
       {/* 6. Create/Edit Modal — Professional HR Panel */}
       {showModal && (can('employees.create') || can('employees.edit')) && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowModal(false); setSaveMsg(null); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-gradient-to-l from-primary/5 to-transparent">
@@ -907,7 +906,7 @@ export const Employees: React.FC = () => {
                   <p className="text-xs text-slate-500">ملء البيانات الأساسية والوظيفية</p>
                 </div>
               </div>
-              <button onClick={() => setShowModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all">
+              <button onClick={() => { setShowModal(false); setSaveMsg(null); }} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all">
                 <span className="material-icons-round">close</span>
               </button>
             </div>
@@ -1351,7 +1350,7 @@ export const Employees: React.FC = () => {
                 )}
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="outline" onClick={() => setShowModal(false)}>إلغاء</Button>
+                <Button variant="outline" onClick={() => { setShowModal(false); setSaveMsg(null); }}>إلغاء</Button>
                 <Button variant="primary" onClick={handleSave} disabled={saving || !isFormValid}>
                   {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
                   {editId ? 'حفظ التعديلات' : 'إضافة الموظف'}
