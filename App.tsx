@@ -42,7 +42,11 @@ const consumePostLoginRedirect = (): string | null => {
 const LoginRedirect: React.FC = () => {
   const permissions = useAppStore((s) => s.userPermissions);
   const home = getHomeRoute(permissions);
-  const target = useMemo(() => consumePostLoginRedirect() ?? home, [home]);
+  const target = useMemo(() => {
+    // Employee role should always land on employee dashboard after login.
+    if (home === '/employee-dashboard') return home;
+    return consumePostLoginRedirect() ?? home;
+  }, [home]);
   return <Navigate to={target} replace />;
 };
 

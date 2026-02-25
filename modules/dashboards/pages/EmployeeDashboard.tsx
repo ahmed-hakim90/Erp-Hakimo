@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
 import { Card, Badge, LoadingSkeleton } from '../components/UI';
 import { WorkOrderPrint } from '../../production/components/ProductionReportPrint';
@@ -72,6 +73,7 @@ const DashboardPeriodFilter: React.FC<{
 // ─── Employee Dashboard ────────────────────────────────────────────────────
 
 export const EmployeeDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const {
     uid,
     _rawEmployees,
@@ -346,7 +348,19 @@ export const EmployeeDashboard: React.FC = () => {
             {employee?.name ? `مرحباً ${employee.name}` : 'متابعة الأداء التشغيلي'}
           </p>
         </div>
-        <DashboardPeriodFilter period={period} onChange={setPeriod} />
+        <div className="flex flex-wrap items-center gap-2">
+          {can('quickAction.view') && (
+            <button
+              type="button"
+              onClick={() => navigate('/quick-action')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold bg-primary text-white hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all"
+            >
+              <span className="material-icons-round text-base">bolt</span>
+              الإدخال السريع
+            </button>
+          )}
+          <DashboardPeriodFilter period={period} onChange={setPeriod} />
+        </div>
       </div>
 
       {/* ── Alerts ─────────────────────────────────────────────────── */}
