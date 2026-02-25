@@ -118,3 +118,7 @@
 ## [4.0.4] - 2026-02-25
 
 - dashbaord worker
+
+## [4.0.5] - 2026-02-25
+
+- dashbaord worker search product

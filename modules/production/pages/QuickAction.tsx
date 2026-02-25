@@ -5,7 +5,7 @@ import { Card, Button, SearchableSelect } from '../components/UI';
 import { usePermission } from '../../../utils/permissions';
 import { exportToPDF, shareToWhatsApp, ShareResult } from '../../../utils/reportExport';
 import { lineAssignmentService } from '../../../services/lineAssignmentService';
-import { formatNumber } from '../../../utils/calculations';
+import { formatNumber, getTodayDateString } from '../../../utils/calculations';
 import type { LineWorkerAssignment } from '../../../types';
 import {
   SingleReportPrint,
@@ -18,6 +18,7 @@ export const QuickAction: React.FC = () => {
   const _rawLines = useAppStore((s) => s._rawLines);
   const _rawProducts = useAppStore((s) => s._rawProducts);
   const employees = useAppStore((s) => s.employees);
+  const uid = useAppStore((s) => s.uid);
   const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
 
   const [employeeId, setEmployeeId] = useState('');
@@ -35,18 +36,36 @@ export const QuickAction: React.FC = () => {
   const [printReport, setPrintReport] = useState<ReportPrintRow | null>(null);
   const [lineWorkers, setLineWorkers] = useState<LineWorkerAssignment[]>([]);
   const [showLineWorkers, setShowLineWorkers] = useState(false);
+  const [loadingWorkersCount, setLoadingWorkersCount] = useState(false);
+  const [workerPickerId, setWorkerPickerId] = useState('');
+  const [workerActionBusy, setWorkerActionBusy] = useState(false);
+  const [workerActionError, setWorkerActionError] = useState<string | null>(null);
 
   const printRef = useRef<HTMLDivElement>(null);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = useMemo(() => getTodayDateString(), []);
+
+  const fetchWorkersFromLineAssignments = useCallback(async () => {
+    if (!lineId) {
+      setLineWorkers([]);
+      setWorkers('');
+      return;
+    }
+    setLoadingWorkersCount(true);
+    try {
+      const list = await lineAssignmentService.getByLineAndDate(lineId, today);
+      setLineWorkers(list);
+      setWorkers(String(list.length));
+    } catch {
+      // Keep current manual value if fetch fails.
+    } finally {
+      setLoadingWorkersCount(false);
+    }
+  }, [lineId, today]);
 
   useEffect(() => {
-    if (!lineId) { setLineWorkers([]); return; }
-    lineAssignmentService.getByLineAndDate(lineId, today).then((list) => {
-      setLineWorkers(list);
-      if (list.length > 0) setWorkers(String(list.length));
-    }).catch(() => {});
-  }, [lineId, today]);
+    fetchWorkersFromLineAssignments();
+  }, [fetchWorkersFromLineAssignments]);
 
   const getLineName = useCallback(
     (id: string) => _rawLines.find((l) => l.id === id)?.name ?? '—',
@@ -60,6 +79,71 @@ export const QuickAction: React.FC = () => {
     (id: string) => employees.find((s) => s.id === id)?.name ?? '—',
     [employees]
   );
+  const assignableEmployees = useMemo(
+    () => employees.filter((e) => e.isActive),
+    [employees],
+  );
+
+  const addableWorkerOptions = useMemo(
+    () => assignableEmployees
+      .filter((e) => !lineWorkers.some((w) => w.employeeId === e.id))
+      .map((e) => ({
+        value: e.id,
+        label: e.code ? `${e.name} (${e.code})` : e.name,
+      })),
+    [assignableEmployees, lineWorkers],
+  );
+
+  const handleQuickAddWorker = useCallback(async () => {
+    if (!lineId || !workerPickerId) return;
+    const selected = assignableEmployees.find((e) => e.id === workerPickerId);
+    if (!selected) return;
+
+    setWorkerActionBusy(true);
+    setWorkerActionError(null);
+    try {
+      const dayAssignments = await lineAssignmentService.getByDate(today);
+      const sameLine = dayAssignments.find((a) => a.employeeId === selected.id && a.lineId === lineId);
+      if (sameLine) {
+        setWorkerActionError('العامل مسجل بالفعل على هذا الخط اليوم.');
+        return;
+      }
+      const otherLine = dayAssignments.find((a) => a.employeeId === selected.id && a.lineId !== lineId);
+      if (otherLine) {
+        setWorkerActionError(`العامل مسجل على خط آخر اليوم (${getLineName(otherLine.lineId)}).`);
+        return;
+      }
+
+      await lineAssignmentService.create({
+        lineId,
+        employeeId: selected.id,
+        employeeCode: selected.code ?? '',
+        employeeName: selected.name,
+        date: today,
+        assignedBy: uid || '',
+      });
+      setWorkerPickerId('');
+      await fetchWorkersFromLineAssignments();
+    } catch {
+      setWorkerActionError('تعذر إضافة العامل الآن. حاول مرة أخرى.');
+    } finally {
+      setWorkerActionBusy(false);
+    }
+  }, [assignableEmployees, fetchWorkersFromLineAssignments, getLineName, lineId, today, uid, workerPickerId]);
+
+  const handleQuickRemoveWorker = useCallback(async (assignmentId?: string) => {
+    if (!assignmentId) return;
+    setWorkerActionBusy(true);
+    setWorkerActionError(null);
+    try {
+      await lineAssignmentService.delete(assignmentId);
+      await fetchWorkersFromLineAssignments();
+    } catch {
+      setWorkerActionError('تعذر حذف العامل الآن. حاول مرة أخرى.');
+    } finally {
+      setWorkerActionBusy(false);
+    }
+  }, [fetchWorkersFromLineAssignments]);
 
   const handleSave = async () => {
     if (!lineId || !productId || !employeeId || !quantity || !workers || !hours) return;
@@ -284,7 +368,20 @@ export const QuickAction: React.FC = () => {
               />
             </div>
             <div>
-              <label className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 block">عدد العمال *</label>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <label className="text-sm font-bold text-slate-600 dark:text-slate-400 block">عدد العمال *</label>
+                <button
+                  type="button"
+                  onClick={fetchWorkersFromLineAssignments}
+                  disabled={!lineId || loadingWorkersCount}
+                  className="text-xs font-bold text-primary hover:text-primary/80 disabled:text-slate-400 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                >
+                  <span className={`material-icons-round text-sm ${loadingWorkersCount ? 'animate-spin' : ''}`}>
+                    {loadingWorkersCount ? 'refresh' : 'sync'}
+                  </span>
+                  استدعاء من ربط الخطوط
+                </button>
+              </div>
               <input
                 type="number"
                 value={workers}
@@ -302,6 +399,9 @@ export const QuickAction: React.FC = () => {
                   <span className="material-icons-round text-xs">groups</span>
                   تم جلب {lineWorkers.length} عامل مسجل — اضغط للعرض
                 </button>
+              )}
+              {lineId && lineWorkers.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-slate-400">لا توجد عمالة مسجلة على هذا الخط اليوم.</p>
               )}
             </div>
             <div>
@@ -446,7 +546,7 @@ export const QuickAction: React.FC = () => {
       )}
 
       {/* Line Workers Modal */}
-      {showLineWorkers && lineWorkers.length > 0 && (
+      {showLineWorkers && lineId && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowLineWorkers(false)}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
@@ -459,18 +559,61 @@ export const QuickAction: React.FC = () => {
                 <span className="material-icons-round">close</span>
               </button>
             </div>
-            <div className="p-4 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-800">
-              {lineWorkers.map((w, i) => (
-                <div key={w.id || i} className="flex items-center gap-3 py-2.5">
-                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <span className="material-icons-round text-primary text-sm">person</span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{w.employeeName}</p>
-                    <p className="text-xs text-slate-400 font-mono">{w.employeeCode}</p>
-                  </div>
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <SearchableSelect
+                    placeholder="ابحث عن عامل للإضافة السريعة"
+                    options={addableWorkerOptions}
+                    value={workerPickerId}
+                    onChange={setWorkerPickerId}
+                  />
                 </div>
-              ))}
+                <Button
+                  onClick={handleQuickAddWorker}
+                  disabled={!workerPickerId || workerActionBusy}
+                  className="shrink-0"
+                >
+                  {workerActionBusy ? (
+                    <span className="material-icons-round animate-spin text-sm">refresh</span>
+                  ) : (
+                    <span className="material-icons-round text-sm">person_add</span>
+                  )}
+                  إضافة
+                </Button>
+              </div>
+              {workerActionError && (
+                <p className="text-xs font-bold text-rose-500">{workerActionError}</p>
+              )}
+            </div>
+            <div className="p-4 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-800">
+              {lineWorkers.length === 0 ? (
+                <div className="text-center py-8">
+                  <span className="material-icons-round text-4xl text-slate-300 dark:text-slate-700 mb-2 block">person_add</span>
+                  <p className="text-sm text-slate-500 font-medium">لا يوجد عمالة مسجلة على هذا الخط اليوم</p>
+                </div>
+              ) : (
+                lineWorkers.map((w, i) => (
+                  <div key={w.id || i} className="flex items-center gap-3 py-2.5">
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary text-sm">person</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{w.employeeName}</p>
+                      <p className="text-xs text-slate-400 font-mono">{w.employeeCode}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickRemoveWorker(w.id)}
+                      disabled={workerActionBusy}
+                      className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all disabled:opacity-50"
+                      title="حذف العامل من الخط"
+                    >
+                      <span className="material-icons-round text-base">delete</span>
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
