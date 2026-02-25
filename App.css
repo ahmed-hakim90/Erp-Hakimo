@@ -1,3 +1,15 @@
 * {
   font-family: var(--font-family-base, 'Cairo', 'Noto Sans Arabic', sans-serif);
 }
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Prevent accidental browser pull-to-refresh on mobile drag-down */
+html,
+body {
+  overscroll-behavior-y: contain;
+}
