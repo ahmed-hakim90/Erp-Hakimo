@@ -1040,7 +1040,7 @@ export const AdminDashboard: React.FC = () => {
       </div>
       )}
 
-      <Card>
+      {/* <Card>
         <div className="flex items-center gap-2 mb-4">
           <span className="material-icons-round text-blue-500">bolt</span>
           <h3 className="text-lg font-bold">الإنتاج اللحظي (الباركود)</h3>
@@ -1054,7 +1054,7 @@ export const AdminDashboard: React.FC = () => {
         <p className="text-xs text-slate-500 mt-4">
           أعلى نشاط حالي: <span className="font-bold text-slate-700 dark:text-slate-300">{liveScanKpis.hotLineProduct}</span>
         </p>
-      </Card>
+      </Card> */}
 
 {/* ── Active Work Orders (same visual style) ─────────────────────────── */}
 {(() => {

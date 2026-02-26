@@ -146,3 +146,7 @@
 ## [4.0.11] - 2026-02-26
 
 - top bar login in updated
+
+## [4.0.12] - 2026-02-26
+
+- QC Firebase
