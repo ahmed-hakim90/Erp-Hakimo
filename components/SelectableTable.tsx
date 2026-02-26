@@ -53,6 +53,8 @@ interface SelectableTableProps<T> {
   enableSearch?: boolean;
   /** Optional search placeholder */
   searchPlaceholder?: string;
+  /** Optional custom toolbar controls */
+  toolbarContent?: React.ReactNode;
   /** Optional table id for user-specific settings */
   tableId?: string;
   /** Disable checkbox selection while keeping actions */
@@ -79,6 +81,7 @@ export function SelectableTable<T>({
   onRowClick,
   enableSearch = false,
   searchPlaceholder,
+  toolbarContent,
   tableId,
   checkboxSelection = true,
   loading = false,
@@ -133,6 +136,7 @@ export function SelectableTable<T>({
       enableColumnVisibility={enableColumnVisibility}
       enableSearch={enableSearch}
       searchPlaceholder={searchPlaceholder}
+      toolbarContent={toolbarContent}
       highlightRowId={highlightRowId}
       emptyIcon={emptyIcon}
       emptyTitle={emptyTitle}

@@ -1446,14 +1446,37 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteReport: async (id) => {
     try {
+      const reportToDelete = await reportService.getById(id);
+      if (reportToDelete?.workOrderId) {
+        const linkedWorkOrder = await workOrderService.getById(reportToDelete.workOrderId);
+        if (linkedWorkOrder?.id) {
+          const removedProduced = Math.max(0, Number(reportToDelete.quantityProduced) || 0);
+          const nextProduced = Math.max(0, (linkedWorkOrder.producedQuantity ?? 0) - removedProduced);
+
+          const nextStatus =
+            nextProduced <= 0
+              ? 'pending'
+              : nextProduced < (linkedWorkOrder.quantity ?? 0)
+                ? 'in_progress'
+                : 'completed';
+
+          await workOrderService.update(linkedWorkOrder.id, {
+            producedQuantity: nextProduced,
+            status: nextStatus,
+            completedAt: nextStatus === 'completed' ? (linkedWorkOrder.completedAt ?? new Date().toISOString()) : null,
+          });
+        }
+      }
+
       await reportService.delete(id);
       const today = getTodayDateString();
       const { start: monthStart, end: monthEnd } = getMonthDateRange();
-      const [todayReports, monthlyReports] = await Promise.all([
+      const [todayReports, monthlyReports, workOrders] = await Promise.all([
         reportService.getByDateRange(today, today),
         reportService.getByDateRange(monthStart, monthEnd),
+        workOrderService.getAll(),
       ]);
-      set({ todayReports, monthlyReports, productionReports: monthlyReports });
+      set({ todayReports, monthlyReports, productionReports: monthlyReports, workOrders });
       get()._rebuildProducts();
       get()._rebuildLines();
 

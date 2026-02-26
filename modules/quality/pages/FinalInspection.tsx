@@ -77,6 +77,10 @@ export const FinalInspection: React.FC = () => {
       photosCount: photoFiles.length,
     };
   }, [selectedWorkOrder, _rawLines, _rawProducts, currentEmployee?.name, userDisplayName, userEmail, statusLabel, selectedReason?.labelAr, notes, photoFiles.length]);
+  const qualityReportCode = useMemo(
+    () => `QR-${selectedWorkOrder?.workOrderNumber ?? 'NA'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+    [selectedWorkOrder?.workOrderNumber],
+  );
 
   const onSubmit = async () => {
     if (!selectedWorkOrder || !currentEmployee?.id || !canInspect) return;
@@ -148,6 +152,7 @@ export const FinalInspection: React.FC = () => {
       const summary = await qualityInspectionService.buildWorkOrderSummary(selectedWorkOrder.id!);
       await updateWorkOrder(selectedWorkOrder.id!, {
         qualitySummary: summary,
+        qualityReportCode,
         qualityStatus: status === 'approved' || status === 'passed' ? 'approved' : 'pending',
         ...(status === 'approved' || status === 'passed'
           ? { qualityApprovedBy: currentEmployee.id, qualityApprovedAt: new Date().toISOString() }

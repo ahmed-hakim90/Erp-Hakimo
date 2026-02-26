@@ -5,7 +5,7 @@ import { useAppStore } from '../../../store/useAppStore';
 import { Card, Button, Badge, SearchableSelect } from '../components/UI';
 import { formatNumber, getTodayDateString } from '../../../utils/calculations';
 import { buildReportsCosts, buildSupervisorHourlyRatesMap, estimateReportCost, formatCost } from '../../../utils/costCalculations';
-import { ProductionReport, LineWorkerAssignment, WorkOrder } from '../../../types';
+import { ProductionReport, LineWorkerAssignment, WorkOrder, QualityStatus } from '../../../types';
 import { usePermission } from '../../../utils/permissions';
 import { exportReportsByDateRange, exportWorkOrders } from '../../../utils/exportExcel';
 import { exportToPDF, shareToWhatsApp, ShareResult } from '../../../utils/reportExport';
@@ -120,6 +120,7 @@ export const Reports: React.FC = () => {
 
   // Work order detail popup
   const [viewWOReport, setViewWOReport] = useState<ProductionReport | null>(null);
+  const [viewQualityReport, setViewQualityReport] = useState<ProductionReport | null>(null);
 
   // Date range filter
   const [startDate, setStartDate] = useState(getTodayDateString());
@@ -279,6 +280,21 @@ export const Reports: React.FC = () => {
     (id: string) => woMap.get(id),
     [woMap]
   );
+  const qualityStatusMeta = useCallback((status?: QualityStatus) => {
+    const normalized = status ?? 'pending';
+    const map: Record<QualityStatus, { label: string; className: string }> = {
+      pending: { label: 'قيد المراجعة', className: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300' },
+      approved: { label: 'معتمد', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' },
+      rejected: { label: 'مرفوض', className: 'bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300' },
+      not_required: { label: 'غير مطلوب', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
+    };
+    return map[normalized];
+  }, []);
+  const getQualityReportCode = useCallback((workOrder?: WorkOrder, reportCode?: string) => {
+    if (workOrder?.qualityReportCode) return workOrder.qualityReportCode;
+    if (!workOrder?.qualityStatus && !workOrder?.qualitySummary) return null;
+    return reportCode ? `QR-${reportCode}` : 'QR';
+  }, []);
 
   const lookups = useMemo(
     () => ({ getLineName, getProductName, getEmployeeName, getWorkOrder }),
@@ -445,6 +461,115 @@ export const Reports: React.FC = () => {
   };
 
   const activeFilterCount = (filterLineId ? 1 : 0) + (filterEmployeeId ? 1 : 0);
+  const tableToolbarFilters = (
+    <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto">
+      <Button
+        variant={viewMode === 'today' ? 'primary' : 'outline'}
+        onClick={handleShowToday}
+        className="text-xs py-2"
+      >
+        <span className="material-icons-round text-sm">today</span>
+        اليوم
+      </Button>
+      <Button
+        variant={viewMode === 'range' && startDate === endDate && startDate !== getTodayDateString() ? 'primary' : 'outline'}
+        onClick={handleShowYesterday}
+        className="text-xs py-2"
+      >
+        <span className="material-icons-round text-sm">history</span>
+        أمس
+      </Button>
+      <Button
+        variant={viewMode === 'range' && endDate === getTodayDateString() && (() => {
+          const d = new Date();
+          d.setDate(d.getDate() - 6);
+          return startDate === toDateInputValue(d);
+        })() ? 'primary' : 'outline'}
+        onClick={handleShowWeekly}
+        className="text-xs py-2"
+      >
+        <span className="material-icons-round text-sm">date_range</span>
+        أسبوعي
+      </Button>
+      <Button
+        variant={viewMode === 'range' && endDate === getTodayDateString() && (() => {
+          const now = new Date();
+          return startDate === toDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
+        })() ? 'primary' : 'outline'}
+        onClick={handleShowMonthly}
+        className="text-xs py-2"
+      >
+        <span className="material-icons-round text-sm">calendar_month</span>
+        شهري
+      </Button>
+
+      <div className="flex items-center gap-2">
+        <label className="text-xs font-bold text-slate-500 whitespace-nowrap">من:</label>
+        <input
+          type="date"
+          className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 w-[130px] sm:w-auto"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <label className="text-xs font-bold text-slate-500 whitespace-nowrap">إلى:</label>
+        <input
+          type="date"
+          className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 w-[130px] sm:w-auto"
+          value={endDate}
+          onChange={(e) => setEndDate(e.target.value)}
+        />
+      </div>
+      <Button variant="outline" onClick={handleFetchRange} className="text-xs py-2">
+        {reportsLoading ? (
+          <span className="material-icons-round animate-spin text-sm">refresh</span>
+        ) : (
+          <span className="material-icons-round text-sm">search</span>
+        )}
+        عرض
+      </Button>
+
+      <span className="material-icons-round text-slate-400 text-lg">filter_list</span>
+      <div className="flex items-center gap-2">
+        <label className="text-xs font-bold text-slate-500 whitespace-nowrap">الخط:</label>
+        <select
+          className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 min-w-[140px]"
+          value={filterLineId}
+          onChange={(e) => setFilterLineId(e.target.value)}
+        >
+          <option value="">الكل</option>
+          {_rawLines.map((l) => (
+            <option key={l.id} value={l.id!}>{l.name}</option>
+          ))}
+        </select>
+      </div>
+      {!myEmployeeId && (
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-bold text-slate-500 whitespace-nowrap">المشرف:</label>
+          <select
+            className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 min-w-[160px]"
+            value={filterEmployeeId}
+            onChange={(e) => setFilterEmployeeId(e.target.value)}
+          >
+            <option value="">الكل</option>
+            {employees.filter((e) => e.level === 2).map((emp) => (
+              <option key={emp.id} value={emp.id}>{emp.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      {activeFilterCount > 0 && (
+        <button
+          onClick={() => { setFilterLineId(''); setFilterEmployeeId(''); }}
+          className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-lg transition-all"
+        >
+          <span className="material-icons-round text-sm">close</span>
+          مسح الفلاتر ({activeFilterCount})
+        </button>
+      )}
+    </div>
+  );
 
   const openCreate = () => {
     setEditId(null);
@@ -709,11 +834,30 @@ export const Reports: React.FC = () => {
     const cols: TableColumn<ProductionReport>[] = [
       {
         header: 'كود التقرير',
-        render: (r) => (
-          <span className="font-mono text-xs font-black text-primary">
-            {r.reportCode || '—'}
-          </span>
-        ),
+        render: (r) => {
+          const wo = r.workOrderId ? woMap.get(r.workOrderId) : undefined;
+          const hasQuality = !!wo?.qualitySummary || !!wo?.qualityStatus || !!wo?.qualityReportCode;
+          if (!can('quality.reports.view') || !hasQuality) {
+            return (
+              <span className="font-mono text-xs font-black text-primary">
+                {r.reportCode || '—'}
+              </span>
+            );
+          }
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewQualityReport(r);
+              }}
+              className="font-mono text-xs font-black text-primary hover:underline"
+              title="عرض تقرير الجودة المرتبط"
+            >
+              {r.reportCode || '—'}
+            </button>
+          );
+        },
       },
       { header: 'التاريخ', render: (r) => <span className="font-bold text-slate-700 dark:text-slate-300">{r.date}</span> },
       { header: 'خط الإنتاج', render: (r) => <span className="font-medium">{getLineName(r.lineId)}</span> },
@@ -801,6 +945,39 @@ export const Reports: React.FC = () => {
           );
         },
       },
+      {
+        header: 'تقرير الجودة',
+        render: (r) => {
+          const wo = r.workOrderId ? woMap.get(r.workOrderId) : undefined;
+          const hasQuality = !!wo?.qualitySummary || !!wo?.qualityStatus || !!wo?.qualityReportCode;
+          if (!hasQuality) return <span className="text-xs text-slate-300">—</span>;
+          const qm = qualityStatusMeta(wo.qualityStatus);
+          const qualityCode = getQualityReportCode(wo, r.reportCode);
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewQualityReport(r);
+              }}
+              className="text-right space-y-1 hover:bg-primary/5 rounded-lg px-2 py-1 transition-colors"
+              title="عرض تقرير الجودة"
+            >
+              <span className={`inline-flex text-xs font-bold px-2 py-0.5 rounded-full ${qm.className}`}>
+                {qm.label}
+              </span>
+              <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                {qualityCode || '—'}
+              </div>
+              {wo.qualitySummary && (
+                <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  فحص: {formatNumber(wo.qualitySummary.inspectedUnits)} | فاشل: {formatNumber(wo.qualitySummary.failedUnits)}
+                </div>
+              )}
+            </button>
+          );
+        },
+      },
     ];
     if (canViewCosts) {
       cols.push({
@@ -816,7 +993,7 @@ export const Reports: React.FC = () => {
       });
     }
     return cols;
-  }, [canViewCosts, expandedNoteRows, getLineName, getProductName, getEmployeeName, reportCosts, woMap]);
+  }, [canViewCosts, expandedNoteRows, getLineName, getProductName, getEmployeeName, reportCosts, woMap, can, qualityStatusMeta, getQualityReportCode]);
 
   const handleBulkPrintSelected = useCallback(async (items: ProductionReport[]) => {
     setBulkPrintSource(items);
@@ -876,20 +1053,6 @@ export const Reports: React.FC = () => {
         </div>
       )}
     </div>
-  );
-
-  const qualityReportRows = useMemo(
-    () =>
-      workOrders
-        .filter((wo) => !!wo.qualitySummary)
-        .slice()
-        .sort((a, b) => {
-          const aMs = a.qualitySummary?.lastInspectionAt?.toDate?.()?.getTime?.() ?? new Date(a.qualityApprovedAt || 0).getTime();
-          const bMs = b.qualitySummary?.lastInspectionAt?.toDate?.()?.getTime?.() ?? new Date(b.qualityApprovedAt || 0).getTime();
-          return (bMs || 0) - (aMs || 0);
-        })
-        .slice(0, 8),
-    [workOrders],
   );
 
   return (
@@ -987,49 +1150,6 @@ export const Reports: React.FC = () => {
         </div>
       )}
 
-      {can('quality.reports.view') && (
-        <Card title="ملخص تقارير الجودة (آخر أوامر الشغل)">
-          {qualityReportRows.length === 0 ? (
-            <p className="text-sm text-slate-500">لا توجد تقارير جودة مرتبطة بأوامر الشغل حاليًا.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700">
-                    <th className="text-right py-2 px-2">أمر الشغل</th>
-                    <th className="text-right py-2 px-2">الحالة</th>
-                    <th className="text-right py-2 px-2">Inspected</th>
-                    <th className="text-right py-2 px-2">Failed</th>
-                    <th className="text-right py-2 px-2">Rework</th>
-                    <th className="text-right py-2 px-2">FPY</th>
-                    <th className="text-right py-2 px-2">Defect Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {qualityReportRows.map((wo) => (
-                    <tr key={wo.id} className="border-b border-slate-100 dark:border-slate-800">
-                      <td className="py-2 px-2 font-bold">#{wo.workOrderNumber}</td>
-                      <td className="py-2 px-2">{wo.qualityStatus ?? 'pending'}</td>
-                      <td className="py-2 px-2">{wo.qualitySummary?.inspectedUnits ?? 0}</td>
-                      <td className="py-2 px-2">{wo.qualitySummary?.failedUnits ?? 0}</td>
-                      <td className="py-2 px-2">{wo.qualitySummary?.reworkUnits ?? 0}</td>
-                      <td className="py-2 px-2">{wo.qualitySummary?.firstPassYield ?? 0}%</td>
-                      <td className="py-2 px-2">{wo.qualitySummary?.defectRate ?? 0}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div className="mt-3 flex justify-end">
-            <Button variant="outline" onClick={() => (window.location.hash = '#/quality/reports')}>
-              <span className="material-icons-round text-sm">open_in_new</span>
-              <span>فتح تقارير الجودة التفصيلية</span>
-            </Button>
-          </div>
-        </Card>
-      )}
-
       {/* WhatsApp Share Feedback Toast */}
       {shareToast && (
         <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 flex items-center gap-3 animate-in fade-in duration-300">
@@ -1041,128 +1161,12 @@ export const Reports: React.FC = () => {
         </div>
       )}
 
-      {/* Filter Bar */}
-      <div className="bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-sm">
-        {/* Row 1: Date filters */}
-        <div className="flex flex-wrap gap-3 sm:gap-4 items-center">
-          <Button
-            variant={viewMode === 'today' ? 'primary' : 'outline'}
-            onClick={handleShowToday}
-            className="text-xs py-2"
-          >
-            <span className="material-icons-round text-sm">today</span>
-            اليوم
-          </Button>
-          <Button
-            variant={viewMode === 'range' && startDate === endDate && startDate !== getTodayDateString() ? 'primary' : 'outline'}
-            onClick={handleShowYesterday}
-            className="text-xs py-2"
-          >
-            <span className="material-icons-round text-sm">history</span>
-            أمس
-          </Button>
-          <Button
-            variant={viewMode === 'range' && endDate === getTodayDateString() && (() => {
-              const d = new Date();
-              d.setDate(d.getDate() - 6);
-              return startDate === toDateInputValue(d);
-            })() ? 'primary' : 'outline'}
-            onClick={handleShowWeekly}
-            className="text-xs py-2"
-          >
-            <span className="material-icons-round text-sm">date_range</span>
-            أسبوعي
-          </Button>
-          <Button
-            variant={viewMode === 'range' && endDate === getTodayDateString() && (() => {
-              const now = new Date();
-              return startDate === toDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
-            })() ? 'primary' : 'outline'}
-            onClick={handleShowMonthly}
-            className="text-xs py-2"
-          >
-            <span className="material-icons-round text-sm">calendar_month</span>
-            شهري
-          </Button>
-          <div className="hidden sm:block h-8 w-[1px] bg-slate-200 dark:bg-slate-700"></div>
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-bold text-slate-500">من:</label>
-              <input
-                type="date"
-                className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 w-[130px] sm:w-auto"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-bold text-slate-500">إلى:</label>
-              <input
-                type="date"
-                className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 w-[130px] sm:w-auto"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
-            <Button variant="outline" onClick={handleFetchRange} className="text-xs py-2">
-              {reportsLoading ? (
-                <span className="material-icons-round animate-spin text-sm">refresh</span>
-              ) : (
-                <span className="material-icons-round text-sm">search</span>
-              )}
-              عرض
-            </Button>
-          </div>
-        </div>
-
-        {/* Row 2: Line & Supervisor filters */}
-        <div className="flex flex-wrap gap-3 items-center border-t border-slate-100 dark:border-slate-800 pt-3">
-          <span className="material-icons-round text-slate-400 text-lg">filter_list</span>
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-bold text-slate-500 whitespace-nowrap">الخط:</label>
-            <select
-              className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 min-w-[140px]"
-              value={filterLineId}
-              onChange={(e) => setFilterLineId(e.target.value)}
-            >
-              <option c value="">الكل</option>
-              {_rawLines.map((l) => (
-                <option key={l.id} value={l.id!}>{l.name}</option>
-              ))}
-            </select>
-          </div>
-          {!myEmployeeId && (
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-bold text-slate-500 whitespace-nowrap">المشرف:</label>
-              <select
-                className="border border-slate-200 dark:border-slate-700 dark:bg-slate-800 rounded-lg py-2 px-2 sm:px-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 min-w-[160px]"
-                value={filterEmployeeId}
-                onChange={(e) => setFilterEmployeeId(e.target.value)}
-              >
-                <option  value="">الكل</option>
-                {employees.filter((e) => e.level === 2).map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          {activeFilterCount > 0 && (
-            <button
-              onClick={() => { setFilterLineId(''); setFilterEmployeeId(''); }}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-lg transition-all"
-            >
-              <span className="material-icons-round text-sm">close</span>
-              مسح الفلاتر ({activeFilterCount})
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* Reports Table */}
       <SelectableTable<ProductionReport>
         data={displayedReports}
         columns={reportColumns}
         enableColumnVisibility
+        toolbarContent={tableToolbarFilters}
         highlightRowId={highlightReportId}
         getId={(r) => r.id!}
         bulkActions={reportBulkActions}
@@ -1188,7 +1192,7 @@ export const Reports: React.FC = () => {
 
       {/* ══ Create / Edit Report Modal ══ */}
       {showModal && (can("reports.create") || can("reports.edit")) && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowModal(false); setEditId(null); setSaveToast(null); }}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-start justify-start p-4" onClick={() => { setShowModal(false); setEditId(null); setSaveToast(null); }}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
               <h3 className="text-lg font-bold">{editId ? 'تعديل تقرير إنتاج' : 'إنشاء تقرير إنتاج'}</h3>
@@ -1783,6 +1787,106 @@ export const Reports: React.FC = () => {
                     <span className="text-slate-400 block text-xs mb-1">ملاحظات</span>
                     <p className="text-slate-600 dark:text-slate-300 font-medium">{wo.notes}</p>
                   </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══ Quality Report Modal (from production report code) ══ */}
+      {viewQualityReport && (() => {
+        const wo = viewQualityReport.workOrderId ? woMap.get(viewQualityReport.workOrderId) : null;
+        const qualityCode = getQualityReportCode(wo ?? undefined, viewQualityReport.reportCode);
+        if (!wo || (!wo.qualitySummary && !wo.qualityStatus && !wo.qualityReportCode)) {
+          return (
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setViewQualityReport(null)}>
+              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 p-5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold">تقرير الجودة المرتبط</h3>
+                  <button onClick={() => setViewQualityReport(null)} className="text-slate-400 hover:text-slate-600">
+                    <span className="material-icons-round">close</span>
+                  </button>
+                </div>
+                <p className="text-sm text-slate-500">لا يوجد تقرير جودة مرتبط بهذا التقرير حتى الآن.</p>
+              </div>
+            </div>
+          );
+        }
+        const qm = qualityStatusMeta(wo.qualityStatus);
+        const qs = wo.qualitySummary;
+        return (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setViewQualityReport(null)}>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 dark:border-slate-800 flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="font-black">تقرير الجودة المرتبط</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {viewQualityReport.reportCode || '—'} — WO: {wo.workOrderNumber}
+                  </p>
+                  <p className="text-xs text-primary font-bold mt-1">
+                    كود تقرير الجودة: {qualityCode || '—'}
+                  </p>
+                </div>
+                <button onClick={() => setViewQualityReport(null)} className="text-slate-400 hover:text-slate-600">
+                  <span className="material-icons-round">close</span>
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div>
+                  <span className={`inline-flex text-xs font-bold px-2 py-0.5 rounded-full ${qm.className}`}>
+                    {qm.label}
+                  </span>
+                </div>
+                {qs ? (
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                        <p className="text-xs text-slate-500">تم الفحص</p>
+                        <p className="text-lg font-black text-slate-800 dark:text-slate-100">{formatNumber(qs.inspectedUnits)}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                        <p className="text-xs text-slate-500">ناجح</p>
+                        <p className="text-lg font-black text-emerald-600">{formatNumber(qs.passedUnits)}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                        <p className="text-xs text-slate-500">فاشل</p>
+                        <p className="text-lg font-black text-rose-600">{formatNumber(qs.failedUnits)}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                        <p className="text-xs text-slate-500">Rework</p>
+                        <p className="text-lg font-black text-amber-600">{formatNumber(qs.reworkUnits)}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                        <p className="text-xs text-slate-500">FPY</p>
+                        <p className="text-lg font-black text-primary">{qs.firstPassYield}%</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                        <p className="text-xs text-slate-500">Defect Rate</p>
+                        <p className="text-lg font-black text-violet-600">{qs.defectRate}%</p>
+                      </div>
+                    </div>
+                    <div className="text-sm">
+                      <p className="text-slate-500">أعلى سبب عيب</p>
+                      <p className="font-bold text-slate-800 dark:text-slate-100">{qs.topDefectReason || '—'}</p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/20 px-3 py-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
+                    تم حفظ حالة تقرير الجودة، وسيظهر الملخص التفصيلي بعد اكتمال مزامنة البيانات/الـ indexes.
+                  </div>
+                )}
+              </div>
+              <div className="px-5 py-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                {can('quality.reports.view') && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      window.location.hash = `#/quality/reports?workOrderId=${encodeURIComponent(wo.id || '')}`;
+                    }}
+                  >
+                    فتح تقرير الجودة التفصيلي
+                  </Button>
                 )}
               </div>
             </div>

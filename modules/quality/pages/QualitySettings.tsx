@@ -124,6 +124,14 @@ export const QualitySettings: React.FC = () => {
   }, [loadData]);
 
   const activeReasonsCount = useMemo(() => reasons.filter((item) => item.isActive).length, [reasons]);
+  const productNameById = useMemo(
+    () => new Map(rawProducts.filter((p) => p.id).map((p) => [p.id as string, p.name])),
+    [rawProducts],
+  );
+  const lineNameById = useMemo(
+    () => new Map(rawLines.filter((l) => l.id).map((l) => [l.id as string, l.name])),
+    [rawLines],
+  );
 
   const onSavePolicies = async () => {
     if (!canManageSettings) return;
@@ -639,7 +647,9 @@ export const QualitySettings: React.FC = () => {
                 <div key={plan.id} className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
                   <div className="text-sm">
                     <p className="font-bold">كل {plan.frequencyMinutes} دقيقة - عينة {plan.sampleSize}</p>
-                    <p className="text-xs text-slate-500">Product: {plan.productId || 'الكل'} | Line: {plan.lineId || 'الكل'}</p>
+                    <p className="text-xs text-slate-500">
+                      المنتج: {plan.productId ? (productNameById.get(plan.productId) ?? plan.productId) : 'كل المنتجات'} | الخط: {plan.lineId ? (lineNameById.get(plan.lineId) ?? plan.lineId) : 'كل الخطوط'}
+                    </p>
                   </div>
                   <div className="flex gap-1">
                     <Button

@@ -63,6 +63,14 @@ export const IPQC: React.FC = () => {
     if (status === 'approved') return 'Approved';
     return status;
   }, [status]);
+  const inspectorId = currentEmployee?.id ?? uid ?? '';
+  const saveDisabledReason = useMemo(() => {
+    if (!canInspect) return 'لا تملك صلاحية تنفيذ فحص IPQC.';
+    if (!workOrderId) return 'اختر أمر شغل أولاً.';
+    if (!inspectorId) return 'هذا المستخدم غير مرتبط بموظف. راجع بيانات الموظفين/المستخدمين.';
+    if (busy) return 'جاري الحفظ...';
+    return '';
+  }, [canInspect, workOrderId, inspectorId, busy]);
   const printData = useMemo(() => {
     if (!selectedWorkOrder) return null;
     const lineName = _rawLines.find((l) => l.id === selectedWorkOrder.lineId)?.name ?? selectedWorkOrder.lineId;
@@ -80,9 +88,13 @@ export const IPQC: React.FC = () => {
       photosCount: photoFiles.length,
     };
   }, [selectedWorkOrder, _rawLines, _rawProducts, currentEmployee?.name, userDisplayName, userEmail, statusLabel, serialBarcode, selectedReason?.labelAr, notes, photoFiles.length]);
+  const qualityReportCode = useMemo(
+    () => `QR-${selectedWorkOrder?.workOrderNumber ?? 'NA'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+    [selectedWorkOrder?.workOrderNumber],
+  );
 
   const onSubmit = async () => {
-    if (!selectedWorkOrder || !currentEmployee?.id || !canInspect) return;
+    if (!selectedWorkOrder || !inspectorId || !canInspect) return;
     const requiresReason = status === 'failed' || status === 'rework';
     if (requiresReason && !reasonCode) {
       setMessage({ type: 'error', text: 'سبب العيب مطلوب عند الفشل أو إعادة التشغيل.' });
@@ -92,22 +104,25 @@ export const IPQC: React.FC = () => {
     setBusy(true);
     setMessage(null);
     try {
+      const isIndexError = (error: unknown): boolean =>
+        error instanceof Error && error.message.toLowerCase().includes('requires an index');
       const reason = reasonCatalog.find((r) => r.code === reasonCode);
       const attachments: FileAttachmentMeta[] = [];
-      for (let i = 0; i < photoFiles.length; i += 1) {
-        const uploaded = await storageService.uploadImage(
-          photoFiles[i],
-          'qc_reports',
-          selectedWorkOrder.id!,
-          {
-            onProgress: (progress) => {
-              const overall = Math.round(((i + progress / 100) / photoFiles.length) * 100);
-              setUploadProgress(overall);
-            },
-          },
-        );
-        attachments.push(uploaded);
-      }
+      // Temporarily disabled: image upload flow.
+      // for (let i = 0; i < photoFiles.length; i += 1) {
+      //   const uploaded = await storageService.uploadImage(
+      //     photoFiles[i],
+      //     'qc_reports',
+      //     selectedWorkOrder.id!,
+      //     {
+      //       onProgress: (progress) => {
+      //         const overall = Math.round(((i + progress / 100) / photoFiles.length) * 100);
+      //         setUploadProgress(overall);
+      //       },
+      //     },
+      //   );
+      //   attachments.push(uploaded);
+      // }
 
       const inspectionId = await qualityInspectionService.createInspection({
         workOrderId: selectedWorkOrder.id!,
@@ -116,7 +131,7 @@ export const IPQC: React.FC = () => {
         serialBarcode: serialBarcode || undefined,
         type: 'ipqc',
         status,
-        inspectedBy: currentEmployee.id,
+        inspectedBy: inspectorId,
         notes,
         attachments,
       });
@@ -136,7 +151,7 @@ export const IPQC: React.FC = () => {
           severity: reason.severityDefault,
           quantity: 1,
           status: status === 'rework' ? 'reworked' : 'open',
-          createdBy: currentEmployee.id,
+          createdBy: inspectorId,
           notes,
           attachments,
         });
@@ -151,12 +166,39 @@ export const IPQC: React.FC = () => {
         }
       }
 
-      const summary = await qualityInspectionService.buildWorkOrderSummary(selectedWorkOrder.id!);
+      let summary;
+      try {
+        summary = await qualityInspectionService.buildWorkOrderSummary(selectedWorkOrder.id!);
+      } catch (error) {
+        if (isIndexError(error)) {
+          await updateWorkOrder(selectedWorkOrder.id!, {
+            qualityStatus: status === 'approved' || status === 'passed' ? 'approved' : 'pending',
+            qualityReportCode,
+            ...(status === 'approved' || status === 'passed'
+              ? { qualityApprovedBy: inspectorId, qualityApprovedAt: new Date().toISOString() }
+              : {}),
+          });
+          setStatus('passed');
+          setReasonCode('');
+          setSerialBarcode('');
+          setNotes('');
+          setPhotoFiles([]);
+          setPhotoPreviews([]);
+          setUploadProgress(0);
+          setMessage({
+            type: 'success',
+            text: 'تم حفظ تقرير IPQC.',
+          });
+          return;
+        }
+        throw error;
+      }
       await updateWorkOrder(selectedWorkOrder.id!, {
         qualitySummary: summary,
         qualityStatus: status === 'approved' || status === 'passed' ? 'approved' : 'pending',
+        qualityReportCode,
         ...(status === 'approved' || status === 'passed'
-          ? { qualityApprovedBy: currentEmployee.id, qualityApprovedAt: new Date().toISOString() }
+          ? { qualityApprovedBy: inspectorId, qualityApprovedAt: new Date().toISOString() }
           : {}),
       });
 
@@ -190,17 +232,21 @@ export const IPQC: React.FC = () => {
 
       const lineName = _rawLines.find((l) => l.id === selectedWorkOrder.lineId)?.name ?? selectedWorkOrder.lineId;
       const productName = _rawProducts.find((p) => p.id === selectedWorkOrder.productId)?.name ?? selectedWorkOrder.productId;
-      await qualityNotificationService.notifyReportStatusChanged({
-        workOrderId: selectedWorkOrder.id!,
-        workOrderNumber: selectedWorkOrder.workOrderNumber,
-        lineName,
-        productName,
-        typeLabel: 'IPQC',
-        statusLabel: status,
-        summary,
-        updatedAt: new Date().toLocaleString(),
-        supervisorId: selectedWorkOrder.supervisorId,
-      });
+      try {
+        await qualityNotificationService.notifyReportStatusChanged({
+          workOrderId: selectedWorkOrder.id!,
+          workOrderNumber: selectedWorkOrder.workOrderNumber,
+          lineName,
+          productName,
+          typeLabel: 'IPQC',
+          statusLabel: status,
+          summary,
+          updatedAt: new Date().toLocaleString(),
+          supervisorId: selectedWorkOrder.supervisorId,
+        });
+      } catch (error) {
+        if (!isIndexError(error)) throw error;
+      }
 
       setStatus('passed');
       setReasonCode('');
@@ -323,6 +369,11 @@ export const IPQC: React.FC = () => {
             className="md:col-span-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm min-h-[90px]"
           />
           <div className="md:col-span-2 space-y-2">
+            {/* Temporarily disabled: image upload UI. */}
+            <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+              رفع الصور متوقف مؤقتًا.
+            </p>
+            {/*
             <label className="block text-sm font-bold text-slate-600 dark:text-slate-400">صور الفحص</label>
             <label className="block cursor-pointer">
               <input
@@ -376,13 +427,17 @@ export const IPQC: React.FC = () => {
             {busy && photoFiles.length > 0 && (
               <p className="mt-1 text-xs font-bold text-primary">رفع الصور... {uploadProgress}%</p>
             )}
+            */}
           </div>
         </div>
         <div className="mt-4 flex justify-end">
-          <Button variant="primary" disabled={!canInspect || busy || !workOrderId || !currentEmployee?.id} onClick={onSubmit}>
+          <Button variant="primary" disabled={Boolean(saveDisabledReason)} onClick={onSubmit}>
             حفظ تقرير IPQC
           </Button>
         </div>
+        {saveDisabledReason && (
+          <p className="mt-2 text-xs font-semibold text-amber-700 dark:text-amber-300">{saveDisabledReason}</p>
+        )}
       </Card>
 
       <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>

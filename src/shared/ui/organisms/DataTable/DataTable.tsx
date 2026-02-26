@@ -25,6 +25,7 @@ export function DataTable<T>({
   enableColumnVisibility = true,
   enableSearch = true,
   searchPlaceholder = 'بحث في الجدول...',
+  toolbarContent,
   highlightRowId = null,
   emptyIcon = 'inbox',
   emptyTitle = 'لا توجد بيانات',
@@ -178,6 +179,76 @@ export function DataTable<T>({
     });
   }, [allSelected, pageRows, getId]);
 
+  const columnsVisibilityControl = enableColumnVisibility ? (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setShowColumnsMenu((previous) => !previous)}
+        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
+      >
+        <span className="material-icons-round text-sm">view_column</span>
+        الأعمدة
+      </button>
+      {showColumnsMenu && (
+        <div className="absolute left-0 top-11 z-20 w-80 max-h-80 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl p-2 space-y-1">
+          {resolvedColumns.map((column, index) => (
+            <div key={column.id} className="rounded-lg border border-slate-100 dark:border-slate-800 p-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={column.visible}
+                  onChange={() => toggleVisibility(column.id)}
+                  className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary/30"
+                />
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 flex-1">
+                  {column.header}
+                </span>
+                <button
+                  onClick={() => moveColumn(column.id, 'left')}
+                  disabled={index === 0}
+                  className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
+                  title="نقل لليسار"
+                >
+                  <span className="material-icons-round text-sm">west</span>
+                </button>
+                <button
+                  onClick={() => moveColumn(column.id, 'right')}
+                  disabled={index === resolvedColumns.length - 1}
+                  className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
+                  title="نقل لليمين"
+                >
+                  <span className="material-icons-round text-sm">east</span>
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-400">العرض</span>
+                {(['xs', 'sm', 'md', 'lg', 'xl'] as const).map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => setWidth(column.id, size)}
+                    className={`px-2 py-1 rounded text-[10px] font-bold border ${
+                      column.width === size
+                        ? 'border-primary text-primary bg-primary/10'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    {size.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <button
+            className="w-full text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800"
+            onClick={reset}
+          >
+            إعادة ضبط افتراضي
+          </button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   if (loading) {
     return (
       <div className="animate-pulse space-y-3 p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -223,7 +294,7 @@ export function DataTable<T>({
       )}
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 justify-between">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-2">
           {enableSearch ? (
             <div className="relative w-full max-w-md">
               <span className="material-icons-round absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-base">search</span>
@@ -234,79 +305,13 @@ export function DataTable<T>({
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 pr-9 pl-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
               />
             </div>
-          ) : (
-            <div />
-          )}
+          ) : null}
 
-          {enableColumnVisibility && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowColumnsMenu((previous) => !previous)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
-              >
-                <span className="material-icons-round text-sm">view_column</span>
-                الأعمدة
-              </button>
-              {showColumnsMenu && (
-                <div className="absolute left-0 top-11 z-20 w-80 max-h-80 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl p-2 space-y-1">
-                  {resolvedColumns.map((column, index) => (
-                    <div key={column.id} className="rounded-lg border border-slate-100 dark:border-slate-800 p-2 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={column.visible}
-                          onChange={() => toggleVisibility(column.id)}
-                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary/30"
-                        />
-                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300 flex-1">
-                          {column.header}
-                        </span>
-                        <button
-                          onClick={() => moveColumn(column.id, 'left')}
-                          disabled={index === 0}
-                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
-                          title="نقل لليسار"
-                        >
-                          <span className="material-icons-round text-sm">west</span>
-                        </button>
-                        <button
-                          onClick={() => moveColumn(column.id, 'right')}
-                          disabled={index === resolvedColumns.length - 1}
-                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
-                          title="نقل لليمين"
-                        >
-                          <span className="material-icons-round text-sm">east</span>
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-bold text-slate-400">العرض</span>
-                        {(['xs', 'sm', 'md', 'lg', 'xl'] as const).map((size) => (
-                          <button
-                            key={size}
-                            onClick={() => setWidth(column.id, size)}
-                            className={`px-2 py-1 rounded text-[10px] font-bold border ${
-                              column.width === size
-                                ? 'border-primary text-primary bg-primary/10'
-                                : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                            }`}
-                          >
-                            {size.toUpperCase()}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <button
-                    className="w-full text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    onClick={reset}
-                  >
-                    إعادة ضبط افتراضي
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          {enableSearch && <div className="flex-1" />}
+
+          {toolbarContent ? columnsVisibilityControl : null}
+          {toolbarContent}
+          {!toolbarContent ? columnsVisibilityControl : null}
         </div>
 
         <div className="overflow-auto max-h-[70vh]">

@@ -10,6 +10,7 @@ import {
   QueryDocumentSnapshot,
   DocumentData,
 } from 'firebase/firestore';
+import type { FirebaseError } from 'firebase/app';
 import { auth, db, isConfigured } from '../../auth/services/firebase';
 import type { ActivityLog, ActivityAction } from '../../../types';
 
@@ -82,16 +83,28 @@ export const activityLogService = {
     metadata?: Record<string, any>,
   ): Promise<void> {
     if (!isConfigured) return;
+    const payload = {
+      userId,
+      userEmail,
+      action,
+      description,
+      metadata: metadata ?? {},
+      timestamp: serverTimestamp(),
+    };
     try {
-      await addDoc(collection(db, COLLECTION), {
-        userId,
-        userEmail,
-        action,
-        description,
-        metadata: metadata ?? {},
-        timestamp: serverTimestamp(),
-      });
+      await addDoc(collection(db, COLLECTION), payload);
     } catch (error) {
+      const code = (error as FirebaseError | undefined)?.code;
+      if (code === 'already-exists') {
+        // Rare race/retry case: retry with a new auto-ID and avoid noisy failures.
+        try {
+          await addDoc(collection(db, COLLECTION), payload);
+          return;
+        } catch (retryError) {
+          console.warn('activityLogService.log retry failed:', retryError);
+          return;
+        }
+      }
       console.error('activityLogService.log error:', error);
     }
   },

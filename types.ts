@@ -272,6 +272,7 @@ export interface WorkOrder {
   scanSessionClosedAt?: any;
   qualityStatus?: QualityStatus;
   qualitySummary?: WorkOrderQualitySummary;
+  qualityReportCode?: string;
   qualityApprovedBy?: string;
   qualityApprovedAt?: any;
   createdBy: string;

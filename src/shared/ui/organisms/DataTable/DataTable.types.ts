@@ -52,6 +52,7 @@ export interface DataTableProps<T> {
   enableColumnVisibility?: boolean;
   enableSearch?: boolean;
   searchPlaceholder?: string;
+  toolbarContent?: React.ReactNode;
 
   highlightRowId?: string | null;
   emptyIcon?: string;
