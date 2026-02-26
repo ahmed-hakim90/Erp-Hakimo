@@ -583,7 +583,7 @@ const GroupDropdown: React.FC<GroupDropdownProps> = ({ group, isActiveItem, badg
     <div className="absolute top-full mt-1 right-0 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
       <div className="absolute -top-1.5 right-5 w-3 h-3 bg-[var(--color-card)] border-l border-t border-[var(--color-border)] rotate-45 z-10" />
       <div className={[
-        'relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl shadow-slate-200/60 dark:shadow-slate-950/80 overflow-hidden',
+        'relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg shadow-slate-200/35 dark:shadow-slate-950/45 overflow-hidden',
         useColumns ? 'min-w-[460px]' : 'min-w-[240px]',
       ].join(' ')}>
         <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[var(--color-border)] bg-slate-50/80 dark:bg-slate-800/40">

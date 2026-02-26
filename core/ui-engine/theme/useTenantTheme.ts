@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { applyTenantTheme, loadTenantTheme, resolveTheme } from './tenantTheme';
+import { applyTenantTheme, cacheTenantTheme, loadTenantTheme, readCachedTenantTheme, resolveTheme } from './tenantTheme';
 
 export function useTenantTheme() {
   const isAuthenticated = useAppStore((state) => state.isAuthenticated);
@@ -9,11 +9,18 @@ export function useTenantTheme() {
   useEffect(() => {
     let active = true;
 
+    // Apply cached theme first to avoid style flicker before DB theme resolves.
+    const cachedTheme = readCachedTenantTheme();
+    if (cachedTheme) {
+      applyTenantTheme(cachedTheme);
+    }
+
     const bootstrapTheme = async () => {
       const tenantId = (userProfile as { tenantId?: string } | null)?.tenantId;
       const theme = isAuthenticated ? await loadTenantTheme(tenantId) : resolveTheme();
       if (active) {
         applyTenantTheme(theme);
+        cacheTenantTheme(theme);
       }
     };
 

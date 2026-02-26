@@ -17,6 +17,37 @@ export interface TenantTheme {
   colorSidebarText: string;
 }
 
+const THEME_STORAGE_KEY = 'tenant_theme_cache_v1';
+
+function toRgbChannels(color: string, fallback = '168 0 8'): string {
+  const value = color.trim();
+  if (!value) return fallback;
+
+  // Already in CSS channel format (e.g. "168 0 8")
+  if (/^\d+\s+\d+\s+\d+$/.test(value)) return value;
+
+  // Hex format (#rrggbb or #rgb)
+  const hex = value.startsWith('#') ? value.slice(1) : value;
+  if (/^[\da-fA-F]{6}$/.test(hex)) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `${r} ${g} ${b}`;
+  }
+  if (/^[\da-fA-F]{3}$/.test(hex)) {
+    const r = parseInt(hex[0] + hex[0], 16);
+    const g = parseInt(hex[1] + hex[1], 16);
+    const b = parseInt(hex[2] + hex[2], 16);
+    return `${r} ${g} ${b}`;
+  }
+
+  // rgb(r, g, b) format
+  const rgbMatch = value.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+  if (rgbMatch) return `${rgbMatch[1]} ${rgbMatch[2]} ${rgbMatch[3]}`;
+
+  return fallback;
+}
+
 const PRESETS: Record<Exclude<TenantThemePreset, 'custom'>, TenantTheme> = {
   light: {
     preset: 'light',
@@ -65,13 +96,35 @@ export function resolveTheme(theme?: Partial<TenantTheme> | null): TenantTheme {
   } as TenantTheme;
 }
 
+export function readCachedTenantTheme(): TenantTheme | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<TenantTheme> | null;
+    return resolveTheme(parsed);
+  } catch (error) {
+    console.error('Failed to read cached tenant theme:', error);
+    return null;
+  }
+}
+
+export function cacheTenantTheme(theme: TenantTheme) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
+  } catch (error) {
+    console.error('Failed to cache tenant theme:', error);
+  }
+}
+
 export function applyTenantTheme(theme: TenantTheme) {
   const root = document.documentElement;
   root.style.setProperty('--color-bg', theme.colorBg);
   root.style.setProperty('--color-card', theme.colorCard);
   root.style.setProperty('--color-border', theme.colorBorder);
   root.style.setProperty('--color-text', theme.colorText);
-  root.style.setProperty('--color-primary', theme.primaryColor);
+  root.style.setProperty('--color-primary', toRgbChannels(theme.primaryColor));
   root.style.setProperty('--color-sidebar-bg', theme.colorSidebarBg);
   root.style.setProperty('--color-sidebar-text', theme.colorSidebarText);
   root.style.setProperty('--tenant-logo', theme.logo ?? '');

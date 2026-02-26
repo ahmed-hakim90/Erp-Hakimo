@@ -78,6 +78,15 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Notifications Collection ───────────────────────────────────────────
+    // Managers can read all notifications. Normal users can only read their own.
+    match /notifications/{docId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if isActiveUser();
+      allow delete: if isAdmin();
+    }
+
     // ── Products Collection ───────────────────────────────────────────────
     match /products/{docId} {
       allow read: if isActiveUser();
@@ -395,7 +404,8 @@ service cloud.firestore {
     // ── Quality: Rework Orders ─────────────────────────────────────────────
     match /quality_rework_orders/{docId} {
       allow read: if hasPermission('quality.rework.view') || hasPermission('quality.reports.view');
-      allow create, update: if hasPermission('quality.rework.manage');
+      allow create: if hasPermission('quality.rework.manage') || hasPermission('quality.finalInspection.inspect') || hasPermission('quality.ipqc.inspect');
+      allow update: if hasPermission('quality.rework.manage');
       allow delete: if isAdmin();
     }
 

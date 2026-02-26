@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { Button, Card } from '../components/UI';
 import { useAppStore } from '@/store/useAppStore';
 import { usePermission } from '@/utils/permissions';
@@ -7,6 +8,7 @@ import { qualityInspectionService } from '../services/qualityInspectionService';
 import { qualityNotificationService } from '../services/qualityNotificationService';
 import { qualityPrintService } from '../services/qualityPrintService';
 import { qualitySettingsService } from '../services/qualitySettingsService';
+import { SingleIPQCPrint } from '../components/QualityReportPrint';
 import { storageService } from '@/services/storageService';
 import { eventBus, SystemEvents } from '@/shared/events';
 
@@ -21,6 +23,7 @@ export const IPQC: React.FC = () => {
   const uid = useAppStore((s) => s.uid);
   const userDisplayName = useAppStore((s) => s.userDisplayName);
   const userEmail = useAppStore((s) => s.userEmail);
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
   const updateWorkOrder = useAppStore((s) => s.updateWorkOrder);
 
   const [reasonCatalog, setReasonCatalog] = useState<QualityReasonCatalogItem[]>([]);
@@ -33,7 +36,9 @@ export const IPQC: React.FC = () => {
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({ contentRef: printRef });
 
   useEffect(() => {
     qualitySettingsService.getReasons(true).then(setReasonCatalog);
@@ -47,10 +52,45 @@ export const IPQC: React.FC = () => {
     () => activeWorkOrders.find((w) => w.id === workOrderId) ?? null,
     [activeWorkOrders, workOrderId],
   );
+  const selectedReason = useMemo(
+    () => reasonCatalog.find((r) => r.code === reasonCode),
+    [reasonCatalog, reasonCode],
+  );
+  const statusLabel = useMemo(() => {
+    if (status === 'passed') return 'Passed';
+    if (status === 'failed') return 'Failed';
+    if (status === 'rework') return 'Rework';
+    if (status === 'approved') return 'Approved';
+    return status;
+  }, [status]);
+  const printData = useMemo(() => {
+    if (!selectedWorkOrder) return null;
+    const lineName = _rawLines.find((l) => l.id === selectedWorkOrder.lineId)?.name ?? selectedWorkOrder.lineId;
+    const productName = _rawProducts.find((p) => p.id === selectedWorkOrder.productId)?.name ?? selectedWorkOrder.productId;
+    return {
+      date: new Date().toLocaleDateString('en-CA'),
+      workOrderNumber: selectedWorkOrder.workOrderNumber,
+      lineName,
+      productName,
+      inspectorName: currentEmployee?.name ?? userDisplayName ?? userEmail ?? '—',
+      statusLabel,
+      serialBarcode: serialBarcode || undefined,
+      reasonLabel: selectedReason?.labelAr,
+      notes: notes || undefined,
+      photosCount: photoFiles.length,
+    };
+  }, [selectedWorkOrder, _rawLines, _rawProducts, currentEmployee?.name, userDisplayName, userEmail, statusLabel, serialBarcode, selectedReason?.labelAr, notes, photoFiles.length]);
 
   const onSubmit = async () => {
     if (!selectedWorkOrder || !currentEmployee?.id || !canInspect) return;
+    const requiresReason = status === 'failed' || status === 'rework';
+    if (requiresReason && !reasonCode) {
+      setMessage({ type: 'error', text: 'سبب العيب مطلوب عند الفشل أو إعادة التشغيل.' });
+      return;
+    }
+
     setBusy(true);
+    setMessage(null);
     try {
       const reason = reasonCatalog.find((r) => r.code === reasonCode);
       const attachments: FileAttachmentMeta[] = [];
@@ -80,9 +120,12 @@ export const IPQC: React.FC = () => {
         notes,
         attachments,
       });
+      if (!inspectionId) {
+        throw new Error('تعذر الحفظ: Backend غير مهيأ (Firebase).');
+      }
 
-      if (inspectionId && (status === 'failed' || status === 'rework') && reason) {
-        await qualityInspectionService.createDefect({
+      if ((status === 'failed' || status === 'rework') && reason) {
+        const defectId = await qualityInspectionService.createDefect({
           workOrderId: selectedWorkOrder.id!,
           inspectionId,
           lineId: selectedWorkOrder.lineId,
@@ -97,10 +140,25 @@ export const IPQC: React.FC = () => {
           notes,
           attachments,
         });
+        if (status === 'rework' && defectId) {
+          await qualityInspectionService.createRework({
+            workOrderId: selectedWorkOrder.id!,
+            defectId,
+            serialBarcode: serialBarcode || undefined,
+            status: 'open',
+            notes,
+          });
+        }
       }
 
       const summary = await qualityInspectionService.buildWorkOrderSummary(selectedWorkOrder.id!);
-      await updateWorkOrder(selectedWorkOrder.id!, { qualitySummary: summary });
+      await updateWorkOrder(selectedWorkOrder.id!, {
+        qualitySummary: summary,
+        qualityStatus: status === 'approved' || status === 'passed' ? 'approved' : 'pending',
+        ...(status === 'approved' || status === 'passed'
+          ? { qualityApprovedBy: currentEmployee.id, qualityApprovedAt: new Date().toISOString() }
+          : {}),
+      });
 
       eventBus.emit(
         status === 'approved' || status === 'passed'
@@ -151,6 +209,12 @@ export const IPQC: React.FC = () => {
       setPhotoFiles([]);
       setPhotoPreviews([]);
       setUploadProgress(0);
+      setMessage({ type: 'success', text: 'تم حفظ تقرير IPQC بنجاح.' });
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'تعذر حفظ التقرير. حاول مرة أخرى.',
+      });
     } finally {
       setBusy(false);
     }
@@ -164,19 +228,32 @@ export const IPQC: React.FC = () => {
           <p className="text-sm text-slate-500">فحص أثناء التشغيل بعينة أو سيريال محدد</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => window.print()} disabled={!canPrint}>طباعة التقرير</Button>
+          <Button variant="outline" onClick={() => handlePrint()} disabled={!canPrint || !selectedWorkOrder}>طباعة التقرير</Button>
           <Button
             variant="outline"
             onClick={async () => {
               if (!printRef.current) return;
-              await qualityPrintService.exportDocumentPdf(
-                printRef.current,
-                `quality-ipqc-${selectedWorkOrder?.workOrderNumber ?? 'report'}`,
-                'ipqc',
-                selectedWorkOrder?.id,
-              );
+              try {
+                await qualityPrintService.exportDocumentPdf(
+                  printRef.current,
+                  `quality-ipqc-${selectedWorkOrder?.workOrderNumber ?? 'report'}`,
+                  'ipqc',
+                  selectedWorkOrder?.id,
+                  {
+                    paperSize: printTemplate?.paperSize,
+                    orientation: printTemplate?.orientation,
+                    copies: printTemplate?.copies,
+                  },
+                );
+                setMessage({ type: 'success', text: 'تم تصدير تقرير IPQC PDF بنجاح.' });
+              } catch (error) {
+                setMessage({
+                  type: 'error',
+                  text: error instanceof Error ? error.message : 'تعذر تصدير تقرير IPQC.',
+                });
+              }
             }}
-            disabled={!canPrint}
+            disabled={!canPrint || !selectedWorkOrder}
           >
             PDF
           </Button>
@@ -184,7 +261,15 @@ export const IPQC: React.FC = () => {
       </div>
 
       <Card>
-        <div ref={printRef}>
+        {message && (
+          <div className={`mb-3 rounded-lg border px-3 py-2 text-sm font-semibold ${
+            message.type === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-300'
+              : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-900/20 dark:text-rose-300'
+          }`}>
+            {message.text}
+          </div>
+        )}
         <div className="grid md:grid-cols-2 gap-3">
           <select
             value={workOrderId}
@@ -298,8 +383,11 @@ export const IPQC: React.FC = () => {
             حفظ تقرير IPQC
           </Button>
         </div>
-        </div>
       </Card>
+
+      <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+        <SingleIPQCPrint ref={printRef} data={printData} printSettings={printTemplate} />
+      </div>
     </div>
   );
 };

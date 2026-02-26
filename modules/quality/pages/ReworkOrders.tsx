@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { Button, Card } from '../components/UI';
 import { useAppStore } from '@/store/useAppStore';
 import { usePermission } from '@/utils/permissions';
@@ -6,19 +7,51 @@ import type { QualityReworkOrder } from '@/types';
 import { qualityInspectionService } from '../services/qualityInspectionService';
 import { qualityNotificationService } from '../services/qualityNotificationService';
 import { qualityPrintService } from '../services/qualityPrintService';
+import { ReworkOrdersPrint } from '../components/QualityReportPrint';
 
 const STATUS_OPTIONS: QualityReworkOrder['status'][] = ['open', 'in_progress', 'done', 'scrap'];
+const STATUS_LABELS: Record<QualityReworkOrder['status'], string> = {
+  open: 'مفتوح',
+  in_progress: 'قيد التنفيذ',
+  done: 'مكتمل',
+  scrap: 'سكراب',
+};
 
 export const ReworkOrders: React.FC = () => {
   const { can } = usePermission();
   const canManageRework = can('quality.rework.manage');
   const canPrint = can('quality.print');
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
   const workOrders = useAppStore((s) => s.workOrders);
   const lines = useAppStore((s) => s._rawLines);
   const products = useAppStore((s) => s._rawProducts);
   const [rows, setRows] = useState<QualityReworkOrder[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({ contentRef: printRef });
+  const displayRows = useMemo(() => rows.map((row) => {
+    const workOrder = workOrders.find((w) => w.id === row.workOrderId);
+    return {
+      ...row,
+      workOrderNumber: workOrder?.workOrderNumber ?? row.workOrderId,
+      lineName: lines.find((line) => line.id === workOrder?.lineId)?.name ?? workOrder?.lineId ?? '—',
+      productName: products.find((product) => product.id === workOrder?.productId)?.name ?? workOrder?.productId ?? '—',
+      statusLabel: STATUS_LABELS[row.status] ?? row.status,
+    };
+  }), [rows, workOrders, lines, products]);
+  const printRows = useMemo(
+    () =>
+      displayRows.map((row) => ({
+        workOrderNumber: row.workOrderNumber,
+        lineName: row.lineName,
+        productName: row.productName,
+        defectId: row.defectId,
+        serialBarcode: row.serialBarcode,
+        statusLabel: row.statusLabel,
+      })),
+    [displayRows],
+  );
 
   useEffect(() => qualityInspectionService.subscribeRework(setRows), []);
 
@@ -30,14 +63,32 @@ export const ReworkOrders: React.FC = () => {
           <p className="text-sm text-slate-500">متابعة حالات إعادة التشغيل</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => window.print()} disabled={!canPrint}>طباعة التقرير</Button>
+          <Button variant="outline" onClick={() => handlePrint()} disabled={!canPrint || rows.length === 0}>طباعة التقرير</Button>
           <Button
             variant="outline"
             onClick={async () => {
               if (!printRef.current) return;
-              await qualityPrintService.exportDocumentPdf(printRef.current, 'quality-rework-orders', 'rework');
+              try {
+                await qualityPrintService.exportDocumentPdf(
+                  printRef.current,
+                  'quality-rework-orders',
+                  'rework',
+                  undefined,
+                  {
+                    paperSize: printTemplate?.paperSize,
+                    orientation: printTemplate?.orientation,
+                    copies: printTemplate?.copies,
+                  },
+                );
+                setMessage({ type: 'success', text: 'تم تصدير تقرير إعادة التشغيل PDF بنجاح.' });
+              } catch (error) {
+                setMessage({
+                  type: 'error',
+                  text: error instanceof Error ? error.message : 'تعذر تصدير التقرير.',
+                });
+              }
             }}
-            disabled={!canPrint}
+            disabled={!canPrint || rows.length === 0}
           >
             PDF
           </Button>
@@ -45,7 +96,16 @@ export const ReworkOrders: React.FC = () => {
       </div>
 
       <Card>
-        <div ref={printRef}>
+        {message && (
+          <div className={`mb-3 rounded-lg border px-3 py-2 text-sm font-semibold ${
+            message.type === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-300'
+              : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-900/20 dark:text-rose-300'
+          }`}>
+            {message.text}
+          </div>
+        )}
+        <div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -58,12 +118,15 @@ export const ReworkOrders: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {displayRows.map((row) => (
                 <tr key={row.id} className="border-b border-slate-100 dark:border-slate-800">
-                  <td className="py-2 px-2 font-mono">{row.workOrderId}</td>
+                  <td className="py-2 px-2 font-mono">
+                    <div>{row.workOrderNumber}</div>
+                    <div className="text-xs text-slate-500">{row.lineName} — {row.productName}</div>
+                  </td>
                   <td className="py-2 px-2 font-mono">{row.defectId}</td>
                   <td className="py-2 px-2">{row.serialBarcode ?? '—'}</td>
-                  <td className="py-2 px-2 font-bold">{row.status}</td>
+                  <td className="py-2 px-2 font-bold">{row.statusLabel}</td>
                   <td className="py-2 px-2">
                     <div className="flex flex-wrap gap-1">
                       {STATUS_OPTIONS.map((status) => (
@@ -88,6 +151,12 @@ export const ReworkOrders: React.FC = () => {
                                 updatedAt: new Date().toLocaleString(),
                                 supervisorId: workOrder.supervisorId,
                               });
+                              setMessage({ type: 'success', text: 'تم تحديث حالة أمر إعادة التشغيل.' });
+                            } catch (error) {
+                              setMessage({
+                                type: 'error',
+                                text: error instanceof Error ? error.message : 'تعذر تحديث حالة إعادة التشغيل.',
+                              });
                             } finally {
                               setBusyId(null);
                             }
@@ -109,6 +178,9 @@ export const ReworkOrders: React.FC = () => {
         </div>
         </div>
       </Card>
+      <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+        <ReworkOrdersPrint ref={printRef} rows={printRows} printSettings={printTemplate} />
+      </div>
     </div>
   );
 };

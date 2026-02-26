@@ -116,11 +116,7 @@ const PERMISSION_GROUPS_RAW: PermissionGroup[] = [
     key: 'quality',
     label: 'الجودة',
     permissions: [
-      { key: 'quality.view', label: 'عرض الجودة' },
-      { key: 'quality.inspect', label: 'تنفيذ الفحص' },
-      { key: 'quality.approve', label: 'اعتماد الجودة' },
       { key: 'quality.print', label: 'طباعة مستندات الجودة' },
-      { key: 'quality.manageWorkers', label: 'إدارة عمال الجودة' },
       { key: 'quality.settings.view', label: 'عرض إعدادات الجودة' },
       { key: 'quality.settings.manage', label: 'إدارة إعدادات الجودة' },
       { key: 'quality.workers.view', label: 'عرض عمال الجودة' },
@@ -456,6 +452,15 @@ export function checkPermission(
   // Backward compatibility for old role docs created before this permission existed.
   if (permission === 'employees.viewDetails') {
     return permissions['employees.view'] === true;
+  }
+  if (permission === 'quality.finalInspection.view' || permission === 'quality.ipqc.view' || permission === 'quality.rework.view' || permission === 'quality.capa.view' || permission === 'quality.reports.view') {
+    return permissions['quality.view'] === true;
+  }
+  if (permission === 'quality.finalInspection.inspect' || permission === 'quality.ipqc.inspect') {
+    return permissions['quality.inspect'] === true;
+  }
+  if (permission === 'quality.workers.manage') {
+    return permissions['quality.manageWorkers'] === true;
   }
 
   return false;

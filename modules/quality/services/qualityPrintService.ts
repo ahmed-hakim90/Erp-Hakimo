@@ -2,6 +2,7 @@ import { addDoc, serverTimestamp } from 'firebase/firestore';
 import { isConfigured } from '@/services/firebase';
 import { activityLogService } from '@/services/activityLogService';
 import { exportToPDF } from '@/utils/reportExport';
+import type { ExportPDFOptions } from '@/utils/reportExport';
 import { qualityPrintLogsRef } from '../collections';
 
 type QualityPrintDocType = 'final_inspection' | 'ipqc' | 'defects' | 'rework' | 'capa' | 'quality_kpi';
@@ -12,8 +13,9 @@ export const qualityPrintService = {
     fileName: string,
     type: QualityPrintDocType,
     workOrderId?: string,
+    options?: ExportPDFOptions,
   ): Promise<void> {
-    await exportToPDF(element, fileName, { paperSize: 'a4', orientation: 'portrait' });
+    await exportToPDF(element, fileName, options ?? { paperSize: 'a4', orientation: 'portrait' });
     if (!isConfigured) return;
     await addDoc(qualityPrintLogsRef(), {
       type,

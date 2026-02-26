@@ -42,7 +42,7 @@ export const Login: React.FC = () => {
   const errorMsg = localError || authError;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: 'var(--color-bg)' }}>
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
@@ -50,16 +50,22 @@ export const Login: React.FC = () => {
             <span className="material-icons-round text-4xl">factory</span>
           </div>
           <h1 className="text-3xl font-black text-primary tracking-tight">HAKIMO</h1>
-          <p className="text-sm text-slate-400 font-bold mt-1">نظام إدارة الإنتاج</p>
+          <p className="text-sm font-bold mt-1" style={{ color: 'var(--color-text)', opacity: 0.6 }}>نظام إدارة الإنتاج</p>
         </div>
 
         {/* Card */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl p-5 sm:p-8">
+        <div
+          className="rounded-2xl shadow-xl p-5 sm:p-8"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
           <div className="text-center mb-6">
-            <h2 className="text-xl font-black text-slate-800 dark:text-white">
+            <h2 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
               {isRegister ? 'إنشاء حساب جديد' : 'تسجيل الدخول'}
             </h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <p className="text-sm mt-1" style={{ color: 'var(--color-text)', opacity: 0.6 }}>
               {isRegister ? 'أدخل بياناتك لإنشاء حساب' : 'أدخل بيانات حسابك للمتابعة'}
             </p>
           </div>
@@ -130,7 +136,7 @@ export const Login: React.FC = () => {
                 {loading ? 'جاري الإنشاء...' : 'إنشاء الحساب'}
               </Button>
 
-              <p className="text-center text-sm text-slate-400 mt-4">
+              <p className="text-center text-sm mt-4" style={{ color: 'var(--color-text)', opacity: 0.6 }}>
                 عندك حساب بالفعل؟{' '}
                 <button type="button" onClick={switchMode} className="text-primary font-bold hover:underline">
                   تسجيل الدخول
@@ -187,7 +193,7 @@ export const Login: React.FC = () => {
                 {loading ? 'جاري تسجيل الدخول...' : 'تسجيل الدخول'}
               </Button>
 
-              <p className="text-center text-sm text-slate-400 mt-4">
+              <p className="text-center text-sm mt-4" style={{ color: 'var(--color-text)', opacity: 0.6 }}>
                 ليس لديك حساب؟{' '}
                 <button type="button" onClick={switchMode} className="text-primary font-bold hover:underline">
                   إنشاء حساب جديد
@@ -197,7 +203,7 @@ export const Login: React.FC = () => {
           )}
         </div>
 
-        <p className="text-center text-xs text-slate-400 mt-6 font-medium">
+        <p className="text-center text-xs mt-6 font-medium" style={{ color: 'var(--color-text)', opacity: 0.5 }}>
           © {new Date().getFullYear()} HAKIM PRODUCTION SYSTEM
         </p>
       </div>

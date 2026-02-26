@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { Button, Card } from '../components/UI';
 import { useAppStore } from '@/store/useAppStore';
 import { usePermission } from '@/utils/permissions';
@@ -7,21 +8,33 @@ import { qualityInspectionService } from '../services/qualityInspectionService';
 import { qualityNotificationService } from '../services/qualityNotificationService';
 import { qualityPrintService } from '../services/qualityPrintService';
 import { qualitySettingsService } from '../services/qualitySettingsService';
+import { SingleCAPAPrint } from '../components/QualityReportPrint';
 
 const STATUS_OPTIONS: QualityCAPA['status'][] = ['open', 'in_progress', 'done', 'closed'];
+const STATUS_LABELS: Record<QualityCAPA['status'], string> = {
+  open: 'مفتوح',
+  in_progress: 'قيد التنفيذ',
+  done: 'مكتمل',
+  closed: 'مغلق',
+};
 
 export const CAPA: React.FC = () => {
   const { can } = usePermission();
   const canManageCapa = can('quality.capa.manage');
   const canPrint = can('quality.print');
+  const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
   const _rawEmployees = useAppStore((s) => s._rawEmployees);
   const workOrders = useAppStore((s) => s.workOrders);
   const lines = useAppStore((s) => s._rawLines);
   const products = useAppStore((s) => s._rawProducts);
   const [rows, setRows] = useState<QualityCAPA[]>([]);
   const [reasons, setReasons] = useState<{ code: string; labelAr: string }[]>([]);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({ contentRef: printRef });
   const [form, setForm] = useState({
+    workOrderId: '',
+    defectId: '',
     reasonCode: '',
     title: '',
     actionPlan: '',
@@ -39,18 +52,62 @@ export const CAPA: React.FC = () => {
     () => form.reasonCode && form.title.trim() && form.actionPlan.trim() && form.ownerId,
     [form],
   );
+  const rowsWithContext = useMemo(
+    () =>
+      rows.map((row) => {
+        const linkedWorkOrder = row.workOrderId
+          ? workOrders.find((item) => item.id === row.workOrderId)
+          : null;
+        return {
+          ...row,
+          workOrderNumber: linkedWorkOrder?.workOrderNumber ?? '—',
+          lineName: linkedWorkOrder ? (lines.find((line) => line.id === linkedWorkOrder.lineId)?.name ?? linkedWorkOrder.lineId) : '—',
+          productName: linkedWorkOrder ? (products.find((product) => product.id === linkedWorkOrder.productId)?.name ?? linkedWorkOrder.productId) : '—',
+        };
+      }),
+    [rows, workOrders, lines, products],
+  );
+  const printRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        title: row.title,
+        reasonLabel: reasons.find((r) => r.code === row.reasonCode)?.labelAr ?? row.reasonCode,
+        ownerName: _rawEmployees.find((e) => e.id === row.ownerId)?.name ?? row.ownerId,
+        statusLabel: STATUS_LABELS[row.status],
+        dueDate: row.dueDate || undefined,
+      })),
+    [rows, reasons, _rawEmployees],
+  );
 
   const createCAPA = async () => {
     if (!canCreate || !canManageCapa) return;
-    await qualityInspectionService.createCAPA({
-      reasonCode: form.reasonCode,
-      title: form.title.trim(),
-      actionPlan: form.actionPlan.trim(),
-      ownerId: form.ownerId,
-      dueDate: form.dueDate || undefined,
-      status: 'open',
-    });
-    setForm({ reasonCode: '', title: '', actionPlan: '', ownerId: '', dueDate: '' });
+    try {
+      await qualityInspectionService.createCAPA({
+        workOrderId: form.workOrderId || undefined,
+        defectId: form.defectId || undefined,
+        reasonCode: form.reasonCode,
+        title: form.title.trim(),
+        actionPlan: form.actionPlan.trim(),
+        ownerId: form.ownerId,
+        dueDate: form.dueDate || undefined,
+        status: 'open',
+      });
+      setForm({
+        workOrderId: '',
+        defectId: '',
+        reasonCode: '',
+        title: '',
+        actionPlan: '',
+        ownerId: '',
+        dueDate: '',
+      });
+      setMessage({ type: 'success', text: 'تم إنشاء CAPA بنجاح.' });
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'تعذر إنشاء CAPA.',
+      });
+    }
   };
 
   return (
@@ -61,14 +118,32 @@ export const CAPA: React.FC = () => {
           <p className="text-sm text-slate-500">الإجراءات التصحيحية والوقائية</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => window.print()} disabled={!canPrint}>طباعة التقرير</Button>
+          <Button variant="outline" onClick={() => handlePrint()} disabled={!canPrint || rows.length === 0}>طباعة التقرير</Button>
           <Button
             variant="outline"
             onClick={async () => {
               if (!printRef.current) return;
-              await qualityPrintService.exportDocumentPdf(printRef.current, 'quality-capa', 'capa');
+              try {
+                await qualityPrintService.exportDocumentPdf(
+                  printRef.current,
+                  'quality-capa',
+                  'capa',
+                  undefined,
+                  {
+                    paperSize: printTemplate?.paperSize,
+                    orientation: printTemplate?.orientation,
+                    copies: printTemplate?.copies,
+                  },
+                );
+                setMessage({ type: 'success', text: 'تم تصدير تقرير CAPA PDF بنجاح.' });
+              } catch (error) {
+                setMessage({
+                  type: 'error',
+                  text: error instanceof Error ? error.message : 'تعذر تصدير تقرير CAPA.',
+                });
+              }
             }}
-            disabled={!canPrint}
+            disabled={!canPrint || rows.length === 0}
           >
             PDF
           </Button>
@@ -76,8 +151,34 @@ export const CAPA: React.FC = () => {
       </div>
 
       <Card title="إنشاء CAPA">
-        <div ref={printRef}>
+        {message && (
+          <div className={`mb-3 rounded-lg border px-3 py-2 text-sm font-semibold ${
+            message.type === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-300'
+              : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-900/20 dark:text-rose-300'
+          }`}>
+            {message.text}
+          </div>
+        )}
         <div className="grid md:grid-cols-2 gap-3">
+          <select
+            value={form.workOrderId}
+            onChange={(e) => setForm((s) => ({ ...s, workOrderId: e.target.value }))}
+            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+          >
+            <option value="">ربط بأمر شغل (اختياري)</option>
+            {workOrders.map((wo) => (
+              <option key={wo.id} value={wo.id}>#{wo.workOrderNumber}</option>
+            ))}
+          </select>
+
+          <input
+            value={form.defectId}
+            onChange={(e) => setForm((s) => ({ ...s, defectId: e.target.value }))}
+            placeholder="Defect ID (اختياري)"
+            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+          />
+
           <select
             value={form.reasonCode}
             onChange={(e) => setForm((s) => ({ ...s, reasonCode: e.target.value }))}
@@ -124,7 +225,6 @@ export const CAPA: React.FC = () => {
         <div className="mt-4 flex justify-end">
           <Button variant="primary" onClick={createCAPA} disabled={!canCreate || !canManageCapa}>إنشاء CAPA</Button>
         </div>
-        </div>
       </Card>
 
       <Card title="متابعة CAPA">
@@ -134,15 +234,19 @@ export const CAPA: React.FC = () => {
               <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500">
                 <th className="text-right py-2 px-2">Title</th>
                 <th className="text-right py-2 px-2">Reason</th>
+                <th className="text-right py-2 px-2">Work Order</th>
+                <th className="text-right py-2 px-2">Line / Product</th>
                 <th className="text-right py-2 px-2">Owner</th>
                 <th className="text-right py-2 px-2">Status</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {rowsWithContext.map((row) => (
                 <tr key={row.id} className="border-b border-slate-100 dark:border-slate-800">
                   <td className="py-2 px-2 font-bold">{row.title}</td>
                   <td className="py-2 px-2">{reasons.find((r) => r.code === row.reasonCode)?.labelAr ?? row.reasonCode}</td>
+                  <td className="py-2 px-2">{row.workOrderNumber}</td>
+                  <td className="py-2 px-2">{row.lineName} / {row.productName}</td>
                   <td className="py-2 px-2">{_rawEmployees.find((e) => e.id === row.ownerId)?.name ?? row.ownerId}</td>
                   <td className="py-2 px-2">
                     <select
@@ -150,23 +254,32 @@ export const CAPA: React.FC = () => {
                       onChange={async (e) => {
                         if (!row.id) return;
                         const nextStatus = e.target.value as QualityCAPA['status'];
-                        await qualityInspectionService.updateCAPA(row.id, { status: nextStatus });
-                        const linkedWorkOrder = row.workOrderId
-                          ? workOrders.find((item) => item.id === row.workOrderId)
-                          : null;
-                        if (!linkedWorkOrder) return;
-                        const summary = await qualityInspectionService.buildWorkOrderSummary(linkedWorkOrder.id!);
-                        await qualityNotificationService.notifyReportStatusChanged({
-                          workOrderId: linkedWorkOrder.id!,
-                          workOrderNumber: linkedWorkOrder.workOrderNumber,
-                          lineName: lines.find((line) => line.id === linkedWorkOrder.lineId)?.name ?? linkedWorkOrder.lineId,
-                          productName: products.find((product) => product.id === linkedWorkOrder.productId)?.name ?? linkedWorkOrder.productId,
-                          typeLabel: 'CAPA',
-                          statusLabel: nextStatus,
-                          summary,
-                          updatedAt: new Date().toLocaleString(),
-                          supervisorId: linkedWorkOrder.supervisorId,
-                        });
+                        try {
+                          await qualityInspectionService.updateCAPA(row.id, { status: nextStatus });
+                          const linkedWorkOrder = row.workOrderId
+                            ? workOrders.find((item) => item.id === row.workOrderId)
+                            : null;
+                          if (linkedWorkOrder) {
+                            const summary = await qualityInspectionService.buildWorkOrderSummary(linkedWorkOrder.id!);
+                            await qualityNotificationService.notifyReportStatusChanged({
+                              workOrderId: linkedWorkOrder.id!,
+                              workOrderNumber: linkedWorkOrder.workOrderNumber,
+                              lineName: lines.find((line) => line.id === linkedWorkOrder.lineId)?.name ?? linkedWorkOrder.lineId,
+                              productName: products.find((product) => product.id === linkedWorkOrder.productId)?.name ?? linkedWorkOrder.productId,
+                              typeLabel: 'CAPA',
+                              statusLabel: nextStatus,
+                              summary,
+                              updatedAt: new Date().toLocaleString(),
+                              supervisorId: linkedWorkOrder.supervisorId,
+                            });
+                          }
+                          setMessage({ type: 'success', text: 'تم تحديث حالة CAPA.' });
+                        } catch (error) {
+                          setMessage({
+                            type: 'error',
+                            text: error instanceof Error ? error.message : 'تعذر تحديث حالة CAPA.',
+                          });
+                        }
                       }}
                       disabled={!canManageCapa}
                       className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
@@ -182,6 +295,10 @@ export const CAPA: React.FC = () => {
           </table>
         </div>
       </Card>
+
+      <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+        <SingleCAPAPrint ref={printRef} rows={printRows} printSettings={printTemplate} />
+      </div>
     </div>
   );
 };

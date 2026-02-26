@@ -66,6 +66,9 @@ export interface QuickActionDefinition {
 export const AVAILABLE_QUICK_ACTIONS: QuickActionDefinition[] = [
   { key: 'quick_action', label: 'إدخال سريع', icon: 'bolt', color: 'amber', actionType: 'navigate', target: '/quick-action', permission: 'quickAction.view' },
   { key: 'reports', label: 'التقارير', icon: 'bar_chart', color: 'primary', actionType: 'navigate', target: '/reports', permission: 'reports.view' },
+  { key: 'quality_final', label: 'الفحص النهائي', icon: 'task_alt', color: 'emerald', actionType: 'navigate', target: '/quality/final-inspection', permission: 'quality.finalInspection.view' },
+  { key: 'quality_ipqc', label: 'IPQC', icon: 'rule', color: 'violet', actionType: 'navigate', target: '/quality/ipqc', permission: 'quality.ipqc.view' },
+  { key: 'quality_reports', label: 'تقارير الجودة', icon: 'print', color: 'slate', actionType: 'navigate', target: '/quality/reports', permission: 'quality.reports.view' },
   { key: 'lines', label: 'خطوط الإنتاج', icon: 'precision_manufacturing', color: 'violet', actionType: 'navigate', target: '/lines', permission: 'lines.view' },
   { key: 'products', label: 'المنتجات', icon: 'inventory_2', color: 'emerald', actionType: 'navigate', target: '/products', permission: 'products.view' },
   { key: 'plans', label: 'خطط الإنتاج', icon: 'event_note', color: 'primary', actionType: 'navigate', target: '/production-plans', permission: 'plans.view' },
