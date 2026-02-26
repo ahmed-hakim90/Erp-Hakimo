@@ -63,6 +63,16 @@ interface SelectableTableProps<T> {
   loading?: boolean;
 }
 
+function extractSortableText(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractSortableText).join(' ').trim();
+  if (React.isValidElement(node)) {
+    return extractSortableText((node.props as { children?: React.ReactNode })?.children);
+  }
+  return '';
+}
+
 export function SelectableTable<T>({
   data,
   columns,
@@ -100,11 +110,11 @@ export function SelectableTable<T>({
         id: column.id ?? `${tableId ?? 'table'}-${index}`,
         header: column.header,
         accessor: (row: T) => {
-          const value = column.sortKey ? column.sortKey(row) : '';
+          const value = column.sortKey ? column.sortKey(row) : extractSortableText(column.render(row));
           return value;
         },
         render: column.render,
-        sortable: Boolean(column.sortKey),
+        sortable: true,
         hideable: column.hideable,
         visible: !column.defaultHidden,
         headerClassName: column.headerClassName,

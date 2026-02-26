@@ -9,6 +9,10 @@ function asComparableValue(value: unknown): string | number {
   return String(value ?? '');
 }
 
+function isColumnSortable(sortable?: boolean): boolean {
+  return sortable !== false;
+}
+
 export function DataTable<T>({
   tableId,
   userId,
@@ -103,7 +107,7 @@ export function DataTable<T>({
   const sortedRows = useMemo(() => {
     if (!sortColumnId) return filteredRows;
     const column = visibleColumns.find((candidate) => candidate.id === sortColumnId);
-    if (!column?.sortable) return filteredRows;
+    if (!column || !isColumnSortable(column.sortable)) return filteredRows;
     return [...filteredRows].sort((left, right) => {
       const leftValue = asComparableValue(column.accessor(left));
       const rightValue = asComparableValue(column.accessor(right));
@@ -338,16 +342,18 @@ export function DataTable<T>({
                     className={[
                       'px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-slate-500',
                       TABLE_WIDTH_CLASS[column.width],
-                      column.sortable ? 'cursor-pointer select-none hover:text-primary' : '',
+                      isColumnSortable(column.sortable) ? 'cursor-pointer select-none hover:text-primary' : '',
                       column.headerClassName ?? '',
                     ].join(' ')}
-                    onClick={column.sortable ? () => onSort(column.id) : undefined}
+                    onClick={isColumnSortable(column.sortable) ? () => onSort(column.id) : undefined}
                   >
                     <span className="inline-flex items-center gap-1">
                       {column.header}
-                      {column.sortable && sortColumnId === column.id && (
-                        <span className="material-icons-round text-sm text-primary">
-                          {sortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward'}
+                      {isColumnSortable(column.sortable) && (
+                        <span className={`material-icons-round text-sm ${sortColumnId === column.id ? 'text-primary' : 'text-slate-300 dark:text-slate-600'}`}>
+                          {sortColumnId === column.id
+                            ? (sortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward')
+                            : 'unfold_more'}
                         </span>
                       )}
                     </span>
