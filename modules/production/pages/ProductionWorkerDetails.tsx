@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useReactToPrint } from 'react-to-print';
 import { Card, KPIBox, Badge, Button, LoadingSkeleton } from '../components/UI';
 import { useAppStore } from '../../../store/useAppStore';
+import { useManagedPrint } from '@/utils/printManager';
 import { usePermission } from '../../../utils/permissions';
 import { reportService } from '../../../services/reportService';
 import { employeeService } from '../../hr/employeeService';
@@ -81,7 +81,7 @@ export const ProductionWorkerDetails: React.FC = () => {
   const [chartTab, setChartTab] = useState<ChartTab>('production');
 
   const printRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({ contentRef: printRef });
+  const handlePrint = useManagedPrint({ contentRef: printRef, printSettings: printTemplate });
 
   useEffect(() => {
     if (!id) { setLoading(false); return; }

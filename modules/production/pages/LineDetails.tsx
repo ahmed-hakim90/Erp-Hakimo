@@ -19,12 +19,14 @@ import {
   calculatePlanProgress,
   groupReportsByDate,
   countUniqueDays,
+  sumMaxWorkHoursByDate,
   getTodayDateString,
 } from '../../../utils/calculations';
 import {
   formatCost,
   getCurrentMonth,
   calculateDailyIndirectCost,
+  buildLineAllocatedCostSummary,
 } from '../../../utils/costCalculations';
 import { getAlertSettings } from '../../../utils/dashboardConfig';
 import type { ProductionReport } from '../../../types';
@@ -63,12 +65,20 @@ const HEALTH_STATUS_CONFIG = {
 // ── Chart tab types ──────────────────────────────────────────────────────────
 
 type ChartTab = 'production' | 'cost' | 'efficiency' | 'hours';
+type Period = 'daily' | 'yesterday' | 'weekly' | 'monthly';
 
 const CHART_TABS: { key: ChartTab; label: string; icon: string }[] = [
   { key: 'production', label: 'الإنتاج', icon: 'inventory' },
   { key: 'cost', label: 'التكلفة', icon: 'payments' },
   { key: 'efficiency', label: 'الكفاءة', icon: 'speed' },
   { key: 'hours', label: 'الساعات', icon: 'schedule' },
+];
+
+const PERIOD_OPTIONS: { value: Period; label: string }[] = [
+  { value: 'daily', label: 'اليوم' },
+  { value: 'yesterday', label: 'أمس' },
+  { value: 'weekly', label: 'أسبوعي' },
+  { value: 'monthly', label: 'شهري' },
 ];
 
 // ── Main Component ───────────────────────────────────────────────────────────
@@ -82,6 +92,7 @@ export const LineDetails: React.FC = () => {
   const productionLines = useAppStore((s) => s.productionLines);
   const _rawLines = useAppStore((s) => s._rawLines);
   const _rawProducts = useAppStore((s) => s._rawProducts);
+  const _rawEmployees = useAppStore((s) => s._rawEmployees);
   const lineProductConfigs = useAppStore((s) => s.lineProductConfigs);
   const employees = useAppStore((s) => s.employees);
   const productionPlans = useAppStore((s) => s.productionPlans);
@@ -96,8 +107,10 @@ export const LineDetails: React.FC = () => {
   const [lineWorkOrders, setLineWorkOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [chartTab, setChartTab] = useState<ChartTab>('production');
+  const [period, setPeriod] = useState<Period>('daily');
   const [viewWorkersData, setViewWorkersData] = useState<{ date: string; workers: LineWorkerAssignment[] } | null>(null);
   const [viewWorkersLoading, setViewWorkersLoading] = useState(false);
+  const todayStr = getTodayDateString();
 
   const handleViewWorkers = async (date: string) => {
     if (!id) return;
@@ -117,6 +130,37 @@ export const LineDetails: React.FC = () => {
   const rawLine = _rawLines.find((l) => l.id === id);
   const hourlyRate = laborSettings?.hourlyRate ?? 0;
   const alertCfg = useMemo(() => getAlertSettings(systemSettings), [systemSettings]);
+
+  const periodReports = useMemo(() => {
+    if (reports.length === 0) return [];
+
+    if (period === 'daily') {
+      return reports.filter((r) => r.date === todayStr);
+    }
+
+    if (period === 'yesterday') {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const y = yesterday.getFullYear();
+      const m = String(yesterday.getMonth() + 1).padStart(2, '0');
+      const d = String(yesterday.getDate()).padStart(2, '0');
+      const yesterdayStr = `${y}-${m}-${d}`;
+      return reports.filter((r) => r.date === yesterdayStr);
+    }
+
+    if (period === 'weekly') {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      const y = weekAgo.getFullYear();
+      const m = String(weekAgo.getMonth() + 1).padStart(2, '0');
+      const d = String(weekAgo.getDate()).padStart(2, '0');
+      const start = `${y}-${m}-${d}`;
+      return reports.filter((r) => r.date >= start && r.date <= todayStr);
+    }
+
+    const monthPrefix = todayStr.slice(0, 7);
+    return reports.filter((r) => r.date.startsWith(monthPrefix));
+  }, [reports, period, todayStr]);
 
   useEffect(() => {
     if (!id) return;
@@ -161,23 +205,23 @@ export const LineDetails: React.FC = () => {
   // ── Core metrics ──────────────────────────────────────────────────────────
 
   const totalProduced = useMemo(
-    () => reports.reduce((sum, r) => sum + (r.quantityProduced || 0), 0),
-    [reports]
+    () => periodReports.reduce((sum, r) => sum + (r.quantityProduced || 0), 0),
+    [periodReports]
   );
 
   const totalWaste = useMemo(
-    () => reports.reduce((sum, r) => sum + (r.quantityWaste || 0), 0),
-    [reports]
+    () => periodReports.reduce((sum, r) => sum + (r.quantityWaste || 0), 0),
+    [periodReports]
   );
 
   const totalHours = useMemo(
-    () => reports.reduce((sum, r) => sum + (r.workHours || 0), 0),
-    [reports]
+    () => sumMaxWorkHoursByDate(periodReports),
+    [periodReports]
   );
 
   const avgAssemblyTime = useMemo(
-    () => calculateAvgAssemblyTime(reports),
-    [reports]
+    () => calculateAvgAssemblyTime(periodReports),
+    [periodReports]
   );
 
   const wasteRatio = useMemo(
@@ -200,7 +244,7 @@ export const LineDetails: React.FC = () => {
     [standardTime, avgAssemblyTime]
   );
 
-  const uniqueDays = useMemo(() => countUniqueDays(reports), [reports]);
+  const uniqueDays = useMemo(() => countUniqueDays(periodReports), [periodReports]);
 
   const utilization = useMemo(() => {
     if (!rawLine || uniqueDays === 0) return 0;
@@ -213,18 +257,95 @@ export const LineDetails: React.FC = () => {
     [activePlan, planActualProduced]
   );
 
+  const lineAllocatedCosts = useMemo(() => {
+    if (!id) return null;
+    return buildLineAllocatedCostSummary(
+      id,
+      getCurrentMonth(),
+      costCenters,
+      costCenterValues,
+      costAllocations,
+    );
+  }, [id, costCenters, costCenterValues, costAllocations]);
+
+  const employeeHourlyRates = useMemo(() => {
+    const rates = new Map<string, number>();
+    _rawEmployees.forEach((employee) => {
+      if (!employee.id) return;
+      rates.set(employee.id, Math.max(0, employee.hourlyRate || 0));
+    });
+    return rates;
+  }, [_rawEmployees]);
+
+  const dailySupervisorCostRows = useMemo(() => {
+    const byDate = new Map<string, {
+      totalProduced: number;
+      supervisors: Map<string, { name: string; maxHours: number; rate: number }>;
+    }>();
+
+    periodReports.forEach((report) => {
+      const date = report.date;
+      const hours = report.workHours || 0;
+      const produced = report.quantityProduced || 0;
+      const specificRate = report.employeeId ? (employeeHourlyRates.get(report.employeeId) || 0) : 0;
+      // If supervisor rate is missing, fallback to global labor rate.
+      const rate = specificRate > 0 ? specificRate : hourlyRate;
+      const supervisorName = employees.find((e) => e.id === report.employeeId)?.name || '—';
+      const supervisorKey = report.employeeId || `unknown:${supervisorName}`;
+
+      const prev = byDate.get(date) || {
+        totalProduced: 0,
+        supervisors: new Map<string, { name: string; maxHours: number; rate: number }>(),
+      };
+      prev.totalProduced += produced;
+
+      const supervisorPrev = prev.supervisors.get(supervisorKey) || {
+        name: supervisorName,
+        maxHours: 0,
+        rate,
+      };
+      supervisorPrev.maxHours = Math.max(supervisorPrev.maxHours, hours);
+      supervisorPrev.rate = rate;
+      if (supervisorName && supervisorName !== '—') supervisorPrev.name = supervisorName;
+      prev.supervisors.set(supervisorKey, supervisorPrev);
+
+      byDate.set(date, prev);
+    });
+
+    return Array.from(byDate.entries())
+      .map(([date, data]) => {
+        const supervisors = Array.from(data.supervisors.values());
+        const totalHours = supervisors.reduce((sum, sup) => sum + sup.maxHours, 0);
+        const totalCost = supervisors.reduce((sum, sup) => sum + (sup.maxHours * sup.rate), 0);
+        const supervisorNames = supervisors
+          .map((sup) => sup.name)
+          .filter((name) => name && name !== '—');
+
+        return {
+          date,
+          supervisorsText: supervisorNames.length > 0 ? Array.from(new Set(supervisorNames)).join('، ') : '—',
+          totalHours: Number(totalHours.toFixed(2)),
+          totalCost,
+          produced: data.totalProduced,
+          supervisorCostPerUnit: data.totalProduced > 0 ? totalCost / data.totalProduced : 0,
+        };
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [periodReports, employeeHourlyRates, hourlyRate, employees]);
+
   // ── Cost per unit ──────────────────────────────────────────────────────────
 
   const costPerUnit = useMemo(() => {
     if (totalProduced === 0 || !id) return 0;
 
-    const totalLaborCost = reports.reduce(
+    const totalLaborCost = periodReports.reduce(
       (sum, r) => sum + (r.workersCount || 0) * (r.workHours || 0) * hourlyRate, 0
     );
 
     const monthCache = new Map<string, number>();
-    const dates = new Set<string>(reports.filter((r) => r.quantityProduced > 0).map((r) => r.date));
+    const dates = new Set<string>(periodReports.filter((r) => r.quantityProduced > 0).map((r) => r.date));
     let totalIndirect = 0;
+    let totalSupervisorIndirect = 0;
     dates.forEach((date: string) => {
       const month = date.slice(0, 7);
       if (!monthCache.has(month)) {
@@ -233,8 +354,19 @@ export const LineDetails: React.FC = () => {
       totalIndirect += monthCache.get(month) || 0;
     });
 
-    return (totalLaborCost + totalIndirect) / totalProduced;
-  }, [reports, hourlyRate, id, costCenters, costCenterValues, costAllocations, totalProduced]);
+    periodReports.forEach((report) => {
+      const savedCost = report.supervisorIndirectCost ?? 0;
+      if (savedCost > 0) {
+        totalSupervisorIndirect += savedCost;
+        return;
+      }
+      const specificRate = report.employeeId ? (employeeHourlyRates.get(report.employeeId) || 0) : 0;
+      const effectiveRate = specificRate > 0 ? specificRate : hourlyRate;
+      totalSupervisorIndirect += (report.workHours || 0) * effectiveRate;
+    });
+
+    return (totalLaborCost + totalIndirect + totalSupervisorIndirect) / totalProduced;
+  }, [periodReports, hourlyRate, id, costCenters, costCenterValues, costAllocations, totalProduced, employeeHourlyRates]);
 
   // ── Capacity metrics ───────────────────────────────────────────────────────
 
@@ -243,10 +375,9 @@ export const LineDetails: React.FC = () => {
     [rawLine, avgAssemblyTime]
   );
 
-  const todayStr = getTodayDateString();
   const todayProduced = useMemo(
-    () => reports.filter((r) => r.date === todayStr).reduce((sum, r) => sum + (r.quantityProduced || 0), 0),
-    [reports, todayStr]
+    () => periodReports.filter((r) => r.date === todayStr).reduce((sum, r) => sum + (r.quantityProduced || 0), 0),
+    [periodReports, todayStr]
   );
 
   const currentLoadPercent = dailyCapacity > 0 ? Math.round((todayProduced / dailyCapacity) * 100) : 0;
@@ -311,11 +442,11 @@ export const LineDetails: React.FC = () => {
   const enrichedChartData = useMemo(() => {
     const byDate = new Map<string, { produced: number; waste: number; hours: number; workerHours: number }>();
 
-    reports.forEach((r) => {
+    periodReports.forEach((r) => {
       const prev = byDate.get(r.date) || { produced: 0, waste: 0, hours: 0, workerHours: 0 };
       prev.produced += r.quantityProduced || 0;
       prev.waste += r.quantityWaste || 0;
-      prev.hours += r.workHours || 0;
+      prev.hours = Math.max(prev.hours, r.workHours || 0);
       prev.workerHours += (r.workersCount || 0) * (r.workHours || 0);
       byDate.set(r.date, prev);
     });
@@ -324,13 +455,22 @@ export const LineDetails: React.FC = () => {
 
     return Array.from(byDate.entries())
       .map(([date, d]) => {
+        const dayReports = periodReports.filter((report) => report.date === date);
         const month = date.slice(0, 7);
         if (!monthIndirectCache.has(month) && id) {
           monthIndirectCache.set(month, calculateDailyIndirectCost(id, month, costCenters, costCenterValues, costAllocations));
         }
         const indirectCost = monthIndirectCache.get(month) || 0;
         const laborCost = d.workerHours * hourlyRate;
-        const totalCost = laborCost + indirectCost;
+        const supervisorCost = dayReports
+          .reduce((sum, report) => {
+            const savedCost = report.supervisorIndirectCost ?? 0;
+            if (savedCost > 0) return sum + savedCost;
+            const specificRate = report.employeeId ? (employeeHourlyRates.get(report.employeeId) || 0) : 0;
+            const effectiveRate = specificRate > 0 ? specificRate : hourlyRate;
+            return sum + (report.workHours || 0) * effectiveRate;
+          }, 0);
+        const totalCost = laborCost + indirectCost + supervisorCost;
         const actualAssemblyTime = d.produced > 0 ? (d.workerHours * 60) / d.produced : 0;
         const dayEfficiency = standardTime > 0 && actualAssemblyTime > 0
           ? Number(((standardTime / actualAssemblyTime) * 100).toFixed(1))
@@ -347,7 +487,7 @@ export const LineDetails: React.FC = () => {
         };
       })
       .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
-  }, [reports, id, hourlyRate, costCenters, costCenterValues, costAllocations, standardTime]);
+  }, [periodReports, id, hourlyRate, costCenters, costCenterValues, costAllocations, standardTime, employeeHourlyRates]);
 
   // ── Visible chart tabs ─────────────────────────────────────────────────────
 
@@ -530,6 +670,24 @@ export const LineDetails: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex items-center justify-end">
+        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+          {PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setPeriod(opt.value)}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                period === opt.value
+                  ? 'bg-white dark:bg-slate-700 text-primary shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── Expanded KPI Cards ──────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
         <KPIBox
@@ -625,6 +783,117 @@ export const LineDetails: React.FC = () => {
           />
         )}
       </div>
+
+      {canViewCosts && lineAllocatedCosts && (
+        <Card>
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <div className="flex items-center gap-2">
+              <span className="material-icons-round text-violet-500">account_balance</span>
+              <h3 className="text-lg font-bold">التكاليف المتوزعة على الخط</h3>
+            </div>
+            <span className="text-xs font-bold text-violet-500">{lineAllocatedCosts.month}</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div className="rounded-xl border border-violet-100 dark:border-violet-900/50 bg-violet-50/60 dark:bg-violet-900/10 p-3">
+              <p className="text-xs text-slate-500">إجمالي شهري موزع</p>
+              <p className="text-xl font-black text-violet-700 dark:text-violet-300">
+                {lineAllocatedCosts.totalMonthlyAllocated > 0 ? formatCost(lineAllocatedCosts.totalMonthlyAllocated) : '—'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-violet-100 dark:border-violet-900/50 bg-violet-50/60 dark:bg-violet-900/10 p-3">
+              <p className="text-xs text-slate-500">موزع يومي</p>
+              <p className="text-xl font-black text-violet-700 dark:text-violet-300">
+                {lineAllocatedCosts.totalDailyAllocated > 0 ? formatCost(lineAllocatedCosts.totalDailyAllocated) : '—'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-violet-100 dark:border-violet-900/50 bg-violet-50/60 dark:bg-violet-900/10 p-3">
+              <p className="text-xs text-slate-500">عدد مراكز التكلفة</p>
+              <p className="text-xl font-black text-violet-700 dark:text-violet-300">
+                {lineAllocatedCosts.centers.length}
+              </p>
+            </div>
+          </div>
+
+          {lineAllocatedCosts.centers.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-right text-sm">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500">مركز التكلفة</th>
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500 text-center">نسبة التوزيع</th>
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500 text-center">المبلغ الشهري</th>
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500 text-center">المبلغ اليومي</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {lineAllocatedCosts.centers.map((center) => (
+                    <tr key={center.costCenterId}>
+                      <td className="px-4 py-2.5 font-bold text-slate-700 dark:text-slate-200">{center.costCenterName}</td>
+                      <td className="px-4 py-2.5 text-center font-bold text-violet-600">{formatNumber(center.percentage)}%</td>
+                      <td className="px-4 py-2.5 text-center font-bold">{formatCost(center.monthlyAllocated)}</td>
+                      <td className="px-4 py-2.5 text-center font-bold text-slate-600 dark:text-slate-300">{formatCost(center.dailyAllocated)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 px-4 py-5 text-center text-sm font-medium text-slate-500">
+              لا توجد توزيعات تكلفة غير مباشرة على هذا الخط خلال الشهر الحالي.
+            </div>
+          )}
+        </Card>
+      )}
+
+      {canViewCosts && (
+        <Card>
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <div className="flex items-center gap-2">
+              <span className="material-icons-round text-emerald-500">manage_accounts</span>
+              <h3 className="text-lg font-bold">تكلفة المشرف اليومية</h3>
+            </div>
+            <span className="text-xs text-slate-500 font-bold">
+              المعادلة: ساعات المشرف × أجر الساعة
+            </span>
+          </div>
+
+          {dailySupervisorCostRows.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-right text-sm">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500">التاريخ</th>
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500">المشرف</th>
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500 text-center">ساعات الإشراف</th>
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500 text-center">إنتاج اليوم</th>
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500 text-center">تكلفة المشرف</th>
+                    <th className="px-4 py-2.5 text-xs font-black text-slate-500 text-center">تكلفة مشرف/وحدة</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {dailySupervisorCostRows.map((row) => (
+                    <tr key={row.date}>
+                      <td className="px-4 py-2.5 font-bold text-slate-700 dark:text-slate-200">{row.date}</td>
+                      <td className="px-4 py-2.5 text-slate-600 dark:text-slate-300">{row.supervisorsText}</td>
+                      <td className="px-4 py-2.5 text-center font-bold">{formatNumber(row.totalHours)}</td>
+                      <td className="px-4 py-2.5 text-center font-bold">{formatNumber(row.produced)}</td>
+                      <td className="px-4 py-2.5 text-center font-black text-emerald-600">{formatCost(row.totalCost)}</td>
+                      <td className="px-4 py-2.5 text-center font-bold text-slate-700 dark:text-slate-200">
+                        {row.supervisorCostPerUnit > 0 ? formatCost(row.supervisorCostPerUnit) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 px-4 py-5 text-center text-sm font-medium text-slate-500">
+              لا توجد تقارير كافية لحساب تكلفة المشرف على هذا الخط.
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* ── Plan Health Block ──────────────────────────────────────────────── */}
       {activePlan && planHealth && healthCfg && (
@@ -928,14 +1197,14 @@ export const LineDetails: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {reports.length === 0 && (
+              {periodReports.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
                     <p className="font-bold">لا توجد تقارير لهذا الخط</p>
                   </td>
                 </tr>
               )}
-              {reports.slice(0, 20).map((r) => {
+              {periodReports.slice(0, 20).map((r) => {
                 const productName = _rawProducts.find((p) => p.id === r.productId)?.name ?? '—';
                 return (
                   <tr key={r.id}>
@@ -964,10 +1233,10 @@ export const LineDetails: React.FC = () => {
             </tbody>
           </table>
         </div>
-        {reports.length > 0 && (
+        {periodReports.length > 0 && (
           <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800">
             <span className="text-sm text-slate-500 font-bold">
-              إجمالي <span className="text-primary">{reports.length}</span> تقرير
+              إجمالي <span className="text-primary">{periodReports.length}</span> تقرير
             </span>
           </div>
         )}

@@ -188,6 +188,8 @@ export interface ProductionReport {
   quantityWaste: number;
   workersCount: number;
   workHours: number;
+  supervisorHourlyRateApplied?: number;
+  supervisorIndirectCost?: number;
   notes?: string;
   workOrderId?: string;
   createdAt?: any;
@@ -548,6 +550,23 @@ export interface WidgetConfig {
   visible: boolean;
 }
 
+export type CustomWidgetType = 'kpi' | 'text' | 'quick_link';
+
+export interface CustomWidgetConfig {
+  id: string;
+  dashboardKey: string;
+  type: CustomWidgetType;
+  label: string;
+  icon: string;
+  visible: boolean;
+  order: number;
+  permission?: string;
+  description?: string;
+  value?: string;
+  unit?: string;
+  target?: string;
+}
+
 export interface AlertSettings {
   wasteThreshold: number;
   costVarianceThreshold: number;
@@ -572,6 +591,11 @@ export interface PrintTemplateSettings {
   paperSize: PaperSize;
   orientation: PaperOrientation;
   copies: number;
+  marginTopMm: number;
+  marginRightMm: number;
+  marginBottomMm: number;
+  marginLeftMm: number;
+  printBackground: boolean;
   decimalPlaces: number;
   showWaste: boolean;
   showEmployee: boolean;
@@ -632,6 +656,7 @@ export interface AlertToggleSettings {
 
 export type QuickActionColor = 'primary' | 'emerald' | 'amber' | 'rose' | 'violet' | 'slate';
 export type QuickActionType = 'navigate' | 'export_excel';
+export type ExportImportButtonVariant = 'primary' | 'secondary' | 'outline';
 
 export interface QuickActionItem {
   id: string;
@@ -644,8 +669,20 @@ export interface QuickActionItem {
   order: number;
 }
 
+export interface ExportImportPageControl {
+  exportEnabled: boolean;
+  importEnabled: boolean;
+  exportVariant: ExportImportButtonVariant;
+  importVariant: ExportImportButtonVariant;
+}
+
+export interface ExportImportSettings {
+  pages: Record<string, ExportImportPageControl>;
+}
+
 export interface SystemSettings {
   dashboardWidgets: Record<string, WidgetConfig[]>;
+  customDashboardWidgets?: CustomWidgetConfig[];
   alertSettings: AlertSettings;
   kpiThresholds: Record<string, KPIThreshold>;
   printTemplate: PrintTemplateSettings;
@@ -655,6 +692,7 @@ export interface SystemSettings {
   dashboardDisplay?: DashboardDisplaySettings;
   alertToggles?: AlertToggleSettings;
   quickActions?: QuickActionItem[];
+  exportImport?: ExportImportSettings;
 }
 
 // ─── Dynamic Roles & Permissions ─────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/useAppStore';
 import { usePermission } from '../../../utils/permissions';
 import { Card, KPIBox, Badge, LoadingSkeleton } from '../components/UI';
+import { CustomDashboardWidgets } from '../../../components/CustomDashboardWidgets';
 import { reportService } from '../../../services/reportService';
 import { adminService, type SystemUsers } from '../../../services/adminService';
 import { formatNumber, calculateWasteRatio } from '../../../utils/calculations';
@@ -964,6 +965,8 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </Card>
       )}
+
+      <CustomDashboardWidgets dashboardKey="adminDashboard" systemSettings={systemSettings} />
 
 
       {/* ── Operational KPIs ────────────────────────────────────────────────── */}

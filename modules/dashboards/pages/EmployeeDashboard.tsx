@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useReactToPrint } from 'react-to-print';
 import { Card, Badge, LoadingSkeleton } from '../components/UI';
 import { WorkOrderPrint } from '../../production/components/ProductionReportPrint';
 import type { WorkOrderPrintData } from '../../production/components/ProductionReportPrint';
 import { useAppStore, useShallowStore } from '../../../store/useAppStore';
+import { useManagedPrint } from '@/utils/printManager';
 import {
   formatNumber,
   formatCurrency,
@@ -120,7 +120,7 @@ export const EmployeeDashboard: React.FC = () => {
 
   const [woPrintData, setWoPrintData] = useState<WorkOrderPrintData | null>(null);
   const woPrintRef = useRef<HTMLDivElement>(null);
-  const handleWoPrint = useReactToPrint({ contentRef: woPrintRef });
+  const handleWoPrint = useManagedPrint({ contentRef: woPrintRef, printSettings: printTemplate });
 
   const STATUS_LABELS: Record<string, string> = { pending: 'قيد الانتظار', in_progress: 'قيد التنفيذ', completed: 'مكتمل', cancelled: 'ملغي' };
 

@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { useReactToPrint } from 'react-to-print';
 import { useAppStore } from '../../../store/useAppStore';
+import { useManagedPrint } from '@/utils/printManager';
 import { Card, Button, Badge, SearchableSelect } from '../components/UI';
 import { formatNumber, getTodayDateString } from '../../../utils/calculations';
 import { buildReportsCosts, buildSupervisorHourlyRatesMap, estimateReportCost, formatCost } from '../../../utils/costCalculations';
@@ -24,6 +24,7 @@ import {
 import { SelectableTable } from '../components/SelectableTable';
 import type { TableColumn, TableBulkAction } from '../components/SelectableTable';
 import { useJobsStore } from '../../../components/background-jobs/useJobsStore';
+import { getExportImportPageControl } from '../../../utils/exportImportControls';
 
 const emptyForm = {
   employeeId: '',
@@ -74,12 +75,19 @@ export const Reports: React.FC = () => {
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
   const printTemplate = useAppStore((s) => s.systemSettings.printTemplate);
+  const exportImportSettings = useAppStore((s) => s.systemSettings.exportImport);
   const productionPlans = useAppStore((s) => s.productionPlans);
   const workOrders = useAppStore((s) => s.workOrders);
   const planSettings = useAppStore((s) => s.systemSettings.planSettings);
 
   const { can } = usePermission();
   const canViewCosts = can('reports.viewCost');
+  const pageControl = useMemo(
+    () => getExportImportPageControl(exportImportSettings, 'reports'),
+    [exportImportSettings]
+  );
+  const canExportFromPage = can('export') && pageControl.exportEnabled;
+  const canImportFromPage = can('import') && pageControl.importEnabled;
 
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -311,8 +319,8 @@ export const Reports: React.FC = () => {
 
   // ── Print handlers ─────────────────────────────────────────────────────────
 
-  const handleBulkPrint = useReactToPrint({ contentRef: bulkPrintRef });
-  const handleSinglePrint = useReactToPrint({ contentRef: singlePrintRef });
+  const handleBulkPrint = useManagedPrint({ contentRef: bulkPrintRef, printSettings: printTemplate });
+  const handleSinglePrint = useManagedPrint({ contentRef: singlePrintRef, printSettings: printTemplate });
 
   const buildReportRow = useCallback(
     (report: ProductionReport | typeof emptyForm): ReportPrintRow => {
@@ -1012,11 +1020,21 @@ export const Reports: React.FC = () => {
     setBulkDeleteItems(null);
   }, [bulkDeleteItems, deleteReport]);
 
-  const reportBulkActions = useMemo<TableBulkAction<ProductionReport>[]>(() => [
-    { label: 'طباعة المحدد', icon: 'print', action: handleBulkPrintSelected, permission: 'print' },
-    { label: 'تصدير المحدد', icon: 'download', action: (items) => exportReportsByDateRange(items, startDate, endDate, lookups, canViewCosts ? reportCosts : undefined), permission: 'export' },
-    { label: 'حذف المحدد', icon: 'delete', action: (items) => setBulkDeleteItems(items), permission: 'reports.delete', variant: 'danger' },
-  ], [handleBulkPrintSelected, startDate, endDate, lookups, canViewCosts, reportCosts]);
+  const reportBulkActions = useMemo<TableBulkAction<ProductionReport>[]>(() => {
+    const actions: TableBulkAction<ProductionReport>[] = [
+      { label: 'طباعة المحدد', icon: 'print', action: handleBulkPrintSelected, permission: 'print' },
+      { label: 'حذف المحدد', icon: 'delete', action: (items) => setBulkDeleteItems(items), permission: 'reports.delete', variant: 'danger' },
+    ];
+    if (canExportFromPage) {
+      actions.splice(1, 0, {
+        label: 'تصدير المحدد',
+        icon: 'download',
+        action: (items) => exportReportsByDateRange(items, startDate, endDate, lookups, canViewCosts ? reportCosts : undefined),
+        permission: 'export',
+      });
+    }
+    return actions;
+  }, [handleBulkPrintSelected, canExportFromPage, startDate, endDate, lookups, canViewCosts, reportCosts]);
 
   const renderReportActions = (report: ProductionReport) => (
     <div className="flex items-center gap-1 justify-end sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
@@ -1079,10 +1097,10 @@ export const Reports: React.FC = () => {
               <span className="hidden sm:inline">تقارير الجودة</span>
             </Button>
           )}
-          {displayedReports.length > 0 && can("export") && (
+          {displayedReports.length > 0 && canExportFromPage && (
             <>
               <Button
-                variant="secondary"
+                variant={pageControl.exportVariant}
                 onClick={() =>
                   exportReportsByDateRange(displayedReports, startDate, endDate, lookups, canViewCosts ? reportCosts : undefined)
                 }
@@ -1092,7 +1110,7 @@ export const Reports: React.FC = () => {
               </Button>
               {workOrders.length > 0 && can("workOrders.view") && (
                 <Button
-                  variant="secondary"
+                  variant={pageControl.exportVariant}
                   onClick={() =>
                     exportWorkOrders(workOrders, { getProductName, getLineName, getSupervisorName: getEmployeeName })
                   }
@@ -1119,13 +1137,13 @@ export const Reports: React.FC = () => {
               </Button>
             </>
           )}
-          {can("import") && (
+          {canImportFromPage && (
             <>
-              <Button variant="outline" onClick={() => downloadReportsTemplate(templateLookups)}>
+              <Button variant={pageControl.importVariant} onClick={() => downloadReportsTemplate(templateLookups)}>
                 <span className="material-icons-round text-sm">file_download</span>
                 <span className="hidden sm:inline">تحميل قالب</span>
               </Button>
-              <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+              <Button variant={pageControl.importVariant} onClick={() => fileInputRef.current?.click()}>
                 <span className="material-icons-round text-sm">upload_file</span>
                 <span className="hidden sm:inline">رفع Excel</span>
               </Button>
@@ -1365,10 +1383,11 @@ export const Reports: React.FC = () => {
             </div>
             {canViewCosts && form.workersCount > 0 && form.workHours > 0 && form.quantityProduced > 0 && form.lineId && (
               (() => {
+                const selectedSupervisorRate = _rawEmployees.find((e) => e.id === form.employeeId)?.hourlyRate ?? 0;
                 const est = estimateReportCost(
                   form.workersCount, form.workHours, form.quantityProduced,
                   laborSettings?.hourlyRate ?? 0,
-                  (_rawEmployees.find((e) => e.id === form.employeeId)?.hourlyRate ?? 0),
+                  selectedSupervisorRate > 0 ? selectedSupervisorRate : (laborSettings?.hourlyRate ?? 0),
                   form.lineId,
                   costCenters, costCenterValues, costAllocations
                 );

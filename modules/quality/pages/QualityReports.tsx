@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useReactToPrint } from 'react-to-print';
 import { Button, Card, KPIBox } from '../components/UI';
 import { useAppStore } from '@/store/useAppStore';
 import { usePermission } from '@/utils/permissions';
+import { useManagedPrint } from '@/utils/printManager';
 import { qualityInspectionService } from '../services/qualityInspectionService';
 import { qualityPrintService } from '../services/qualityPrintService';
 import type { QualityDefect } from '@/types';
@@ -32,7 +32,7 @@ export const QualityReports: React.FC = () => {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const defectsPrintRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({ contentRef: printRef });
+  const handlePrint = useManagedPrint({ contentRef: printRef, printSettings: printTemplate });
 
   const selectedWorkOrder = useMemo(
     () => workOrders.find((wo) => wo.id === selectedWorkOrderId) ?? null,

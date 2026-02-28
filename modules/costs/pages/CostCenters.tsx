@@ -1,24 +1,36 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Badge, Button } from '../components/UI';
 import { useAppStore } from '../../../store/useAppStore';
 import { usePermission } from '../../../utils/permissions';
 import type { CostCenter } from '../../../types';
+import { getCurrentMonth, getDaysInMonth } from '../../../utils/costCalculations';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 export const CostCenters: React.FC = () => {
   const costCenters = useAppStore((s) => s.costCenters);
   const costCenterValues = useAppStore((s) => s.costCenterValues);
+  const costAllocations = useAppStore((s) => s.costAllocations);
+  const _rawLines = useAppStore((s) => s._rawLines);
   const createCostCenter = useAppStore((s) => s.createCostCenter);
   const updateCostCenter = useAppStore((s) => s.updateCostCenter);
   const deleteCostCenter = useAppStore((s) => s.deleteCostCenter);
   const navigate = useNavigate();
   const { can } = usePermission();
   const canManage = can('costs.manage');
+  const canExport = can('export');
 
   const [modal, setModal] = useState<CostCenter | 'new' | null>(null);
   const [form, setForm] = useState({ name: '', type: 'indirect' as 'indirect' | 'direct', isActive: true });
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
+
+  const lineNameMap = useMemo(
+    () => new Map(_rawLines.map((line) => [line.id || '', line.name || ''])),
+    [_rawLines]
+  );
 
   const openCreate = () => {
     setForm({ name: '', type: 'indirect', isActive: true });
@@ -52,6 +64,80 @@ export const CostCenters: React.FC = () => {
     return costCenterValues.find((v) => v.costCenterId === centerId && v.month === month)?.amount ?? 0;
   };
 
+  const handleExportCenters = () => {
+    const daysInMonth = getDaysInMonth(selectedMonth);
+
+    const summaryRows = costCenters.map((center) => {
+      const monthlyAmount = costCenterValues.find(
+        (value) => value.costCenterId === center.id && value.month === selectedMonth
+      )?.amount ?? 0;
+      const allocationDoc = costAllocations.find(
+        (allocation) => allocation.costCenterId === center.id && allocation.month === selectedMonth
+      );
+      const totalAllocationPct = (allocationDoc?.allocations || []).reduce(
+        (sum, item) => sum + (item.percentage || 0),
+        0
+      );
+      const distributedMonthly = monthlyAmount * (totalAllocationPct / 100);
+      const dailyAmount = daysInMonth > 0 ? monthlyAmount / daysInMonth : 0;
+
+      return {
+        'الشهر': selectedMonth,
+        'معرف المركز': center.id || '',
+        'اسم مركز التكلفة': center.name,
+        'النوع': center.type === 'indirect' ? 'غير مباشر' : 'مباشر',
+        'الحالة': center.isActive ? 'مفعل' : 'معطل',
+        'القيمة الشهرية': monthlyAmount,
+        'القيمة اليومية': dailyAmount,
+        'إجمالي نسبة التوزيع %': totalAllocationPct,
+        'المتبقي %': 100 - totalAllocationPct,
+        'إجمالي المبلغ الموزع': distributedMonthly,
+      };
+    });
+
+    const detailsRows: Array<Record<string, string | number>> = [];
+    costCenters.forEach((center) => {
+      const monthlyAmount = costCenterValues.find(
+        (value) => value.costCenterId === center.id && value.month === selectedMonth
+      )?.amount ?? 0;
+      const allocationDoc = costAllocations.find(
+        (allocation) => allocation.costCenterId === center.id && allocation.month === selectedMonth
+      );
+      const allocations = allocationDoc?.allocations || [];
+      if (allocations.length === 0) {
+        detailsRows.push({
+          'الشهر': selectedMonth,
+          'اسم مركز التكلفة': center.name,
+          'النوع': center.type === 'indirect' ? 'غير مباشر' : 'مباشر',
+          'الخط': center.type === 'indirect' ? 'بدون توزيع' : 'مركز مباشر (غير موزع على خطوط)',
+          'النسبة %': 0,
+          'المبلغ الشهري الموزع': 0,
+          'المبلغ اليومي': 0,
+        });
+        return;
+      }
+
+      allocations.forEach((allocation) => {
+        const allocatedMonthly = monthlyAmount * ((allocation.percentage || 0) / 100);
+        detailsRows.push({
+          'الشهر': selectedMonth,
+          'اسم مركز التكلفة': center.name,
+          'النوع': center.type === 'indirect' ? 'غير مباشر' : 'مباشر',
+          'الخط': lineNameMap.get(allocation.lineId) || allocation.lineId,
+          'النسبة %': allocation.percentage || 0,
+          'المبلغ الشهري الموزع': allocatedMonthly,
+          'المبلغ اليومي': daysInMonth > 0 ? allocatedMonthly / daysInMonth : 0,
+        });
+      });
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'ملخص المراكز');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(detailsRows), 'تفاصيل التوزيع');
+    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
+    saveAs(new Blob([buffer]), `توزيع-مراكز-التكلفة-${selectedMonth}.xlsx`);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -59,12 +145,26 @@ export const CostCenters: React.FC = () => {
           <h2 className="text-xl sm:text-2xl font-black text-slate-800 dark:text-white">مراكز التكلفة</h2>
           <p className="text-sm text-slate-500 font-medium">إدارة مراكز التكلفة المباشرة وغير المباشرة.</p>
         </div>
-        {canManage && (
-          <Button variant="primary" onClick={openCreate}>
-            <span className="material-icons-round text-sm">add</span>
-            إضافة مركز تكلفة
-          </Button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="h-10 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+          />
+          {canExport && costCenters.length > 0 && (
+            <Button variant="outline" onClick={handleExportCenters}>
+              <span className="material-icons-round text-sm">file_download</span>
+              تصدير التوزيع
+            </Button>
+          )}
+          {canManage && (
+            <Button variant="primary" onClick={openCreate}>
+              <span className="material-icons-round text-sm">add</span>
+              إضافة مركز تكلفة
+            </Button>
+          )}
+        </div>
       </div>
 
       {costCenters.length === 0 ? (

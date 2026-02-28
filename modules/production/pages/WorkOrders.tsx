@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
-import { useReactToPrint } from 'react-to-print';
 import { Card, Badge, Button, KPIBox, SearchableSelect } from '../components/UI';
 import { WorkOrderPrint } from '../components/ProductionReportPrint';
 import type { WorkOrderPrintData } from '../components/ProductionReportPrint';
 import { useAppStore, useShallowStore } from '../../../store/useAppStore';
+import { useManagedPrint } from '@/utils/printManager';
 import { formatCurrency, formatNumber, getTodayDateString } from '../../../utils/calculations';
 import { usePermission } from '../../../utils/permissions';
 import { workOrderService } from '../../../services/workOrderService';
@@ -98,7 +98,7 @@ export const WorkOrders: React.FC = () => {
 
   const [printData, setPrintData] = useState<WorkOrderPrintData | null>(null);
   const woPrintRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({ contentRef: woPrintRef });
+  const handlePrint = useManagedPrint({ contentRef: woPrintRef, printSettings: printTemplate });
 
   const [searchParams, setSearchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight');

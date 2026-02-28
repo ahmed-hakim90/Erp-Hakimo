@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/useAppStore';
 import { Card, Button, Badge } from '../components/UI';
 import { formatNumber, getTodayDateString, calculatePlanProgress, calculateSmartStatus, calculateTimeRatio, calculateProgressRatio } from '../../../utils/calculations';
-import { formatCost } from '../../../utils/costCalculations';
+import { formatCost, buildLineAllocatedCostSummary, getCurrentMonth } from '../../../utils/costCalculations';
 import { ProductionLineStatus, FirestoreProductionLine, WorkOrder, ProductionPlan, ProductionReport } from '../../../types';
 import type { LineWorkerAssignment } from '../../../types';
 import { usePermission } from '../../../utils/permissions';
@@ -41,6 +41,9 @@ export const Lines: React.FC = () => {
   const _rawEmployees = useAppStore((s) => s._rawEmployees);
   const todayReports = useAppStore((s) => s.todayReports);
   const productionReports = useAppStore((s) => s.productionReports);
+  const costCenters = useAppStore((s) => s.costCenters);
+  const costCenterValues = useAppStore((s) => s.costCenterValues);
+  const costAllocations = useAppStore((s) => s.costAllocations);
 
   const { can } = usePermission();
   const navigate = useNavigate();
@@ -237,6 +240,48 @@ export const Lines: React.FC = () => {
     });
     return byLine;
   }, [todayReports, productionReports]);
+
+  const currentCostMonth = useMemo(() => getCurrentMonth(), []);
+  const lineAllocatedCosts = useMemo(() => {
+    const result = new Map<string, ReturnType<typeof buildLineAllocatedCostSummary>>();
+    productionLines.forEach((line) => {
+      result.set(
+        line.id,
+        buildLineAllocatedCostSummary(
+          line.id,
+          currentCostMonth,
+          costCenters,
+          costCenterValues,
+          costAllocations,
+        ),
+      );
+    });
+    return result;
+  }, [productionLines, currentCostMonth, costCenters, costCenterValues, costAllocations]);
+
+  const todaySupervisorCostByLine = useMemo(() => {
+    const maxHoursByLineSupervisor = new Map<string, number>();
+
+    todayReports.forEach((report) => {
+      if (!report.employeeId) return;
+      const key = `${report.lineId}__${report.employeeId}`;
+      const current = maxHoursByLineSupervisor.get(key) || 0;
+      maxHoursByLineSupervisor.set(key, Math.max(current, report.workHours || 0));
+    });
+
+    const result = new Map<string, number>();
+    maxHoursByLineSupervisor.forEach((maxHours, key) => {
+      const [lineId, employeeId] = key.split('__');
+      const hourlyRate = Math.max(
+        0,
+        _rawEmployees.find((e) => e.id === employeeId)?.hourlyRate || 0
+      );
+      const cost = maxHours * hourlyRate;
+      result.set(lineId, (result.get(lineId) || 0) + cost);
+    });
+
+    return result;
+  }, [todayReports, _rawEmployees]);
 
   return (
     <div className="space-y-6">
@@ -533,6 +578,9 @@ export const Lines: React.FC = () => {
             const woEstCostPerUnit = activeWO && activeWO.quantity > 0 ? activeWO.estimatedCost / activeWO.quantity : 0;
             const reportProduct = lastLineReport ? _rawProducts.find((p) => p.id === lastLineReport.productId) : null;
             const reportSupervisor = lastLineReport ? _rawEmployees.find((e) => e.id === lastLineReport.employeeId) : null;
+            const allocated = lineAllocatedCosts.get(line.id);
+            const supervisorDailyCost = todaySupervisorCostByLine.get(line.id) || 0;
+            const totalDailyAllocatedWithSupervisor = (allocated?.totalDailyAllocated || 0) + supervisorDailyCost;
 
             return (
               <Card key={line.id} className="transition-all hover:ring-2 hover:ring-primary/10">
@@ -568,6 +616,42 @@ export const Lines: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                {can('costs.view') && allocated && (
+                  <div className="mb-4 rounded-xl border border-violet-200/70 dark:border-violet-800/60 bg-violet-50/70 dark:bg-violet-900/10 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-black text-violet-700 dark:text-violet-300">التكاليف المتوزعة على الخط</p>
+                      <span className="text-[10px] font-bold text-violet-500">{allocated.month}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                      <span className="material-icons-round text-sm text-violet-500">manage_accounts</span>
+                      <span className="font-bold text-slate-500">المشرف:</span>
+                      <span className="font-black">{woSupervisor?.name ?? reportSupervisor?.name ?? line.currentName ?? '—'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-center">
+                      <div className="bg-white/80 dark:bg-slate-800 rounded-lg p-2">
+                        <p className="text-[10px] text-slate-400 mb-0.5">إجمالي شهري</p>
+                        <p className="text-sm font-black text-violet-700 dark:text-violet-300">
+                          {allocated.totalMonthlyAllocated > 0 ? formatCost(allocated.totalMonthlyAllocated) : '—'}
+                        </p>
+                      </div>
+                      <div className="bg-white/80 dark:bg-slate-800 rounded-lg p-2">
+                        <p className="text-[10px] text-slate-400 mb-0.5">موزع يومي + المشرف</p>
+                        <p className="text-sm font-black text-violet-700 dark:text-violet-300">
+                          {totalDailyAllocatedWithSupervisor > 0 ? formatCost(totalDailyAllocatedWithSupervisor) : '—'}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500">
+                      تكلفة مشرف اليوم: {supervisorDailyCost > 0 ? formatCost(supervisorDailyCost) : '—'}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      {allocated.centers.length > 0
+                        ? `عدد مراكز التكلفة الموزعة: ${allocated.centers.length}`
+                        : 'لا توجد توزيعات تكلفة مفعلة على هذا الخط في هذا الشهر.'}
+                    </p>
+                  </div>
+                )}
 
                 <div className="mb-4 rounded-xl border border-primary/15 bg-primary/5 p-3">
                   <div className="flex items-center justify-between gap-2 mb-2">

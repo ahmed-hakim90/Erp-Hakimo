@@ -14,6 +14,22 @@ export interface LineCostData {
   costPerUnit: number;
 }
 
+export interface LineAllocatedCenterCost {
+  costCenterId: string;
+  costCenterName: string;
+  monthlyAllocated: number;
+  dailyAllocated: number;
+  percentage: number;
+}
+
+export interface LineAllocatedCostSummary {
+  month: string;
+  daysInMonth: number;
+  totalMonthlyAllocated: number;
+  totalDailyAllocated: number;
+  centers: LineAllocatedCenterCost[];
+}
+
 /**
  * Daily labor cost for a line =
  * sum(report.workersCount × report.workHours) × hourlyRate
@@ -70,6 +86,70 @@ export const calculateDailyIndirectCost = (
 };
 
 /**
+ * Monthly and daily indirect costs allocated to a line
+ * with per-cost-center breakdown.
+ */
+export const buildLineAllocatedCostSummary = (
+  lineId: string,
+  month: string,
+  costCenters: CostCenter[],
+  costCenterValues: CostCenterValue[],
+  costAllocations: CostAllocation[]
+): LineAllocatedCostSummary => {
+  const daysInMonth = getDaysInMonth(month);
+  if (!lineId || daysInMonth <= 0) {
+    return {
+      month,
+      daysInMonth: Math.max(daysInMonth, 0),
+      totalMonthlyAllocated: 0,
+      totalDailyAllocated: 0,
+      centers: [],
+    };
+  }
+
+  const centers: LineAllocatedCenterCost[] = [];
+
+  for (const center of costCenters) {
+    if (center.type !== 'indirect' || !center.isActive || !center.id) continue;
+
+    const value = costCenterValues.find(
+      (v) => v.costCenterId === center.id && v.month === month
+    );
+    if (!value || value.amount <= 0) continue;
+
+    const allocation = costAllocations.find(
+      (a) => a.costCenterId === center.id && a.month === month
+    );
+    if (!allocation) continue;
+
+    const lineAlloc = allocation.allocations.find((a) => a.lineId === lineId);
+    if (!lineAlloc || lineAlloc.percentage <= 0) continue;
+
+    const monthlyAllocated = value.amount * (lineAlloc.percentage / 100);
+    if (monthlyAllocated <= 0) continue;
+
+    centers.push({
+      costCenterId: center.id,
+      costCenterName: center.name,
+      monthlyAllocated,
+      dailyAllocated: monthlyAllocated / daysInMonth,
+      percentage: lineAlloc.percentage,
+    });
+  }
+
+  centers.sort((a, b) => b.monthlyAllocated - a.monthlyAllocated);
+  const totalMonthlyAllocated = centers.reduce((sum, c) => sum + c.monthlyAllocated, 0);
+
+  return {
+    month,
+    daysInMonth,
+    totalMonthlyAllocated,
+    totalDailyAllocated: totalMonthlyAllocated / daysInMonth,
+    centers,
+  };
+};
+
+/**
  * Build cost data for every line in a single pass.
  */
 export const buildLineCosts = (
@@ -112,10 +192,13 @@ export interface ProductCostData {
 
 const getSupervisorHourlyRate = (
   report: ProductionReport,
-  supervisorHourlyRates?: Map<string, number>
+  supervisorHourlyRates?: Map<string, number>,
+  fallbackHourlyRate = 0
 ): number => {
-  if (!report.employeeId || !supervisorHourlyRates) return 0;
-  return supervisorHourlyRates.get(report.employeeId) || 0;
+  if (!report.employeeId) return Math.max(0, fallbackHourlyRate || 0);
+  const specificRate = supervisorHourlyRates?.get(report.employeeId) || 0;
+  if (specificRate > 0) return specificRate;
+  return Math.max(0, fallbackHourlyRate || 0);
 };
 
 export const buildSupervisorHourlyRatesMap = (
@@ -219,7 +302,10 @@ export const buildReportsCosts = (
     if (!r.id || !r.quantityProduced || r.quantityProduced <= 0) continue;
 
     const laborCost = (r.workersCount || 0) * (r.workHours || 0) * hourlyRate;
-    const supervisorIndirectCost = getSupervisorHourlyRate(r, supervisorHourlyRates) * (r.workHours || 0);
+    const savedSupervisorIndirectCost = r.supervisorIndirectCost ?? 0;
+    const supervisorIndirectCost = savedSupervisorIndirectCost > 0
+      ? savedSupervisorIndirectCost
+      : getSupervisorHourlyRate(r, supervisorHourlyRates, hourlyRate) * (r.workHours || 0);
 
     const month = r.date?.slice(0, 7) || getCurrentMonth();
     if (!indirectCache.has(`${r.lineId}_${month}`)) {

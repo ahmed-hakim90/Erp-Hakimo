@@ -1,8 +1,9 @@
-﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../../store/useAppStore';
 import { usePermission } from '../../../utils/permissions';
 import { Card, KPIBox, Badge, LoadingSkeleton } from '../components/UI';
+import { CustomDashboardWidgets } from '../../../components/CustomDashboardWidgets';
 import { reportService } from '../../../services/reportService';
 import { formatNumber, calculateWasteRatio, calculateProgressRatio, calculateTimeRatio, calculateSmartStatus } from '../../../utils/calculations';
 import {
@@ -439,6 +440,8 @@ export const FactoryManagerDashboard: React.FC = () => {
           </span>
         )}
       </div>
+
+      <CustomDashboardWidgets dashboardKey="factoryDashboard" systemSettings={systemSettings} />
 
       {/* ── Period Filter ──────────────────────────────────────────────────────── */}
       <Card>

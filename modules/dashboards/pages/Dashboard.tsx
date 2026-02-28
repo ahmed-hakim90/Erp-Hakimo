@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { KPIBox, Card, Badge, Button, LoadingSkeleton } from '../components/UI';
 import { EmployeeDashboardWidget } from '../../../components/EmployeeDashboardWidget';
+import { CustomDashboardWidgets } from '../../../components/CustomDashboardWidgets';
 import { useAppStore } from '../../../store/useAppStore';
 import {
   formatNumber,
@@ -313,6 +314,8 @@ export const Dashboard: React.FC = () => {
         <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-white">مؤسسة المغربي</h2>
         <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium text-sm sm:text-base">نظرة عامة شاملة على أداء المصنع اليوم وتتبع حقيقي لخطوط الإنتاج.</p>
       </div> */}
+
+      <CustomDashboardWidgets dashboardKey="dashboard" systemSettings={systemSettings} />
 
       {isVisible('kpi_row') && (
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">

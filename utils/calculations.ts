@@ -189,6 +189,36 @@ export const countUniqueDays = (reports: ProductionReport[]): number => {
   return dates.size;
 };
 
+/**
+ * Sum work hours using "max per day per key" rule.
+ * Useful when multiple reports can exist for the same shift/day.
+ */
+export const sumMaxWorkHoursByDateAndKey = (
+  reports: ProductionReport[],
+  getKey: (report: ProductionReport) => string
+): number => {
+  const maxByDateKey = new Map<string, number>();
+
+  reports.forEach((report) => {
+    const key = getKey(report);
+    const dateKey = `${report.date}__${key}`;
+    const hours = Math.max(0, report.workHours || 0);
+    const current = maxByDateKey.get(dateKey) || 0;
+    if (hours > current) maxByDateKey.set(dateKey, hours);
+  });
+
+  return Array.from(maxByDateKey.values()).reduce((sum, value) => sum + value, 0);
+};
+
+/**
+ * Sum work hours using "max per day" rule.
+ */
+export const sumMaxWorkHoursByDate = (
+  reports: ProductionReport[]
+): number => {
+  return sumMaxWorkHoursByDateAndKey(reports, () => 'all');
+};
+
 // ─── Aggregation Helpers (derive UI data from raw Firestore data) ───────────
 
 /**
@@ -307,7 +337,7 @@ export const buildProductionLines = (
         target: plannedQty,
         workersCount: latest?.workersCount ?? 0,
         efficiency: progress,
-        hoursUsed: merged.reduce((sum, r) => sum + (r.workHours || 0), 0),
+        hoursUsed: sumMaxWorkHoursByDate(merged),
       };
     }
 
@@ -326,9 +356,7 @@ export const buildProductionLines = (
     const workersCount = lineReports.length
       ? lineReports[lineReports.length - 1].workersCount
       : 0;
-    const hoursUsed = lineReports.reduce(
-      (sum, r) => sum + (r.workHours || 0), 0
-    );
+    const hoursUsed = sumMaxWorkHoursByDate(lineReports);
 
     const currentProduct = activeWO
       ? (rawProducts.find((p) => p.id === activeWO.productId)?.name ?? '—')

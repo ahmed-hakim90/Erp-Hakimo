@@ -1,7 +1,8 @@
 import type {
   SystemSettings, AlertSettings, KPIThreshold, WidgetConfig, PrintTemplateSettings,
   PlanSettings, BrandingSettings, ThemeSettings, DashboardDisplaySettings, AlertToggleSettings,
-  QuickActionColor, QuickActionType,
+  QuickActionColor, QuickActionType, CustomWidgetType, CustomWidgetConfig,
+  ExportImportSettings, ExportImportPageControl,
 } from '../types';
 
 // ─── Widget Registry ─────────────────────────────────────────────────────────
@@ -11,6 +12,18 @@ export interface WidgetDefinition {
   label: string;
   icon: string;
 }
+
+export interface WidgetTypeDefinition {
+  type: CustomWidgetType;
+  label: string;
+  icon: string;
+}
+
+export const CUSTOM_WIDGET_TYPES: WidgetTypeDefinition[] = [
+  { type: 'kpi', label: 'KPI', icon: 'analytics' },
+  { type: 'text', label: 'نص توضيحي', icon: 'text_fields' },
+  { type: 'quick_link', label: 'رابط سريع', icon: 'link' },
+];
 
 export const DASHBOARD_WIDGETS: Record<string, WidgetDefinition[]> = {
   dashboard: [
@@ -132,6 +145,11 @@ export const DEFAULT_PRINT_TEMPLATE: PrintTemplateSettings = {
   paperSize: 'a4',
   orientation: 'portrait',
   copies: 1,
+  marginTopMm: 10,
+  marginRightMm: 10,
+  marginBottomMm: 10,
+  marginLeftMm: 10,
+  printBackground: true,
   decimalPlaces: 0,
   showWaste: true,
   showEmployee: true,
@@ -185,12 +203,24 @@ export const DEFAULT_ALERT_TOGGLES: AlertToggleSettings = {
   enableCostVarianceAlert: true,
 };
 
+export const DEFAULT_EXPORT_IMPORT_PAGE_CONTROL: ExportImportPageControl = {
+  exportEnabled: true,
+  importEnabled: true,
+  exportVariant: 'secondary',
+  importVariant: 'outline',
+};
+
+export const DEFAULT_EXPORT_IMPORT_SETTINGS: ExportImportSettings = {
+  pages: {},
+};
+
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   dashboardWidgets: {
     dashboard: buildDefaultWidgets('dashboard'),
     adminDashboard: buildDefaultWidgets('adminDashboard'),
     factoryDashboard: buildDefaultWidgets('factoryDashboard'),
   },
+  customDashboardWidgets: [],
   alertSettings: DEFAULT_ALERT_SETTINGS,
   kpiThresholds: DEFAULT_KPI_THRESHOLDS,
   printTemplate: DEFAULT_PRINT_TEMPLATE,
@@ -200,17 +230,41 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   dashboardDisplay: DEFAULT_DASHBOARD_DISPLAY,
   alertToggles: DEFAULT_ALERT_TOGGLES,
   quickActions: [],
+  exportImport: DEFAULT_EXPORT_IMPORT_SETTINGS,
 };
 
 // ─── Selectors / Helpers ─────────────────────────────────────────────────────
+
+export function getCustomWidgets(
+  settings: SystemSettings | null,
+  dashboardKey: string,
+): CustomWidgetConfig[] {
+  return (settings?.customDashboardWidgets ?? [])
+    .filter((widget) => widget.dashboardKey === dashboardKey)
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+}
 
 export function getWidgetOrder(
   settings: SystemSettings | null,
   dashboardKey: string,
 ): WidgetConfig[] {
-  const widgets = settings?.dashboardWidgets?.[dashboardKey];
-  if (widgets && widgets.length > 0) return widgets;
-  return buildDefaultWidgets(dashboardKey);
+  const baseDefaults = buildDefaultWidgets(dashboardKey);
+  const savedOrder = settings?.dashboardWidgets?.[dashboardKey] ?? [];
+  const customWidgets = getCustomWidgets(settings, dashboardKey);
+  const customDefaults = customWidgets.map((widget) => ({
+    id: widget.id,
+    visible: widget.visible !== false,
+  }));
+
+  if (savedOrder.length === 0) {
+    return [...baseDefaults, ...customDefaults];
+  }
+
+  const knownIds = new Set(savedOrder.map((widget) => widget.id));
+  const missingBase = baseDefaults.filter((widget) => !knownIds.has(widget.id));
+  const missingCustom = customDefaults.filter((widget) => !knownIds.has(widget.id));
+
+  return [...savedOrder, ...missingBase, ...missingCustom];
 }
 
 export function isWidgetVisible(

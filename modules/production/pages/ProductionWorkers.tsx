@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useReactToPrint } from 'react-to-print';
 import { useAppStore } from '../../../store/useAppStore';
 import { Card, KPIBox, Badge, Button, LoadingSkeleton } from '../components/UI';
+import { useManagedPrint } from '@/utils/printManager';
 import { SelectableTable, type TableColumn, type TableBulkAction } from '../components/SelectableTable';
 import { ProductionReportPrint, mapReportsToPrintRows, computePrintTotals } from '../components/ProductionReportPrint';
 import type { FirestoreEmployee, ProductionReport } from '../../../types';
@@ -119,7 +119,7 @@ export const ProductionWorkers: React.FC = () => {
   const hoverTimeout = useRef<ReturnType<typeof setTimeout>>();
   const [bulkPrintReports, setBulkPrintReports] = useState<ProductionReport[] | null>(null);
   const bulkPrintRef = useRef<HTMLDivElement>(null);
-  const handleBulkPrint = useReactToPrint({ contentRef: bulkPrintRef });
+  const handleBulkPrint = useManagedPrint({ contentRef: bulkPrintRef, printSettings: printTemplate });
 
   const loadRefData = useCallback(async () => {
     setDataLoading(true);

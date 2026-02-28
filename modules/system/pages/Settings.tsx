@@ -12,6 +12,7 @@ import {
 import {
   DASHBOARD_WIDGETS,
   DASHBOARD_LABELS,
+  CUSTOM_WIDGET_TYPES,
   AVAILABLE_QUICK_ACTIONS,
   KPI_DEFINITIONS,
   DEFAULT_ALERT_SETTINGS,
@@ -22,7 +23,9 @@ import {
   DEFAULT_THEME,
   DEFAULT_DASHBOARD_DISPLAY,
   DEFAULT_ALERT_TOGGLES,
+  DEFAULT_EXPORT_IMPORT_PAGE_CONTROL,
 } from '../../../utils/dashboardConfig';
+import { EXPORT_IMPORT_PAGE_REGISTRY, getExportImportPageControl } from '../../../utils/exportImportControls';
 import { ProductionReportPrint, computePrintTotals } from '../../production/components/ProductionReportPrint';
 import {
   backupService,
@@ -37,6 +40,7 @@ import type {
   SystemSettings, WidgetConfig, AlertSettings, KPIThreshold, PrintTemplateSettings,
   PaperSize, PaperOrientation, PlanSettings, BrandingSettings, ThemeSettings,
   DashboardDisplaySettings, AlertToggleSettings, ThemeMode, UIDensity, QuickActionItem, QuickActionColor,
+  CustomWidgetConfig, CustomWidgetType, ExportImportSettings,
 } from '../../../types';
 import type { ReportPrintRow } from '../../production/components/ProductionReportPrint';
 import { useJobsStore } from '../../../components/background-jobs/useJobsStore';
@@ -169,6 +173,31 @@ export const Settings: React.FC = () => {
   const [localWidgets, setLocalWidgets] = useState<Record<string, WidgetConfig[]>>(
     () => JSON.parse(JSON.stringify(systemSettings.dashboardWidgets))
   );
+  const [localCustomWidgets, setLocalCustomWidgets] = useState<CustomWidgetConfig[]>(
+    () => JSON.parse(JSON.stringify(systemSettings.customDashboardWidgets ?? []))
+  );
+  const [selectedDashboardKey, setSelectedDashboardKey] = useState<string>(() => Object.keys(DASHBOARD_LABELS)[0] ?? 'dashboard');
+  const [widgetForm, setWidgetForm] = useState<{
+    dashboardKey: string;
+    type: CustomWidgetType;
+    label: string;
+    icon: string;
+    permission: string;
+    description: string;
+    value: string;
+    unit: string;
+    target: string;
+  }>({
+    dashboardKey: Object.keys(DASHBOARD_LABELS)[0] ?? 'dashboard',
+    type: 'kpi',
+    label: '',
+    icon: 'widgets',
+    permission: '',
+    description: '',
+    value: '',
+    unit: '',
+    target: '',
+  });
   const [localAlerts, setLocalAlerts] = useState<AlertSettings>(
     () => ({ ...DEFAULT_ALERT_SETTINGS, ...systemSettings.alertSettings })
   );
@@ -198,6 +227,9 @@ export const Settings: React.FC = () => {
       .slice()
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map((item, index) => ({ ...item, order: item.order ?? index }))
+  );
+  const [localExportImport, setLocalExportImport] = useState<ExportImportSettings>(
+    () => ({ pages: { ...(systemSettings.exportImport?.pages ?? {}) } })
   );
   const [editingQuickActionId, setEditingQuickActionId] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -455,13 +487,50 @@ export const Settings: React.FC = () => {
     []
   );
 
-  const handleSave = useCallback(async (section: 'general' | 'quickActions' | 'widgets' | 'alerts' | 'kpis' | 'print') => {
+  const normalizeCustomWidgets = useCallback(
+    (items: CustomWidgetConfig[]) => {
+      const grouped = items.reduce<Record<string, CustomWidgetConfig[]>>((acc, widget) => {
+        const key = widget.dashboardKey;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(widget);
+        return acc;
+      }, {});
+
+      Object.keys(grouped).forEach((dashboardKey) => {
+        grouped[dashboardKey] = grouped[dashboardKey]
+          .slice()
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          .map((widget, index) => ({ ...widget, order: index }));
+      });
+
+      return Object.values(grouped).flat();
+    },
+    [],
+  );
+
+  const selectedWidgetDefs = useCallback((dashboardKey: string) => {
+    const base = DASHBOARD_WIDGETS[dashboardKey] || [];
+    const custom = localCustomWidgets
+      .filter((widget) => widget.dashboardKey === dashboardKey)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((widget) => ({
+        id: widget.id,
+        label: widget.label,
+        icon: widget.icon,
+      }));
+    return [...base, ...custom];
+  }, [localCustomWidgets]);
+
+  const handleSave = useCallback(async (section: 'general' | 'quickActions' | 'widgets' | 'alerts' | 'kpis' | 'print' | 'exportImport') => {
     setSaving(true);
     setSaveMessage('');
     try {
       const updated: SystemSettings = {
         ...systemSettings,
         dashboardWidgets: section === 'widgets' ? localWidgets : systemSettings.dashboardWidgets,
+        customDashboardWidgets: section === 'widgets'
+          ? normalizeCustomWidgets(localCustomWidgets)
+          : (systemSettings.customDashboardWidgets ?? []),
         alertSettings: section === 'alerts' ? localAlerts : systemSettings.alertSettings,
         kpiThresholds: section === 'kpis' ? localKPIs : systemSettings.kpiThresholds,
         printTemplate: section === 'print' ? localPrint : systemSettings.printTemplate,
@@ -471,6 +540,7 @@ export const Settings: React.FC = () => {
         dashboardDisplay: section === 'general' ? localDashboardDisplay : (systemSettings.dashboardDisplay ?? DEFAULT_DASHBOARD_DISPLAY),
         alertToggles: section === 'general' ? localAlertToggles : (systemSettings.alertToggles ?? DEFAULT_ALERT_TOGGLES),
         quickActions: section === 'quickActions' ? normalizeQuickActions(localQuickActions) : (systemSettings.quickActions ?? []),
+        exportImport: section === 'exportImport' ? localExportImport : (systemSettings.exportImport ?? { pages: {} }),
       };
       await updateSystemSettings(updated);
       setSaveMessage('تم الحفظ بنجاح');
@@ -479,7 +549,7 @@ export const Settings: React.FC = () => {
       setSaveMessage('فشل الحفظ');
     }
     setSaving(false);
-  }, [systemSettings, localWidgets, localAlerts, localKPIs, localPrint, localPlanSettings, localBranding, localTheme, localDashboardDisplay, localAlertToggles, normalizeQuickActions, localQuickActions, updateSystemSettings]);
+  }, [systemSettings, localWidgets, localCustomWidgets, localAlerts, localKPIs, localPrint, localPlanSettings, localBranding, localTheme, localDashboardDisplay, localAlertToggles, normalizeQuickActions, normalizeCustomWidgets, localQuickActions, localExportImport, updateSystemSettings]);
 
   // ── Widget drag & drop ─────────────────────────────────────────────────────
 
@@ -515,9 +585,29 @@ export const Settings: React.FC = () => {
     }
 
     setLocalWidgets((prev) => {
-      const list = [...(prev[dashboardKey] || [])];
+      const seed = prev[dashboardKey] || selectedWidgetDefs(dashboardKey).map((def) => ({ id: def.id, visible: true }));
+      const list = [...seed];
       const [removed] = list.splice(fromIdx, 1);
       list.splice(toIdx, 0, removed);
+
+      setLocalCustomWidgets((widgets) => {
+        const customIds = new Set(
+          list
+            .map((item) => item.id)
+            .filter((itemId) => widgets.some((widget) => widget.id === itemId && widget.dashboardKey === dashboardKey)),
+        );
+        const customOrder = list
+          .map((item) => item.id)
+          .filter((itemId) => customIds.has(itemId));
+
+        return normalizeCustomWidgets(widgets.map((widget) => {
+          if (widget.dashboardKey !== dashboardKey) return widget;
+          const idx = customOrder.indexOf(widget.id);
+          if (idx === -1) return widget;
+          return { ...widget, order: idx };
+        }));
+      });
+
       return { ...prev, [dashboardKey]: list };
     });
 
@@ -527,11 +617,83 @@ export const Settings: React.FC = () => {
 
   const toggleWidget = (dashboardKey: string, widgetId: string) => {
     setLocalWidgets((prev) => {
-      const list = (prev[dashboardKey] || []).map((w) =>
+      const seed = prev[dashboardKey] || selectedWidgetDefs(dashboardKey).map((def) => ({ id: def.id, visible: true }));
+      const list = seed.map((w) =>
         w.id === widgetId ? { ...w, visible: !w.visible } : w
       );
       return { ...prev, [dashboardKey]: list };
     });
+
+    setLocalCustomWidgets((prev) => prev.map((widget) =>
+      widget.id === widgetId ? { ...widget, visible: !widget.visible } : widget
+    ));
+  };
+
+  const addCustomWidget = () => {
+    const dashboardKey = widgetForm.dashboardKey || selectedDashboardKey;
+    const trimmedLabel = widgetForm.label.trim();
+    if (!trimmedLabel) {
+      setSaveMessage('اسم الـ Widget مطلوب');
+      return;
+    }
+    if (widgetForm.type === 'quick_link' && !widgetForm.target.trim()) {
+      setSaveMessage('مسار الرابط مطلوب لهذا النوع');
+      return;
+    }
+
+    const dashboardCustom = localCustomWidgets.filter((widget) => widget.dashboardKey === dashboardKey);
+    const nextOrder = dashboardCustom.length;
+    const id = `custom_${dashboardKey}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const newWidget: CustomWidgetConfig = {
+      id,
+      dashboardKey,
+      type: widgetForm.type,
+      label: trimmedLabel,
+      icon: widgetForm.icon.trim() || 'widgets',
+      visible: true,
+      order: nextOrder,
+      permission: widgetForm.permission.trim() || undefined,
+      description: widgetForm.description.trim() || undefined,
+      value: widgetForm.value.trim() || undefined,
+      unit: widgetForm.unit.trim() || undefined,
+      target: widgetForm.type === 'quick_link' ? widgetForm.target.trim() : undefined,
+    };
+
+    setLocalCustomWidgets((prev) => normalizeCustomWidgets([...prev, newWidget]));
+    setLocalWidgets((prev) => {
+      const current = prev[dashboardKey] || selectedWidgetDefs(dashboardKey).map((def) => ({ id: def.id, visible: true }));
+      const exists = current.some((item) => item.id === newWidget.id);
+      return {
+        ...prev,
+        [dashboardKey]: exists ? current : [...current, { id: newWidget.id, visible: true }],
+      };
+    });
+    setSelectedDashboardKey(dashboardKey);
+    setWidgetForm((prev) => ({
+      ...prev,
+      label: '',
+      description: '',
+      value: '',
+      unit: '',
+      target: '',
+      permission: '',
+    }));
+    setSaveMessage('');
+  };
+
+  const removeCustomWidget = (dashboardKey: string, widgetId: string) => {
+    setLocalCustomWidgets((prev) =>
+      normalizeCustomWidgets(prev.filter((widget) => widget.id !== widgetId))
+    );
+    setLocalWidgets((prev) => {
+      const list = (prev[dashboardKey] || []).filter((widget) => widget.id !== widgetId);
+      return { ...prev, [dashboardKey]: list };
+    });
+  };
+
+  const handleSelectDashboard = (dashboardKey: string) => {
+    setSelectedDashboardKey(dashboardKey);
+    setWidgetForm((prev) => ({ ...prev, dashboardKey }));
   };
 
   const addQuickAction = () => {
@@ -572,6 +734,21 @@ export const Settings: React.FC = () => {
       prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
     );
   };
+
+  const updateExportImportControl = useCallback(
+    (pageKey: string, patch: Partial<(typeof DEFAULT_EXPORT_IMPORT_PAGE_CONTROL)>) => {
+      setLocalExportImport((prev) => {
+        const current = getExportImportPageControl(prev, pageKey);
+        return {
+          pages: {
+            ...prev.pages,
+            [pageKey]: { ...current, ...patch },
+          },
+        };
+      });
+    },
+    [],
+  );
 
   // ── Visible tabs ───────────────────────────────────────────────────────────
 
@@ -1325,7 +1502,7 @@ export const Settings: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-bold">إعدادات عناصر لوحات التحكم</h3>
-              <p className="text-sm text-slate-500">تحكم في ترتيب وظهور العناصر في كل لوحة تحكم. اسحب لإعادة الترتيب.</p>
+              <p className="text-sm text-slate-500">تحكم في ترتيب وظهور العناصر من مكان واحد، مع إمكانية إضافة Widget جديد.</p>
             </div>
             <Button onClick={() => handleSave('widgets')} disabled={saving}>
               {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
@@ -1334,64 +1511,203 @@ export const Settings: React.FC = () => {
             </Button>
           </div>
 
-          {Object.entries(DASHBOARD_LABELS).map(([dashboardKey, dashboardLabel]) => {
-            const widgetDefs = DASHBOARD_WIDGETS[dashboardKey] || [];
-            const currentOrder = localWidgets[dashboardKey] || widgetDefs.map((d) => ({ id: d.id, visible: true }));
+          <Card title="اختيار لوحة التحكم">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {Object.entries(DASHBOARD_LABELS).map(([dashboardKey, dashboardLabel]) => (
+                <button
+                  key={dashboardKey}
+                  onClick={() => handleSelectDashboard(dashboardKey)}
+                  className={`text-sm font-bold rounded-xl px-4 py-3 border transition-all ${
+                    selectedDashboardKey === dashboardKey
+                      ? 'bg-primary/10 text-primary border-primary/30'
+                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-primary/20'
+                  }`}
+                >
+                  {dashboardLabel}
+                </button>
+              ))}
+            </div>
+          </Card>
 
-            return (
-              <Card key={dashboardKey} title={dashboardLabel}>
-                <div className="space-y-1">
-                  {currentOrder.map((widget, index) => {
-                    const def = widgetDefs.find((d) => d.id === widget.id);
-                    if (!def) return null;
-                    return (
-                      <div
-                        key={widget.id}
-                        draggable
-                        onDragStart={() => handleDragStart(dashboardKey, index)}
-                        onDragEnter={() => handleDragEnter(dashboardKey, index)}
-                        onDragEnd={() => handleDragEnd(dashboardKey)}
-                        onDragOver={(e) => e.preventDefault()}
-                        className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-grab active:cursor-grabbing group ${
-                          widget.visible
-                            ? 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-primary/30'
-                            : 'bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 opacity-60'
-                        }`}
+          <Card title={`عناصر ${DASHBOARD_LABELS[selectedDashboardKey] || 'لوحة التحكم'}`} subtitle="اسحب لإعادة الترتيب، وفعّل/عطّل العرض حسب الحاجة">
+            <div className="space-y-1">
+              {(localWidgets[selectedDashboardKey] || selectedWidgetDefs(selectedDashboardKey).map((def) => ({ id: def.id, visible: true }))).map((widget, index) => {
+                const defs = selectedWidgetDefs(selectedDashboardKey);
+                const def = defs.find((d) => d.id === widget.id);
+                if (!def) return null;
+                const isCustom = localCustomWidgets.some((custom) => custom.id === widget.id);
+
+                return (
+                  <div
+                    key={widget.id}
+                    draggable
+                    onDragStart={() => handleDragStart(selectedDashboardKey, index)}
+                    onDragEnter={() => handleDragEnter(selectedDashboardKey, index)}
+                    onDragEnd={() => handleDragEnd(selectedDashboardKey)}
+                    onDragOver={(e) => e.preventDefault()}
+                    className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-grab active:cursor-grabbing group ${
+                      widget.visible
+                        ? 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-primary/30'
+                        : 'bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 opacity-60'
+                    }`}
+                  >
+                    <span className="material-icons-round text-slate-300 dark:text-slate-600 text-lg group-hover:text-primary transition-colors">
+                      drag_indicator
+                    </span>
+                    <span className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-icons-round text-primary text-sm">{def.icon}</span>
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300 truncate">{def.label}</p>
+                      <p className="text-[10px] text-slate-400 font-mono">{widget.id}</p>
+                    </div>
+                    {isCustom && (
+                      <span className="text-[10px] font-bold text-violet-600 bg-violet-50 dark:bg-violet-900/20 px-2 py-0.5 rounded-full">
+                        مخصص
+                      </span>
+                    )}
+                    <span className="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+                      #{index + 1}
+                    </span>
+                    {isCustom && (
+                      <button
+                        onClick={() => removeCustomWidget(selectedDashboardKey, widget.id)}
+                        className="w-8 h-8 rounded-lg border border-rose-200 dark:border-rose-800 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-all"
+                        title="حذف الـ Widget"
                       >
-                        <span className="material-icons-round text-slate-300 dark:text-slate-600 text-lg group-hover:text-primary transition-colors">
-                          drag_indicator
-                        </span>
-                        <span className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                          <span className="material-icons-round text-primary text-sm">{def.icon}</span>
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-slate-700 dark:text-slate-300 truncate">{def.label}</p>
-                          <p className="text-[10px] text-slate-400 font-mono">{widget.id}</p>
-                        </div>
-                        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-                          #{index + 1}
-                        </span>
-                        <button
-                          onClick={() => toggleWidget(dashboardKey, widget.id)}
-                          className={`w-10 h-6 rounded-full transition-all relative shrink-0 ${
-                            widget.visible
-                              ? 'bg-emerald-500'
-                              : 'bg-slate-300 dark:bg-slate-600'
-                          }`}
-                        >
-                          <span
-                            className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${
-                              widget.visible ? 'right-0.5' : 'right-[18px]'
-                            }`}
-                          />
-                        </button>
-                      </div>
-                    );
-                  })}
+                        <span className="material-icons-round text-sm">delete</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => toggleWidget(selectedDashboardKey, widget.id)}
+                      className={`w-10 h-6 rounded-full transition-all relative shrink-0 ${
+                        widget.visible
+                          ? 'bg-emerald-500'
+                          : 'bg-slate-300 dark:bg-slate-600'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${
+                          widget.visible ? 'right-0.5' : 'right-[18px]'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Card title="إنشاء Widget جديد" subtitle="Builder بسيط لعنصر Dashboard جديد">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">اللوحة المستهدفة</label>
+                <select
+                  value={widgetForm.dashboardKey}
+                  onChange={(e) => setWidgetForm((prev) => ({ ...prev, dashboardKey: e.target.value }))}
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                >
+                  {Object.entries(DASHBOARD_LABELS).map(([dashboardKey, label]) => (
+                    <option key={dashboardKey} value={dashboardKey}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">نوع الـ Widget</label>
+                <select
+                  value={widgetForm.type}
+                  onChange={(e) => setWidgetForm((prev) => ({ ...prev, type: e.target.value as CustomWidgetType }))}
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                >
+                  {CUSTOM_WIDGET_TYPES.map((typeDef) => (
+                    <option key={typeDef.type} value={typeDef.type}>{typeDef.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">الاسم</label>
+                <input
+                  type="text"
+                  value={widgetForm.label}
+                  onChange={(e) => setWidgetForm((prev) => ({ ...prev, label: e.target.value }))}
+                  placeholder="اسم الـ Widget"
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">الأيقونة</label>
+                <input
+                  type="text"
+                  value={widgetForm.icon}
+                  onChange={(e) => setWidgetForm((prev) => ({ ...prev, icon: e.target.value }))}
+                  placeholder="widgets"
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">الصلاحية (اختياري)</label>
+                <input
+                  type="text"
+                  value={widgetForm.permission}
+                  onChange={(e) => setWidgetForm((prev) => ({ ...prev, permission: e.target.value }))}
+                  placeholder="مثال: reports.view"
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">الوصف/النص</label>
+                <input
+                  type="text"
+                  value={widgetForm.description}
+                  onChange={(e) => setWidgetForm((prev) => ({ ...prev, description: e.target.value }))}
+                  placeholder="وصف قصير"
+                  className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+              {widgetForm.type === 'kpi' && (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500">القيمة</label>
+                    <input
+                      type="text"
+                      value={widgetForm.value}
+                      onChange={(e) => setWidgetForm((prev) => ({ ...prev, value: e.target.value }))}
+                      placeholder="مثال: 1250"
+                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500">الوحدة</label>
+                    <input
+                      type="text"
+                      value={widgetForm.unit}
+                      onChange={(e) => setWidgetForm((prev) => ({ ...prev, unit: e.target.value }))}
+                      placeholder="وحدة"
+                      className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                </>
+              )}
+              {widgetForm.type === 'quick_link' && (
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500">المسار</label>
+                  <input
+                    type="text"
+                    value={widgetForm.target}
+                    onChange={(e) => setWidgetForm((prev) => ({ ...prev, target: e.target.value }))}
+                    placeholder="/reports"
+                    className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold py-2.5 px-3 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                  />
                 </div>
-              </Card>
-            );
-          })}
+              )}
+            </div>
+            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <Button variant="outline" onClick={addCustomWidget}>
+                <span className="material-icons-round text-sm">add</span>
+                إضافة Widget
+              </Button>
+            </div>
+          </Card>
         </>
       )}
 
@@ -1832,6 +2148,43 @@ export const Settings: React.FC = () => {
                 />
               </div>
 
+              {/* Page Margins */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="material-icons-round text-primary">border_outer</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">هوامش الصفحة (mm)</p>
+                    <p className="text-xs text-slate-400">تُطبَّق تلقائيًا على كل صفحات الطباعة في النظام</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {([
+                    { key: 'marginTopMm' as const, label: 'أعلى' },
+                    { key: 'marginRightMm' as const, label: 'يمين' },
+                    { key: 'marginBottomMm' as const, label: 'أسفل' },
+                    { key: 'marginLeftMm' as const, label: 'يسار' },
+                  ]).map((field) => (
+                    <label key={field.key} className="space-y-1">
+                      <span className="text-xs font-bold text-slate-500">{field.label}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={30}
+                        className="w-full border border-slate-200 dark:border-slate-700 dark:bg-slate-900 rounded-xl text-sm font-bold text-center py-2.5 px-2 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                        value={localPrint[field.key]}
+                        onChange={(e) => {
+                          const next = Number(e.target.value);
+                          const safe = Number.isFinite(next) ? Math.max(0, Math.min(30, next)) : 0;
+                          setLocalPrint((p) => ({ ...p, [field.key]: safe }));
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               {/* Decimal Places */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -1864,6 +2217,7 @@ export const Settings: React.FC = () => {
                 { key: 'showCosts' as const, label: 'عرض التكاليف', icon: 'payments', desc: 'إظهار تكاليف المنتج والتكاليف الصناعية في الطباعة' },
                 { key: 'showWorkOrder' as const, label: 'عرض أمر الشغل', icon: 'assignment', desc: 'إظهار رقم أمر الشغل وبياناته في التقرير' },
                 { key: 'showSellingPrice' as const, label: 'عرض سعر البيع', icon: 'sell', desc: 'إظهار سعر البيع وهامش الربح في طباعة المنتج' },
+                { key: 'printBackground' as const, label: 'طباعة الألوان والخلفيات', icon: 'format_color_fill', desc: 'المحافظة على ألوان التصميم أثناء الطباعة' },
                 { key: 'showQRCode' as const, label: 'عرض رمز QR', icon: 'qr_code', desc: 'إظهار رمز QR للتحقق من صحة التقرير' },
               ]).map((toggle) => (
                 <div
@@ -1947,10 +2301,93 @@ export const Settings: React.FC = () => {
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'exportImport' && isAdmin && (
         <>
-          <div>
-            <h3 className="text-lg font-bold">التصدير والاستيراد</h3>
-            <p className="text-sm text-slate-500">دليل شامل لجميع عمليات التصدير (Excel) والاستيراد المتاحة في النظام.</p>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-lg font-bold">التصدير والاستيراد</h3>
+              <p className="text-sm text-slate-500">تحكم مركزي في إظهار/إخفاء أزرار الاستيراد والتصدير وشكلها لكل صفحة.</p>
+            </div>
+            <Button onClick={() => handleSave('exportImport')} disabled={saving}>
+              {saving && <span className="material-icons-round animate-spin text-sm">refresh</span>}
+              <span className="material-icons-round text-sm">save</span>
+              حفظ إعدادات التصدير/الاستيراد
+            </Button>
           </div>
+
+          <Card title="تحكم الصفحات">
+            <div className="space-y-3">
+              {EXPORT_IMPORT_PAGE_REGISTRY.map((page) => {
+                const control = getExportImportPageControl(localExportImport, page.key);
+                return (
+                  <div
+                    key={page.key}
+                    className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                      <div>
+                        <h4 className="text-sm font-black text-slate-700 dark:text-white">{page.label}</h4>
+                        <p className="text-xs text-slate-400 font-mono">{page.path}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-bold text-slate-700 dark:text-slate-200">زر التصدير</p>
+                          <button
+                            onClick={() => updateExportImportControl(page.key, { exportEnabled: !control.exportEnabled })}
+                            className={`w-12 h-7 rounded-full transition-all relative shrink-0 ${
+                              control.exportEnabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+                            }`}
+                          >
+                            <span
+                              className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-all ${
+                                control.exportEnabled ? 'right-0.5' : 'right-[22px]'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                        <select
+                          value={control.exportVariant}
+                          onChange={(e) => updateExportImportControl(page.key, { exportVariant: e.target.value as 'primary' | 'secondary' | 'outline' })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 px-3 text-sm font-bold outline-none"
+                        >
+                          <option value="primary">شكل رئيسي</option>
+                          <option value="secondary">شكل ثانوي</option>
+                          <option value="outline">شكل حدود فقط</option>
+                        </select>
+                      </div>
+
+                      <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-bold text-slate-700 dark:text-slate-200">زر الاستيراد</p>
+                          <button
+                            onClick={() => updateExportImportControl(page.key, { importEnabled: !control.importEnabled })}
+                            className={`w-12 h-7 rounded-full transition-all relative shrink-0 ${
+                              control.importEnabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+                            }`}
+                          >
+                            <span
+                              className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-all ${
+                                control.importEnabled ? 'right-0.5' : 'right-[22px]'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                        <select
+                          value={control.importVariant}
+                          onChange={(e) => updateExportImportControl(page.key, { importVariant: e.target.value as 'primary' | 'secondary' | 'outline' })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 px-3 text-sm font-bold outline-none"
+                        >
+                          <option value="primary">شكل رئيسي</option>
+                          <option value="secondary">شكل ثانوي</option>
+                          <option value="outline">شكل حدود فقط</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
 
           {/* ─── Export Section ─── */}
           <Card title="التصدير (Excel Export)">

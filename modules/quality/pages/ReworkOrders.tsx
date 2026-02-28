@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useReactToPrint } from 'react-to-print';
 import { Button, Card } from '../components/UI';
 import { useAppStore } from '@/store/useAppStore';
 import { usePermission } from '@/utils/permissions';
+import { useManagedPrint } from '@/utils/printManager';
 import type { QualityReworkOrder } from '@/types';
 import { qualityInspectionService } from '../services/qualityInspectionService';
 import { qualityNotificationService } from '../services/qualityNotificationService';
@@ -29,7 +29,7 @@ export const ReworkOrders: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({ contentRef: printRef });
+  const handlePrint = useManagedPrint({ contentRef: printRef, printSettings: printTemplate });
   const displayRows = useMemo(() => rows.map((row) => {
     const workOrder = workOrders.find((w) => w.id === row.workOrderId);
     return {

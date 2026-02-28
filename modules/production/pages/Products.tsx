@@ -15,6 +15,7 @@ import { calculateProductCostBreakdown } from '../../../utils/productCostBreakdo
 import type { ProductMaterial } from '../../../types';
 import { productMaterialService } from '../../../services/productMaterialService';
 import { useJobsStore } from '../../../components/background-jobs/useJobsStore';
+import { getExportImportPageControl } from '../../../utils/exportImportControls';
 
 type ProductTableColumnKey =
   | 'openingStock'
@@ -86,10 +87,17 @@ export const Products: React.FC = () => {
   const costCenterValues = useAppStore((s) => s.costCenterValues);
   const costAllocations = useAppStore((s) => s.costAllocations);
   const laborSettings = useAppStore((s) => s.laborSettings);
+  const exportImportSettings = useAppStore((s) => s.systemSettings.exportImport);
 
   const { can } = usePermission();
   const canViewCosts = can('costs.view');
   const canViewSellingPrice = can('roles.manage');
+  const pageControl = useMemo(
+    () => getExportImportPageControl(exportImportSettings, 'products'),
+    [exportImportSettings]
+  );
+  const canExportFromPage = can('export') && pageControl.exportEnabled;
+  const canImportFromPage = can('import') && pageControl.importEnabled;
   const navigate = useNavigate();
 
   const [showModal, setShowModal] = useState(false);
@@ -367,9 +375,9 @@ export const Products: React.FC = () => {
           <p className="text-sm text-slate-500 font-medium">قائمة تفصيلية بكافة الأصناف والمخزون وحالة الإنتاج.</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-          {products.length > 0 && can("export") && (
+          {products.length > 0 && canExportFromPage && (
             <>
-              <Button variant="secondary" onClick={() => {
+              <Button variant={pageControl.exportVariant} onClick={() => {
                 const opts: ProductExportOptions = {
                   stock: visibleColumns.openingStock || visibleColumns.totalProduction || visibleColumns.wasteUnits || visibleColumns.stockLevel,
                   productCosts: visibleColumns.chineseUnitCost || visibleColumns.innerBoxCost || visibleColumns.outerCartonCost || visibleColumns.unitsPerCarton || visibleColumns.totalCost || visibleColumns.chinesePriceCny,
@@ -390,13 +398,13 @@ export const Products: React.FC = () => {
               </Button>
             </>
           )}
-          {can("import") && (
+          {canImportFromPage && (
             <>
-            <Button variant="outline" onClick={downloadProductsTemplate} className="shrink-0">
+            <Button variant={pageControl.importVariant} onClick={downloadProductsTemplate} className="shrink-0">
               <span className="material-icons-round text-sm">file_download</span>
               <span className="hidden sm:inline">تحميل قالب</span>
             </Button>
-            <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="shrink-0">
+            <Button variant={pageControl.importVariant} onClick={() => fileInputRef.current?.click()} className="shrink-0">
               <span className="material-icons-round text-sm">upload_file</span>
               <span className="hidden sm:inline">رفع Excel</span>
             </Button>

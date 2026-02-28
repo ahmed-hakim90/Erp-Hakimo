@@ -1,9 +1,9 @@
 
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useReactToPrint } from 'react-to-print';
 import { Card, KPIBox, Button, Badge, LoadingSkeleton } from '../components/UI';
 import { useAppStore } from '../../../store/useAppStore';
+import { useManagedPrint } from '@/utils/printManager';
 import { reportService } from '../../../services/reportService';
 import {
   formatNumber,
@@ -326,7 +326,7 @@ export const ProductDetails: React.FC = () => {
   const printTotals = useMemo(() => computePrintTotals(printRows), [printRows]);
   const productDisplayName = product?.name || rawProduct?.name || '';
 
-  const handlePrint = useReactToPrint({ contentRef: printComponentRef });
+  const handlePrint = useManagedPrint({ contentRef: printComponentRef, printSettings: printTemplate });
 
   const handlePDF = async () => {
     if (!printComponentRef.current) return;

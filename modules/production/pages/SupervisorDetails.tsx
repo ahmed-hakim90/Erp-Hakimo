@@ -1,12 +1,17 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useReactToPrint } from 'react-to-print';
 import { Card, KPIBox, Badge, Button, LoadingSkeleton } from '../components/UI';
 import { useAppStore } from '../../../store/useAppStore';
+import { useManagedPrint } from '@/utils/printManager';
 import { usePermission } from '../../../utils/permissions';
 import { reportService } from '../../../services/reportService';
 import { employeeService } from '../../hr/employeeService';
-import { formatNumber, calculateWasteRatio, getTodayDateString } from '../../../utils/calculations';
+import {
+  formatNumber,
+  calculateWasteRatio,
+  getTodayDateString,
+  sumMaxWorkHoursByDate,
+} from '../../../utils/calculations';
 import { JOB_LEVEL_LABELS, type JobLevel } from '../../hr/types';
 import { EMPLOYMENT_TYPE_LABELS } from '../../../types';
 import type { ProductionReport, FirestoreEmployee } from '../../../types';
@@ -42,6 +47,7 @@ function computePerformanceScore(produced: number, target: number, wasteRatio: n
 
 type ChartTab = 'production' | 'efficiency' | 'hours';
 type DetailTab = 'production' | 'lines' | 'info';
+type Period = 'daily' | 'yesterday' | 'weekly' | 'monthly';
 
 const CHART_TABS: { key: ChartTab; label: string; icon: string }[] = [
   { key: 'production', label: 'الإنتاج', icon: 'inventory' },
@@ -53,6 +59,13 @@ const DETAIL_TABS: { id: DetailTab; label: string; icon: string }[] = [
   { id: 'production', label: 'الإنتاج', icon: 'inventory' },
   { id: 'lines', label: 'الخطوط', icon: 'precision_manufacturing' },
   { id: 'info', label: 'معلومات الموظف', icon: 'badge' },
+];
+
+const PERIOD_OPTIONS: { value: Period; label: string }[] = [
+  { value: 'daily', label: 'اليوم' },
+  { value: 'yesterday', label: 'أمس' },
+  { value: 'weekly', label: 'أسبوعي' },
+  { value: 'monthly', label: 'شهري' },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -85,9 +98,10 @@ export const SupervisorDetails: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<DetailTab>('production');
   const [chartTab, setChartTab] = useState<ChartTab>('production');
+  const [period, setPeriod] = useState<Period>('daily');
 
   const printRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({ contentRef: printRef });
+  const handlePrint = useManagedPrint({ contentRef: printRef, printSettings: printTemplate });
 
   useEffect(() => {
     if (!id) { setLoading(false); return; }
@@ -137,39 +151,69 @@ export const SupervisorDetails: React.FC = () => {
 
   const today = getTodayDateString();
   const weekStart = useMemo(() => getWeekStart(), []);
+  const periodReports = useMemo(() => {
+    if (reports.length === 0) return [];
 
-  const totalProduced = useMemo(() => reports.reduce((s, r) => s + (r.quantityProduced ?? 0), 0), [reports]);
-  const totalWaste = useMemo(() => reports.reduce((s, r) => s + (r.quantityWaste ?? 0), 0), [reports]);
+    if (period === 'daily') {
+      return reports.filter((r) => r.date === today);
+    }
+
+    if (period === 'yesterday') {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const y = yesterday.getFullYear();
+      const m = String(yesterday.getMonth() + 1).padStart(2, '0');
+      const d = String(yesterday.getDate()).padStart(2, '0');
+      const yesterdayStr = `${y}-${m}-${d}`;
+      return reports.filter((r) => r.date === yesterdayStr);
+    }
+
+    if (period === 'weekly') {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      const y = weekAgo.getFullYear();
+      const m = String(weekAgo.getMonth() + 1).padStart(2, '0');
+      const d = String(weekAgo.getDate()).padStart(2, '0');
+      const start = `${y}-${m}-${d}`;
+      return reports.filter((r) => r.date >= start && r.date <= today);
+    }
+
+    const monthPrefix = today.slice(0, 7);
+    return reports.filter((r) => r.date.startsWith(monthPrefix));
+  }, [reports, period, today]);
+
+  const totalProduced = useMemo(() => periodReports.reduce((s, r) => s + (r.quantityProduced ?? 0), 0), [periodReports]);
+  const totalWaste = useMemo(() => periodReports.reduce((s, r) => s + (r.quantityWaste ?? 0), 0), [periodReports]);
   const wasteRatio = useMemo(() => calculateWasteRatio(totalWaste, totalProduced + totalWaste), [totalProduced, totalWaste]);
-  const totalWorkerHours = useMemo(() => reports.reduce((s, r) => s + (r.workersCount ?? 0) * (r.workHours ?? 0), 0), [reports]);
-  const totalHours = useMemo(() => reports.reduce((s, r) => s + (r.workHours ?? 0), 0), [reports]);
-  const avgPerReport = useMemo(() => reports.length > 0 ? Math.round(totalProduced / reports.length) : 0, [totalProduced, reports.length]);
-  const uniqueDays = useMemo(() => new Set(reports.map((r) => r.date)).size, [reports]);
+  const totalWorkerHours = useMemo(() => periodReports.reduce((s, r) => s + (r.workersCount ?? 0) * (r.workHours ?? 0), 0), [periodReports]);
+  const totalHours = useMemo(() => sumMaxWorkHoursByDate(periodReports), [periodReports]);
+  const avgPerReport = useMemo(() => periodReports.length > 0 ? Math.round(totalProduced / periodReports.length) : 0, [totalProduced, periodReports.length]);
+  const uniqueDays = useMemo(() => new Set(periodReports.map((r) => r.date)).size, [periodReports]);
 
-  const todayProduced = useMemo(() => reports.filter((r) => r.date === today).reduce((s, r) => s + (r.quantityProduced ?? 0), 0), [reports, today]);
-  const weekProduced = useMemo(() => reports.filter((r) => r.date >= weekStart && r.date <= today).reduce((s, r) => s + (r.quantityProduced ?? 0), 0), [reports, weekStart, today]);
+  const todayProduced = useMemo(() => periodReports.filter((r) => r.date === today).reduce((s, r) => s + (r.quantityProduced ?? 0), 0), [periodReports, today]);
+  const weekProduced = useMemo(() => periodReports.filter((r) => r.date >= weekStart && r.date <= today).reduce((s, r) => s + (r.quantityProduced ?? 0), 0), [periodReports, weekStart, today]);
 
   const target = useMemo(() => {
     let t = 0;
     for (const plan of productionPlans) {
       if (plan.status === 'in_progress' || plan.status === 'planned') {
-        const planReports = reports.filter((r) => r.lineId === plan.lineId);
+        const planReports = periodReports.filter((r) => r.lineId === plan.lineId);
         if (planReports.length > 0) t += plan.plannedQuantity ?? 0;
       }
     }
     return t;
-  }, [productionPlans, reports]);
+  }, [productionPlans, periodReports]);
 
   const performanceScore = useMemo(() => {
     const totalDays = Math.max(1, Math.ceil((new Date().getTime() - new Date(weekStart).getTime()) / (1000 * 60 * 60 * 24)) + 1);
-    const activeDays = new Set(reports.filter((r) => r.date >= weekStart && r.date <= today).map((r) => r.date)).size;
+    const activeDays = new Set(periodReports.filter((r) => r.date >= weekStart && r.date <= today).map((r) => r.date)).size;
     return computePerformanceScore(totalProduced, target, wasteRatio, activeDays, totalDays);
-  }, [totalProduced, target, wasteRatio, reports, weekStart, today]);
+  }, [totalProduced, target, wasteRatio, periodReports, weekStart, today]);
 
   const avgWorkersPerReport = useMemo(() => {
-    if (reports.length === 0) return 0;
-    return Math.round(reports.reduce((s, r) => s + (r.workersCount ?? 0), 0) / reports.length);
-  }, [reports]);
+    if (periodReports.length === 0) return 0;
+    return Math.round(periodReports.reduce((s, r) => s + (r.workersCount ?? 0), 0) / periodReports.length);
+  }, [periodReports]);
 
   // ── Alerts ──────────────────────────────────────────────────────────────────
 
@@ -187,24 +231,24 @@ export const SupervisorDetails: React.FC = () => {
     } else if (performanceScore < 85) {
       result.push({ type: 'warning', icon: 'trending_down', message: `درجة الأداء تحتاج تحسين: ${performanceScore} من 100` });
     }
-    if (todayProduced === 0 && reports.length > 0) {
+    if (period === 'daily' && todayProduced === 0 && periodReports.length > 0) {
       result.push({ type: 'warning', icon: 'today', message: 'لا يوجد إنتاج مسجل اليوم' });
     }
     if (result.length === 0) {
       result.push({ type: 'info', icon: 'check_circle', message: 'المشرف يعمل بشكل طبيعي — لا توجد تنبيهات' });
     }
     return result;
-  }, [wasteRatio, wasteThreshold, performanceScore, todayProduced, reports.length]);
+  }, [wasteRatio, wasteThreshold, performanceScore, todayProduced, period, periodReports.length]);
 
   // ── Chart data ──────────────────────────────────────────────────────────────
 
   const enrichedChartData = useMemo(() => {
     const byDate = new Map<string, { produced: number; waste: number; hours: number; workerHours: number; workers: number; count: number }>();
-    reports.forEach((r) => {
+    periodReports.forEach((r) => {
       const prev = byDate.get(r.date) ?? { produced: 0, waste: 0, hours: 0, workerHours: 0, workers: 0, count: 0 };
       prev.produced += r.quantityProduced ?? 0;
       prev.waste += r.quantityWaste ?? 0;
-      prev.hours += r.workHours ?? 0;
+      prev.hours = Math.max(prev.hours, r.workHours ?? 0);
       prev.workerHours += (r.workersCount ?? 0) * (r.workHours ?? 0);
       prev.workers += r.workersCount ?? 0;
       prev.count++;
@@ -225,30 +269,38 @@ export const SupervisorDetails: React.FC = () => {
         };
       })
       .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
-  }, [reports]);
+  }, [periodReports]);
 
   // ── Lines breakdown ─────────────────────────────────────────────────────────
 
   const lineStats = useMemo(() => {
-    const map = new Map<string, { reports: number; produced: number; waste: number; hours: number }>();
-    reports.forEach((r) => {
-      const prev = map.get(r.lineId) ?? { reports: 0, produced: 0, waste: 0, hours: 0 };
+    const map = new Map<string, { reports: number; produced: number; waste: number; maxHoursByDate: Map<string, number> }>();
+    periodReports.forEach((r) => {
+      const prev = map.get(r.lineId) ?? { reports: 0, produced: 0, waste: 0, maxHoursByDate: new Map<string, number>() };
       prev.reports++;
       prev.produced += r.quantityProduced ?? 0;
       prev.waste += r.quantityWaste ?? 0;
-      prev.hours += r.workHours ?? 0;
+      const currentDateHours = prev.maxHoursByDate.get(r.date) ?? 0;
+      prev.maxHoursByDate.set(r.date, Math.max(currentDateHours, r.workHours ?? 0));
       map.set(r.lineId, prev);
     });
     return Array.from(map.entries())
-      .map(([lineId, stats]) => ({ lineId, name: getLineName(lineId), ...stats }))
+      .map(([lineId, stats]) => ({
+        lineId,
+        name: getLineName(lineId),
+        reports: stats.reports,
+        produced: stats.produced,
+        waste: stats.waste,
+        hours: Array.from(stats.maxHoursByDate.values()).reduce((sum, h) => sum + h, 0),
+      }))
       .sort((a, b) => b.produced - a.produced);
-  }, [reports, productionLines]);
+  }, [periodReports, productionLines]);
 
   // ── Products breakdown ──────────────────────────────────────────────────────
 
   const productStats = useMemo(() => {
     const map = new Map<string, { produced: number; waste: number }>();
-    reports.forEach((r) => {
+    periodReports.forEach((r) => {
       const prev = map.get(r.productId) ?? { produced: 0, waste: 0 };
       prev.produced += r.quantityProduced ?? 0;
       prev.waste += r.quantityWaste ?? 0;
@@ -257,7 +309,7 @@ export const SupervisorDetails: React.FC = () => {
     return Array.from(map.entries())
       .map(([productId, stats]) => ({ name: getProductName(productId), ...stats }))
       .sort((a, b) => b.produced - a.produced);
-  }, [reports, products]);
+  }, [periodReports, products]);
 
   // ── Chart tooltip ───────────────────────────────────────────────────────────
 
@@ -384,6 +436,24 @@ export const SupervisorDetails: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex items-center justify-end">
+        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+          {PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setPeriod(opt.value)}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                period === opt.value
+                  ? 'bg-white dark:bg-slate-700 text-primary shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── KPI Cards ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
         <KPIBox label="إنتاج اليوم" value={formatNumber(todayProduced)} icon="today" colorClass="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400" />
@@ -407,7 +477,7 @@ export const SupervisorDetails: React.FC = () => {
         />
         <KPIBox label="ساعات العمل" value={formatNumber(totalHours)} unit="ساعة" icon="schedule" colorClass="bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400" trend={`${uniqueDays} يوم عمل`} trendUp />
         <KPIBox label="متوسط الإنتاج/تقرير" value={formatNumber(avgPerReport)} icon="trending_up" colorClass="bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-400" />
-        <KPIBox label="عدد التقارير" value={formatNumber(reports.length)} icon="description" colorClass="bg-sky-50 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400" />
+        <KPIBox label="عدد التقارير" value={formatNumber(periodReports.length)} icon="description" colorClass="bg-sky-50 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400" />
         <KPIBox
           label="درجة الأداء"
           value={performanceScore}
@@ -555,7 +625,7 @@ export const SupervisorDetails: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {reports.length === 0 && (
+                  {periodReports.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
                         <span className="material-icons-round text-5xl mb-3 block opacity-30">description</span>
@@ -563,7 +633,7 @@ export const SupervisorDetails: React.FC = () => {
                       </td>
                     </tr>
                   )}
-                  {reports.slice(0, 30).map((r) => (
+                  {periodReports.slice(0, 30).map((r) => (
                     <tr key={r.id}>
                       <td className="px-5 py-3 text-sm font-bold text-slate-700 dark:text-slate-300">{r.date}</td>
                       <td className="px-5 py-3 text-sm font-medium">{getLineName(r.lineId)}</td>
@@ -581,11 +651,11 @@ export const SupervisorDetails: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            {reports.length > 0 && (
+            {periodReports.length > 0 && (
               <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800">
                 <span className="text-sm text-slate-500 font-bold">
-                  إجمالي <span className="text-primary">{reports.length}</span> تقرير
-                  {reports.length > 30 && <span className="text-slate-400 mr-2">— عرض أحدث 30</span>}
+                  إجمالي <span className="text-primary">{periodReports.length}</span> تقرير
+                  {periodReports.length > 30 && <span className="text-slate-400 mr-2">— عرض أحدث 30</span>}
                 </span>
               </div>
             )}

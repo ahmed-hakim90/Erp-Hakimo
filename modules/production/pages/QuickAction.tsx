@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { useReactToPrint } from 'react-to-print';
 import { useAppStore } from '../../../store/useAppStore';
+import { useManagedPrint } from '@/utils/printManager';
 import { Card, Button, SearchableSelect } from '../components/UI';
 import { usePermission } from '../../../utils/permissions';
 import { exportToPDF, shareToWhatsApp, ShareResult } from '../../../utils/reportExport';
@@ -194,7 +194,7 @@ export const QuickAction: React.FC = () => {
     setPrintReport(null);
   };
 
-  const handlePrint = useReactToPrint({ contentRef: printRef });
+  const handlePrint = useManagedPrint({ contentRef: printRef, printSettings: printTemplate });
 
   const handleExportPDF = async () => {
     if (!printRef.current) return;

@@ -158,3 +158,7 @@
 ## [4.0.14] - 2026-02-26
 
 - hide production live change position
+
+## [4.0.15] - 2026-02-26
+
+- top bar table
