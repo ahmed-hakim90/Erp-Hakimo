@@ -14,29 +14,25 @@ export const workOrderService = {
   },
 
   async getByLine(lineId: string): Promise<WorkOrder[]> {
-    return apiClient.get<WorkOrder[]>('/production/work-orders', { lineId });
+    return apiClient.get<WorkOrder[]>('/production/work-orders/filters', { lineId });
   },
 
   async getActiveByLine(lineId: string): Promise<WorkOrder[]> {
-    return apiClient.get<WorkOrder[]>('/production/work-orders', {
-      lineId,
-      status: 'pending,in_progress',
-    });
+    return apiClient.get<WorkOrder[]>(`/production/work-orders/active/by-line/${lineId}`);
   },
 
   async getByPlan(planId: string): Promise<WorkOrder[]> {
-    return apiClient.get<WorkOrder[]>('/production/work-orders', { planId });
+    return apiClient.get<WorkOrder[]>('/production/work-orders/filters', { planId });
   },
 
   async getBySupervisor(supervisorId: string): Promise<WorkOrder[]> {
-    return apiClient.get<WorkOrder[]>('/production/work-orders', { supervisorId });
+    return apiClient.get<WorkOrder[]>('/production/work-orders/filters', { supervisorId });
   },
 
   async getActiveByLineAndProduct(lineId: string, productId: string): Promise<WorkOrder[]> {
-    return apiClient.get<WorkOrder[]>('/production/work-orders', {
+    return apiClient.get<WorkOrder[]>('/production/work-orders/active/by-line-product', {
       lineId,
       productId,
-      status: 'pending,in_progress',
     });
   },
 

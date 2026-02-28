@@ -14,16 +14,12 @@ export const reportService = {
   },
 
   async getByDateRange(startDate: string, endDate: string): Promise<ProductionReport[]> {
-    return apiClient.get<ProductionReport[]>('/production/reports', { startDate, endDate });
+    return apiClient.get<ProductionReport[]>('/production/reports/date-range', { startDate, endDate });
   },
 
   async existsForLineAndDate(lineId: string, date: string): Promise<boolean> {
-    const reports = await apiClient.get<ProductionReport[]>('/production/reports', {
-      lineId,
-      startDate: date,
-      endDate: date,
-    });
-    return reports.length > 0;
+    const result = await apiClient.get<{ exists: boolean }>('/production/reports/exists/line-date', { lineId, date });
+    return result.exists;
   },
 
   async create(data: Omit<ProductionReport, 'id' | 'createdAt'>): Promise<string | null> {
@@ -55,30 +51,30 @@ export const reportService = {
   },
 
   async getByLineAndProduct(lineId: string, productId: string, fromDate?: string): Promise<ProductionReport[]> {
-    const reports = await apiClient.get<ProductionReport[]>('/production/reports', { lineId, productId });
+    const reports = await apiClient.get<ProductionReport[]>('/production/reports/filters', { lineId, productId });
     if (!fromDate) return reports;
     return reports.filter((r) => r.date >= fromDate);
   },
 
   async getByProduct(productId: string): Promise<ProductionReport[]> {
-    return apiClient.get<ProductionReport[]>('/production/reports', { productId });
+    return apiClient.get<ProductionReport[]>('/production/reports/filters', { productId });
   },
 
   async getByLine(lineId: string): Promise<ProductionReport[]> {
-    return apiClient.get<ProductionReport[]>('/production/reports', { lineId });
+    return apiClient.get<ProductionReport[]>('/production/reports/filters', { lineId });
   },
 
   async getByEmployee(employeeId: string): Promise<ProductionReport[]> {
-    return apiClient.get<ProductionReport[]>('/production/reports', { employeeId });
+    return apiClient.get<ProductionReport[]>('/production/reports/filters', { employeeId });
   },
 
   async getByWorkOrderId(workOrderId: string): Promise<ProductionReport[]> {
     if (!workOrderId) return [];
-    return apiClient.get<ProductionReport[]>('/production/reports', { workOrderId });
+    return apiClient.get<ProductionReport[]>('/production/reports/filters', { workOrderId });
   },
 
   async backfillMissingReportCodes(): Promise<number> {
-    const res = await apiClient.post<{ updated: number }>('/production/reports/backfill-missing-codes');
+    const res = await apiClient.post<{ updated: number }>('/production/reports/backfill-report-codes');
     return res.updated;
   },
 

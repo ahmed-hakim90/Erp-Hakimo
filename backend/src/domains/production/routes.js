@@ -58,6 +58,11 @@ const bindCrud = ({ basePath, repository, readGuard, writeGuard }) => {
     res.status(204).send();
   }));
 
+  router.put(`${basePath}/:id`, writeGuard, asyncHandler(async (req, res) => {
+    await repository.update(req.params.id, toSnake(req.body), req.tenantId);
+    res.status(204).send();
+  }));
+
   router.delete(`${basePath}/:id`, writeGuard, asyncHandler(async (req, res) => {
     await repository.remove(req.params.id, req.tenantId);
     res.status(204).send();
@@ -69,8 +74,6 @@ bindCrud({ basePath: '/lines', repository: lineRepository, readGuard: readProduc
 bindCrud({ basePath: '/line-statuses', repository: lineStatusRepository, readGuard: readProduction, writeGuard: writeLineStatus });
 bindCrud({ basePath: '/line-product-configs', repository: lineProductConfigRepository, readGuard: readProduction, writeGuard: writeLines });
 bindCrud({ basePath: '/production-plans', repository: productionPlanRepository, readGuard: readProduction, writeGuard: writePlans });
-bindCrud({ basePath: '/work-orders', repository: workOrderRepository, readGuard: readProduction, writeGuard: writeWorkOrders });
-bindCrud({ basePath: '/reports', repository: reportRepository, readGuard: readProduction, writeGuard: writeReports });
 bindCrud({ basePath: '/line-assignments', repository: lineAssignmentRepository, readGuard: readProduction, writeGuard: writeLineWorkers });
 bindCrud({ basePath: '/product-materials', repository: productMaterialRepository, readGuard: readProduction, writeGuard: writeProducts });
 
@@ -112,6 +115,50 @@ router.get('/work-orders/filters', readProduction, asyncHandler(async (req, res)
   asJson(res, rows);
 }));
 
+router.get('/work-orders/:id', readProduction, asyncHandler(async (req, res, next) => {
+  if (['filters', 'generate-number', 'generate-next-number'].includes(req.params.id)) {
+    return next();
+  }
+  const row = await workOrderRepository.getById(req.params.id, req.tenantId);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  return asJson(res, row);
+}));
+
+router.post('/work-orders', writeWorkOrders, asyncHandler(async (req, res) => {
+  const id = await workOrderRepository.create(toSnake(req.body), req.tenantId);
+  res.json({ id });
+}));
+
+router.patch('/work-orders/:id', writeWorkOrders, asyncHandler(async (req, res) => {
+  await workOrderRepository.update(req.params.id, toSnake(req.body), req.tenantId);
+  res.status(204).send();
+}));
+
+router.put('/work-orders/:id', writeWorkOrders, asyncHandler(async (req, res) => {
+  await workOrderRepository.update(req.params.id, toSnake(req.body), req.tenantId);
+  res.status(204).send();
+}));
+
+router.delete('/work-orders/:id', writeWorkOrders, asyncHandler(async (req, res) => {
+  await workOrderRepository.remove(req.params.id, req.tenantId);
+  res.status(204).send();
+}));
+
+router.get('/work-orders', readProduction, asyncHandler(async (req, res) => {
+  const filters = toSnake({
+    lineId: req.query.lineId,
+    planId: req.query.planId,
+    supervisorId: req.query.supervisorId,
+    productId: req.query.productId,
+  });
+  let rows = await workOrderRepository.getByFilter(req.tenantId, filters);
+  if (req.query.status) {
+    const statuses = String(req.query.status).split(',').map((s) => s.trim()).filter(Boolean);
+    rows = rows.filter((row) => statuses.includes(row.status));
+  }
+  asJson(res, rows);
+}));
+
 router.get('/work-orders/active/by-line/:lineId', readProduction, asyncHandler(async (req, res) => {
   const rows = await workOrderRepository.getActiveByLine(req.tenantId, req.params.lineId);
   asJson(res, rows);
@@ -134,6 +181,15 @@ router.post('/work-orders/generate-next-number', readProduction, asyncHandler(as
   return res.json({ value: `WO-${year}-${String(seq + 1).padStart(4, '0')}` });
 }));
 
+router.post('/work-orders/generate-number', readProduction, asyncHandler(async (req, res) => {
+  const latest = await workOrderRepository.getLatestForNumber(req.tenantId);
+  const year = new Date().getFullYear();
+  if (!latest?.work_order_number) return res.json({ number: `WO-${year}-0001` });
+  const parts = String(latest.work_order_number).split('-');
+  const seq = Number(parts[parts.length - 1] || 0);
+  return res.json({ number: `WO-${year}-${String(seq + 1).padStart(4, '0')}` });
+}));
+
 router.post('/work-orders/:id/increment-produced', writeWorkOrders, asyncHandler(async (req, res) => {
   const current = await workOrderRepository.getById(req.params.id, req.tenantId);
   if (!current) return res.status(404).json({ error: 'Not found' });
@@ -151,9 +207,60 @@ router.post('/work-orders/:id/update-completion-from-scans', writeWorkOrders, as
   res.status(204).send();
 }));
 
+router.post('/work-orders/:id/completion-from-scans', writeWorkOrders, asyncHandler(async (req, res) => {
+  await workOrderRepository.update(req.params.id, toSnake(req.body), req.tenantId);
+  res.status(204).send();
+}));
+
 router.get('/reports/date-range', readProduction, asyncHandler(async (req, res) => {
   const rows = await reportRepository.getByDateRange(req.tenantId, req.query.startDate, req.query.endDate);
   asJson(res, rows);
+}));
+
+router.get('/reports/:id', readProduction, asyncHandler(async (req, res, next) => {
+  if (['filters', 'exists', 'date-range', 'backfill-report-codes', 'backfill-missing-codes'].includes(req.params.id)) {
+    return next();
+  }
+  const row = await reportRepository.getById(req.params.id, req.tenantId);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  return asJson(res, row);
+}));
+
+router.post('/reports', writeReports, asyncHandler(async (req, res) => {
+  const id = await reportRepository.create(toSnake(req.body), req.tenantId);
+  res.json({ id });
+}));
+
+router.patch('/reports/:id', writeReports, asyncHandler(async (req, res) => {
+  await reportRepository.update(req.params.id, toSnake(req.body), req.tenantId);
+  res.status(204).send();
+}));
+
+router.put('/reports/:id', writeReports, asyncHandler(async (req, res) => {
+  await reportRepository.update(req.params.id, toSnake(req.body), req.tenantId);
+  res.status(204).send();
+}));
+
+router.delete('/reports/:id', writeReports, asyncHandler(async (req, res) => {
+  await reportRepository.remove(req.params.id, req.tenantId);
+  res.status(204).send();
+}));
+
+router.get('/reports', readProduction, asyncHandler(async (req, res) => {
+  const startDate = req.query.startDate;
+  const endDate = req.query.endDate;
+  if (startDate && endDate) {
+    const rows = await reportRepository.getByDateRange(req.tenantId, startDate, endDate);
+    return asJson(res, rows);
+  }
+  const filters = toSnake({
+    lineId: req.query.lineId,
+    productId: req.query.productId,
+    employeeId: req.query.employeeId,
+    workOrderId: req.query.workOrderId,
+  });
+  const rows = await reportRepository.getByFilter(req.tenantId, filters);
+  return asJson(res, rows);
 }));
 
 router.get('/reports/filters', readProduction, asyncHandler(async (req, res) => {
@@ -177,6 +284,10 @@ router.get('/reports/exists/line-date', readProduction, asyncHandler(async (req,
 
 router.post('/reports/backfill-report-codes', writeReports, asyncHandler(async (_req, res) => {
   // Placeholder for phased migration safety; implemented in later migration phase.
+  res.json({ updated: 0 });
+}));
+
+router.post('/reports/backfill-missing-codes', writeReports, asyncHandler(async (_req, res) => {
   res.json({ updated: 0 });
 }));
 
@@ -236,12 +347,37 @@ router.get('/scan-events/by-work-order/:workOrderId', readProduction, asyncHandl
   asJson(res, rows);
 }));
 
+router.get('/scan-events', readProduction, asyncHandler(async (req, res) => {
+  const workOrderId = req.query.workOrderId;
+  const serialBarcode = req.query.serialBarcode;
+  const scanDate = req.query.scanDate;
+  let rows = [];
+
+  if (workOrderId && serialBarcode) {
+    rows = await scanEventRepository.getByWorkOrderAndSerial(req.tenantId, workOrderId, serialBarcode);
+  } else if (workOrderId) {
+    rows = await scanEventRepository.getByWorkOrder(req.tenantId, workOrderId);
+  } else {
+    rows = await scanEventRepository.getAll(req.tenantId);
+  }
+
+  if (scanDate) rows = rows.filter((r) => r.scan_date === scanDate);
+  asJson(res, rows);
+}));
+
 router.get('/scan-events/by-work-order-serial', readProduction, asyncHandler(async (req, res) => {
   const rows = await scanEventRepository.getByWorkOrderAndSerial(req.tenantId, req.query.workOrderId, req.query.serialBarcode);
   asJson(res, rows);
 }));
 
 router.delete('/scan-events/delete-session', writeWorkOrders, asyncHandler(async (req, res) => {
+  const rows = await scanEventRepository.getByWorkOrder(req.tenantId, req.query.workOrderId);
+  const related = rows.filter((r) => r.session_id === req.query.sessionId);
+  await Promise.all(related.map((row) => scanEventRepository.remove(row.id, req.tenantId)));
+  res.status(204).send();
+}));
+
+router.delete('/scan-events/session', writeWorkOrders, asyncHandler(async (req, res) => {
   const rows = await scanEventRepository.getByWorkOrder(req.tenantId, req.query.workOrderId);
   const related = rows.filter((r) => r.session_id === req.query.sessionId);
   await Promise.all(related.map((row) => scanEventRepository.remove(row.id, req.tenantId)));
@@ -291,6 +427,11 @@ router.post('/scan-events/toggle', writeWorkOrders, asyncHandler(async (req, res
   }, req.tenantId);
 
   return res.json({ action: 'OUT', eventId: id, sessionId: last.session_id, cycleSeconds });
+}));
+
+router.post('/scan-events', writeWorkOrders, asyncHandler(async (req, res) => {
+  const id = await scanEventRepository.create(toSnake(req.body), req.tenantId);
+  res.json({ id });
 }));
 
 export { router as productionRouter };
