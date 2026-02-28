@@ -1,24 +1,12 @@
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  limit,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  where,
-  type Unsubscribe,
-} from 'firebase/firestore';
-import { db, isConfigured } from '../../auth/services/firebase';
+import apiClient from '../../../services/api';
 import type { WorkOrderLiveSummary, WorkOrderPauseWindow, WorkOrderScanEvent, WorkOrderScanSession } from '../../../types';
 
-const COLLECTION = 'scan_events';
 const SERIAL_SCAN_COOLDOWN_MS = 1200;
 const serialCooldown = new Map<string, number>();
 const DEFAULT_BREAK_START = '12:00';
 const DEFAULT_BREAK_END = '12:30';
+const POLL_MS = 3000;
+type Unsubscribe = () => void;
 
 const toISODate = (d: Date) => {
   const y = d.getFullYear();
@@ -220,22 +208,14 @@ export interface ToggleScanResult {
 
 export const scanEventService = {
   async getByWorkOrder(workOrderId: string): Promise<WorkOrderScanEvent[]> {
-    if (!isConfigured) return [];
-    const q = query(collection(db, COLLECTION), where('workOrderId', '==', workOrderId));
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as WorkOrderScanEvent));
+    return apiClient.get<WorkOrderScanEvent[]>('/production/scan-events', { workOrderId });
   },
 
   async getByWorkOrderAndSerial(workOrderId: string, serialBarcode: string): Promise<WorkOrderScanEvent[]> {
-    if (!isConfigured) return [];
-    const q = query(
-      collection(db, COLLECTION),
-      where('workOrderId', '==', workOrderId),
-      where('serialBarcode', '==', serialBarcode),
-      limit(100),
-    );
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as WorkOrderScanEvent));
+    return apiClient.get<WorkOrderScanEvent[]>('/production/scan-events', {
+      workOrderId,
+      serialBarcode,
+    });
   },
 
   async scanIn(payload: {
@@ -245,10 +225,9 @@ export const scanEventService = {
     serialBarcode: string;
     employeeId?: string;
   }): Promise<ToggleScanResult> {
-    if (!isConfigured) return { action: 'IN', eventId: null, sessionId: '' };
     const now = new Date();
     const sessionId = `${payload.workOrderId}_${payload.serialBarcode}_${now.getTime()}`;
-    const docData: Record<string, any> = {
+    const docData = {
       workOrderId: payload.workOrderId,
       lineId: payload.lineId,
       productId: payload.productId,
@@ -256,10 +235,11 @@ export const scanEventService = {
       action: 'IN',
       sessionId,
       scanDate: toISODate(now),
-      timestamp: serverTimestamp(),
+      timestamp: now.toISOString(),
+      employeeId: payload.employeeId,
     };
-    if (payload.employeeId) docData.employeeId = payload.employeeId;
-    const ref = await addDoc(collection(db, COLLECTION), docData);
+    const res = await apiClient.post<{ id: string }>('/production/scan-events', docData);
+    const ref = { id: res.id };
     return { action: 'IN', eventId: ref.id, sessionId };
   },
 
@@ -272,11 +252,8 @@ export const scanEventService = {
     sessionId: string;
     cycleSeconds: number;
   }): Promise<ToggleScanResult> {
-    if (!isConfigured) {
-      return { action: 'OUT', eventId: null, sessionId: payload.sessionId, cycleSeconds: payload.cycleSeconds };
-    }
     const now = new Date();
-    const docData: Record<string, any> = {
+    const docData = {
       workOrderId: payload.workOrderId,
       lineId: payload.lineId,
       productId: payload.productId,
@@ -285,10 +262,11 @@ export const scanEventService = {
       sessionId: payload.sessionId,
       cycleSeconds: payload.cycleSeconds,
       scanDate: toISODate(now),
-      timestamp: serverTimestamp(),
+      timestamp: now.toISOString(),
+      employeeId: payload.employeeId,
     };
-    if (payload.employeeId) docData.employeeId = payload.employeeId;
-    const ref = await addDoc(collection(db, COLLECTION), docData);
+    const res = await apiClient.post<{ id: string }>('/production/scan-events', docData);
+    const ref = { id: res.id };
     return { action: 'OUT', eventId: ref.id, sessionId: payload.sessionId, cycleSeconds: payload.cycleSeconds };
   },
 
@@ -348,28 +326,50 @@ export const scanEventService = {
   },
 
   async deleteSession(workOrderId: string, sessionId: string): Promise<void> {
-    if (!isConfigured) return;
-    const events = await this.getByWorkOrder(workOrderId);
-    const related = events.filter((e) => e.sessionId === sessionId && e.id);
-    await Promise.all(related.map((e) => deleteDoc(doc(db, COLLECTION, e.id!))));
+    await apiClient.delete<void>('/production/scan-events/session', {
+      workOrderId,
+      sessionId,
+    });
   },
 
   subscribeByWorkOrder(workOrderId: string, onData: (events: WorkOrderScanEvent[]) => void): Unsubscribe {
-    if (!isConfigured) return () => {};
-    const q = query(collection(db, COLLECTION), where('workOrderId', '==', workOrderId));
-    return onSnapshot(q, (snap) => {
-      const events = snap.docs.map((d) => ({ id: d.id, ...d.data() } as WorkOrderScanEvent));
-      onData(events);
-    });
+    let active = true;
+    const pull = async () => {
+      if (!active) return;
+      try {
+        const events = await this.getByWorkOrder(workOrderId);
+        onData(events);
+      } catch {
+        // Keep polling even if one request fails.
+      }
+    };
+    pull();
+    const timer = window.setInterval(pull, POLL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   },
 
   subscribeLiveToday(todayStr: string, onData: (events: WorkOrderScanEvent[]) => void): Unsubscribe {
-    if (!isConfigured) return () => {};
-    const q = query(collection(db, COLLECTION), where('scanDate', '==', todayStr));
-    return onSnapshot(q, (snap) => {
-      const events = snap.docs.map((d) => ({ id: d.id, ...d.data() } as WorkOrderScanEvent));
-      onData(events);
-    });
+    let active = true;
+    const pull = async () => {
+      if (!active) return;
+      try {
+        const events = await apiClient.get<WorkOrderScanEvent[]>('/production/scan-events', {
+          scanDate: todayStr,
+        });
+        onData(events);
+      } catch {
+        // Keep polling even if one request fails.
+      }
+    };
+    pull();
+    const timer = window.setInterval(pull, POLL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   },
 
   sessionsFromEvents,

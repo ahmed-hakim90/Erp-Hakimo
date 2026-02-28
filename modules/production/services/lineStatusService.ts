@@ -1,87 +1,34 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  serverTimestamp,
-  onSnapshot,
-  Unsubscribe,
-} from 'firebase/firestore';
-import { db, isConfigured } from '../../auth/services/firebase';
 import { LineStatus } from '../../../types';
-
-const COLLECTION = 'line_status';
+import { apiRequest } from './apiClient';
+import { startPolling, Unsubscribe } from './polling';
 
 export const lineStatusService = {
   async getAll(): Promise<LineStatus[]> {
-    if (!isConfigured) return [];
-    try {
-      const snap = await getDocs(collection(db, COLLECTION));
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as LineStatus));
-    } catch (error) {
-      console.error('lineStatusService.getAll error:', error);
-      throw error;
-    }
+    return apiRequest<LineStatus[]>('GET', '/production/line-statuses');
   },
 
   async getById(id: string): Promise<LineStatus | null> {
-    if (!isConfigured) return null;
-    try {
-      const snap = await getDoc(doc(db, COLLECTION, id));
-      if (!snap.exists()) return null;
-      return { id: snap.id, ...snap.data() } as LineStatus;
-    } catch (error) {
-      console.error('lineStatusService.getById error:', error);
-      throw error;
-    }
+    return apiRequest<LineStatus>('GET', `/production/line-statuses/${id}`);
   },
 
   async create(data: Omit<LineStatus, 'id' | 'updatedAt'>): Promise<string | null> {
-    if (!isConfigured) return null;
-    try {
-      const ref = await addDoc(collection(db, COLLECTION), {
-        ...data,
-        updatedAt: serverTimestamp(),
-      });
-      return ref.id;
-    } catch (error) {
-      console.error('lineStatusService.create error:', error);
-      throw error;
-    }
+    const result = await apiRequest<{ id: string | null }>('POST', '/production/line-statuses', {
+      body: { ...data, updatedAt: new Date().toISOString() },
+    });
+    return result.id;
   },
 
   async update(id: string, data: Partial<LineStatus>): Promise<void> {
-    if (!isConfigured) return;
-    try {
-      const { id: _id, ...fields } = data as any;
-      await updateDoc(doc(db, COLLECTION, id), {
-        ...fields,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      console.error('lineStatusService.update error:', error);
-      throw error;
-    }
+    await apiRequest<void>('PATCH', `/production/line-statuses/${id}`, {
+      body: { ...data, updatedAt: new Date().toISOString() },
+    });
   },
 
   async delete(id: string): Promise<void> {
-    if (!isConfigured) return;
-    try {
-      await deleteDoc(doc(db, COLLECTION, id));
-    } catch (error) {
-      console.error('lineStatusService.delete error:', error);
-      throw error;
-    }
+    await apiRequest<void>('DELETE', `/production/line-statuses/${id}`);
   },
 
   subscribeAll(onData: (statuses: LineStatus[]) => void): Unsubscribe {
-    if (!isConfigured) return () => {};
-    return onSnapshot(collection(db, COLLECTION), (snap) => {
-      const statuses = snap.docs.map((d) => ({ id: d.id, ...d.data() } as LineStatus));
-      onData(statuses);
-    });
+    return startPolling(() => this.getAll(), onData, 4000);
   },
 };

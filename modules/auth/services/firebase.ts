@@ -12,6 +12,7 @@ import {
   User,
   UserCredential,
 } from 'firebase/auth';
+import { registerApiAuth } from '../../../services/api';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -113,3 +114,13 @@ export const onAuthChange = (callback: (user: User | null) => void): (() => void
   if (!auth) return () => {};
   return onAuthStateChanged(auth, callback);
 };
+
+registerApiAuth({
+  getToken: async () => {
+    if (!auth?.currentUser) return null;
+    return auth.currentUser.getIdToken();
+  },
+  onUnauthorized: () => {
+    firebaseSignOut(auth).catch(() => {});
+  },
+});

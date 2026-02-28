@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:frontend": "vite",
+    "dev:backend": "tsx watch backend/src/server.ts",
+    "dev:all": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
     "build": "vite build",
     "preview": "vite preview",
     "version:auto": "node scripts/auto-version.mjs",
@@ -12,6 +15,9 @@
     "push": "git push"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "file-saver": "^2.0.5",
     "firebase": "^12.9.0",
     "html2canvas": "^1.4.1",
@@ -31,12 +37,16 @@
   "devDependencies": {
     "@tailwindcss/container-queries": "^0.1.1",
     "@tailwindcss/forms": "^0.5.11",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/file-saver": "^2.0.7",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.27",
+    "concurrently": "^9.2.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "vite-plugin-pwa": "^1.2.0"
