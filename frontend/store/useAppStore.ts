@@ -60,6 +60,7 @@ import { userService } from '../services/userService';
 import { activityLogService } from '../services/activityLogService';
 import { systemSettingsService } from '../services/systemSettingsService';
 import { scanEventService } from '../modules/production/services/scanEventService';
+import { bootstrapService } from '../services/bootstrapService';
 import { ALL_PERMISSIONS } from '../utils/permissions';
 import { DEFAULT_SYSTEM_SETTINGS } from '../utils/dashboardConfig';
 import { applyTheme, setupAutoThemeListener } from '../utils/themeEngine';
@@ -540,6 +541,64 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const uid = currentUser.uid;
 
+      // New bootstrap path: backend returns auth profile/roles/permissions/settings.
+      // Keep legacy fallback below for incremental migration safety.
+      try {
+        const boot = await bootstrapService.get();
+        if (boot.userProfile) {
+          if (!boot.userProfile.isActive) {
+            set({
+              isAuthenticated: true,
+              isPendingApproval: true,
+              uid,
+              userEmail: boot.userProfile.email,
+              userDisplayName: boot.userProfile.displayName,
+              userProfile: boot.userProfile,
+              roles: boot.roles,
+              loading: false,
+            });
+            return;
+          }
+
+          const role =
+            boot.roles.find((r) => r.id === boot.userProfile?.roleId) ??
+            boot.roles[0];
+
+          set({
+            isAuthenticated: true,
+            isPendingApproval: false,
+            uid,
+            userEmail: boot.userProfile.email,
+            userDisplayName: boot.userProfile.displayName,
+            userProfile: boot.userProfile,
+            roles: boot.roles,
+          });
+
+          if (role) {
+            get()._applyRole({
+              ...role,
+              permissions:
+                Object.keys(boot.permissions).length > 0
+                  ? boot.permissions
+                  : role.permissions,
+            });
+          }
+
+          if (boot.initialSettings) {
+            const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...boot.initialSettings };
+            set({ systemSettings: merged });
+            applyTheme(merged.theme);
+            setupAutoThemeListener(merged.theme);
+          }
+
+          await get()._loadAppData();
+          set({ loading: false });
+          return;
+        }
+      } catch (bootstrapError) {
+        console.warn('initializeApp bootstrap fallback:', bootstrapError);
+      }
+
       const roles = await roleService.seedIfEmpty();
       set({ roles });
 
@@ -593,6 +652,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { uid } = get();
     if (!uid) return false;
     try {
+      try {
+        const boot = await bootstrapService.get();
+        if (!boot.userProfile || !boot.userProfile.isActive) return false;
+        const role =
+          boot.roles.find((r) => r.id === boot.userProfile?.roleId) ??
+          boot.roles[0];
+        set({
+          isPendingApproval: false,
+          userProfile: boot.userProfile,
+          userEmail: boot.userProfile.email,
+          userDisplayName: boot.userProfile.displayName,
+          roles: boot.roles,
+        });
+        if (role) {
+          get()._applyRole({
+            ...role,
+            permissions:
+              Object.keys(boot.permissions).length > 0
+                ? boot.permissions
+                : role.permissions,
+          });
+        }
+        await get()._loadAppData();
+        return true;
+      } catch (bootstrapError) {
+        console.warn('checkApprovalStatus bootstrap fallback:', bootstrapError);
+      }
+
       const userDoc = await userService.get(uid);
       if (!userDoc) return false;
       if (!userDoc.isActive) return false;

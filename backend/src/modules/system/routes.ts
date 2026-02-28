@@ -5,6 +5,9 @@ import { requireAuth } from "../../middlewares/auth.js";
 export const systemRoutes = Router();
 systemRoutes.use(requireAuth);
 
+const toRoleId = (profile: any): string | undefined =>
+  profile?.roleId || profile?.role_id || profile?.role?.id || undefined;
+
 systemRoutes.get("/bootstrap", async (req, res, next) => {
   try {
     const userId = req.user?.id;
@@ -24,7 +27,8 @@ systemRoutes.get("/bootstrap", async (req, res, next) => {
 
     const profile = profileRes.data;
     const roles = rolesRes.data ?? [];
-    const role = roles.find((r) => r.id === profile?.roleId) ?? null;
+    const roleId = toRoleId(profile);
+    const role = roles.find((r) => r.id === roleId) ?? null;
 
     return res.json({
       currentUser: req.user,

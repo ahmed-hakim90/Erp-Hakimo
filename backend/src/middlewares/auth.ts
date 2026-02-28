@@ -8,6 +8,39 @@ const parseBearer = (header?: string): string | null => {
   return token;
 };
 
+const toRoleId = (profile: any): string | undefined =>
+  profile?.roleId || profile?.role_id || profile?.role?.id || undefined;
+
+const resolvePermissions = async (
+  userId: string,
+  fallback: Record<string, boolean> | string[] | undefined,
+) => {
+  const profileRes = await supabaseAdmin
+    .from("users")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+  if (profileRes.error && profileRes.status !== 406) throw profileRes.error;
+
+  const profile = profileRes.data;
+  const roleId = toRoleId(profile);
+  if (!roleId) return { profile, permissions: fallback };
+
+  const roleRes = await supabaseAdmin
+    .from("roles")
+    .select("*")
+    .eq("id", roleId)
+    .maybeSingle();
+  if (roleRes.error && roleRes.status !== 406) throw roleRes.error;
+
+  const role = roleRes.data;
+  return {
+    profile,
+    permissions: (role?.permissions as Record<string, boolean> | string[] | undefined) ?? fallback,
+    roleName: role?.name as string | undefined,
+  };
+};
+
 export const requireAuth = async (
   req: Request,
   res: Response,
@@ -26,15 +59,21 @@ export const requireAuth = async (
 
     const appMeta = data.user.app_metadata ?? {};
     const userMeta = data.user.user_metadata ?? {};
+    const metaFallback =
+      (appMeta.permissions || userMeta.permissions) as
+        | Record<string, boolean>
+        | string[]
+        | undefined;
+
+    const resolved = await resolvePermissions(data.user.id, metaFallback);
+
     req.user = {
       id: data.user.id,
       email: data.user.email,
-      role: (appMeta.role || userMeta.role) as string | undefined,
-      permissions:
-        (appMeta.permissions || userMeta.permissions) as
-          | Record<string, boolean>
-          | string[]
-          | undefined,
+      role:
+        resolved.roleName ||
+        (appMeta.role || userMeta.role) as string | undefined,
+      permissions: resolved.permissions,
     };
     return next();
   } catch (err) {

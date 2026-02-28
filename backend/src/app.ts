@@ -24,6 +24,7 @@ const api = express.Router();
 api.use("/auth", authRoutes);
 api.use("/production", productionRoutes);
 api.use("/system", systemRoutes);
+api.use("/", systemRoutes);
 app.use("/api", api);
 
 app.use(notFound);
