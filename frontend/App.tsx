@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import './App.css';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Dashboard } from './modules/dashboards/pages/Dashboard';
@@ -172,25 +173,28 @@ const App: React.FC = () => {
   }
 
   return (
-    <HashRouter>
-      <Routes>
-        {AUTH_PUBLIC_ROUTES.map((r) => (
-          <React.Fragment key={r.path}>
-            <Route
-              path={r.path}
-              element={r.resolveElement({
-                isAuthenticated,
-                isPendingApproval,
-                loginRedirectElement: <LoginRedirect />,
-              })}
-            />
-          </React.Fragment>
-        ))}
+    <>
+      <HashRouter>
+        <Routes>
+          {AUTH_PUBLIC_ROUTES.map((r) => (
+            <React.Fragment key={r.path}>
+              <Route
+                path={r.path}
+                element={r.resolveElement({
+                  isAuthenticated,
+                  isPendingApproval,
+                  loginRedirectElement: <LoginRedirect />,
+                })}
+              />
+            </React.Fragment>
+          ))}
 
-        {/* Protected: All app routes inside Layout */}
-        <Route path="/*" element={<ProtectedLayoutRoute isAuthenticated={isAuthenticated} isPendingApproval={isPendingApproval} />} />
-      </Routes>
-    </HashRouter>
+          {/* Protected: All app routes inside Layout */}
+          <Route path="/*" element={<ProtectedLayoutRoute isAuthenticated={isAuthenticated} isPendingApproval={isPendingApproval} />} />
+        </Routes>
+      </HashRouter>
+      <Analytics />
+    </>
   );
 };
 
